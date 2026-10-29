@@ -87,26 +87,56 @@ local function fit(w, h, max_w, max_h)
 end
 M.fit = fit
 
---- Return a scaled cover blitbuffer for `path`, or nil.
--- `bim` is the BookInfoManager (or nil). Results, including "no cover yet",
--- are cached; call cache:drop(path) after a background extraction fills it in.
-function M.getCover(cache, bim, path, max_w, max_h)
-    local key = path .. "@" .. max_w .. "x" .. max_h
-    local cached = cache:get(key)
-    if cached ~= nil then return cached or nil, cached ~= false end
-    if not bim then return nil, false end
-    local ok, info = pcall(bim.getBookInfo, bim, path, true)
-    if not ok or not info then return nil, false end -- not in DB yet: do not cache
-    if not info.cover_bb then
-        if info.cover_fetched then cache:put(key, false) end
-        return nil, info.cover_fetched and true or false
-    end
-    local bb = info.cover_bb
+local function scaleInto(cache, key, bb, max_w, max_h)
     local w, h = fit(bb:getWidth(), bb:getHeight(), max_w, max_h)
     local RenderImage = require("ui/renderimage")
     local scaled = RenderImage:scaleBlitBuffer(bb, w, h, true) -- frees the original
     cache:put(key, scaled)
-    return scaled, true
+    return scaled
+end
+
+--- Return a scaled cover blitbuffer for `book`, or nil, and whether the
+-- answer is final (false: not extracted yet, the caller should queue it).
+-- `covers` = { store = librarycovers Store or nil, bim = BookInfoManager or nil }.
+-- Sources, first hit wins:
+--   1. the in-memory cache of scaled covers;
+--   2. the built-in thumbnail file (small JPEG, cheapest to decode);
+--   3. the cover browser database (Project: Title or Cover browser) if loaded.
+-- Results, including "no cover", are cached; call cache:drop() or clear()
+-- after a background extraction fills one in.
+function M.getCover(cache, covers, book, max_w, max_h)
+    local path = book.path
+    local key = path .. "@" .. max_w .. "x" .. max_h
+    local cached = cache:get(key)
+    if cached ~= nil then return cached or nil, cached ~= false end
+    covers = covers or {}
+    local state, file
+    if covers.store then
+        state, file = covers.store:state(book)
+        if state == "cover" then
+            local bb = require("librarycovers").loadThumb(file)
+            if bb then return scaleInto(cache, key, bb, max_w, max_h), true end
+            covers.store:forget(path) -- unreadable thumbnail: extract again
+            state = nil
+        end
+    end
+    if covers.bim then
+        local ok, info = pcall(covers.bim.getBookInfo, covers.bim, path, true)
+        if ok and info then
+            if info.cover_bb then return scaleInto(cache, key, info.cover_bb, max_w, max_h), true end
+            if info.cover_fetched then
+                cache:put(key, false)
+                return nil, true
+            end
+        end
+        if state == "none" then cache:put(key, false); return nil, true end
+        return nil, false
+    end
+    if state == "none" then
+        cache:put(key, false)
+        return nil, true
+    end
+    return nil, false
 end
 
 ----------------------------------------------------------------------------
@@ -263,7 +293,7 @@ local Tile = InputContainer:extend{
     cover_h = nil,
     book = nil,      -- for book tiles
     group = nil,     -- { name=, books=, cover_book= } for group tiles
-    bim = nil,
+    covers = nil,    -- { store=, bim= }, see M.getCover
     cover_cache = nil,
     on_tap = nil,
     on_hold = nil,
@@ -285,9 +315,9 @@ function Tile:init()
 
     local bb, known
     if book then
-        bb, known = M.getCover(self.cover_cache, self.bim, book.path, cover_w, cover_h)
+        bb, known = M.getCover(self.cover_cache, self.covers, book, cover_w, cover_h)
     end
-    self.needs_cover = book and not known and self.bim ~= nil
+    self.needs_cover = book and not known and self.covers ~= nil
     local cover
     if bb then
         local cw, ch = bb:getWidth(), bb:getHeight()
@@ -409,7 +439,7 @@ local ListRow = InputContainer:extend{
     thumb_h = nil,
     book = nil,
     group = nil,
-    bim = nil,
+    covers = nil,
     cover_cache = nil,
     on_tap = nil,
     on_hold = nil,
@@ -434,9 +464,9 @@ function ListRow:init()
     tw = math.min(tw, math.floor(th * 2 / 3 + 0.5))
     local bb, known
     if book then
-        bb, known = M.getCover(self.cover_cache, self.bim, book.path, tw - 2 * Size.border.thin, th - 2 * Size.border.thin)
+        bb, known = M.getCover(self.cover_cache, self.covers, book, tw - 2 * Size.border.thin, th - 2 * Size.border.thin)
     end
-    self.needs_cover = book and not known and self.bim ~= nil
+    self.needs_cover = book and not known and self.covers ~= nil
     local thumb
     if bb then
         thumb = FrameContainer:new{ padding = 0, bordersize = Size.border.thin,

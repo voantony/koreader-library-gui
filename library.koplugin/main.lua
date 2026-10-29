@@ -4,7 +4,9 @@ Library: a cover-grid library view for KOReader.
 Always-visible search bar, cover grid with reading progress, Recent sort,
 collections, authors and series, and status filters. Book metadata comes from
 calibre's metadata.calibre, the cover browser's database (Project: Title or
-coverbrowser), or the book sidecars; the index is cached on disk.
+coverbrowser), or the book sidecars; the index is cached on disk. Covers come
+from the plugin's own thumbnails (librarycovers.lua), or from the cover
+browser's database when one of those plugins is loaded.
 
 @module koplugin.library
 --]]
@@ -480,6 +482,12 @@ function Library:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Clear cover cache"),
+                help_text = _("Delete the Library's cover thumbnails. They are made again, in the background, the next time the Library is open."),
+                keep_menu_open = true,
+                callback = function() self:clearCoverCache() end,
+            },
+            {
                 text = _("Include hidden folders"),
                 checked_func = function() return self.settings.show_hidden end,
                 callback = function()
@@ -500,6 +508,33 @@ function Library:onCloseDocument()
     if self.ui.document and shared.index then
         shared.index:refreshBook(self.ui.document.file)
     end
+end
+
+--- A custom cover was set or removed in Book information: drop our thumbnail.
+function Library:onInvalidateMetadataCache(file)
+    if not file then return end
+    local Covers = require("librarycovers")
+    Covers.getStore():forget(file)
+    if shared.view then
+        shared.view.cover_cache:clear()
+        shared.view:refreshBody()
+    end
+end
+
+function Library:clearCoverCache()
+    local Covers = require("librarycovers")
+    local store = Covers.getStore()
+    Covers.kill()
+    local n, bytes = store:usage()
+    store:clear()
+    if shared.view then
+        shared.view.cover_cache:clear()
+        shared.view:refreshBody(true)
+    end
+    UIManager:show(InfoMessage:new{
+        text = T(_("Removed %1 cover thumbnails (%2)."), n, Core.formatSize(bytes)),
+        timeout = 2,
+    })
 end
 
 function Library:onBookMetadataChanged()

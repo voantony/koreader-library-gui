@@ -42,6 +42,7 @@ local time = require("ui/time")
 local util = require("util")
 local Core = require("librarycore")
 local Tiles = require("librarytile")
+local Covers = require("librarycovers")
 local Screen = Device.screen
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -94,6 +95,10 @@ function LibraryView:init()
     self.view_mode = Core.viewMode(self.view_mode)
     -- grid pages, list thumbnails and the Continue reading covers
     self.cover_cache = Tiles.newCoverCache(self.cols * 6 * 3 + 40)
+    -- Where covers come from: our own thumbnails, and the cover browser's
+    -- database when Project: Title or Cover browser is loaded.
+    self.covers = { store = Covers.getStore(), bim = self.plugin:getBIM() }
+    self.covers.store:scan()
     self.query = ""
     self.page = 1
     self.group = nil         -- { kind=, name=, books= } when inside a collection/author/series
@@ -332,14 +337,14 @@ function LibraryView:buildGrid(items, kind, layout, height)
                 cover_h = layout.cover_h,
                 book = kind == "books" and item or nil,
                 group = kind == "groups" and item or nil,
-                bim = self.plugin:getBIM(),
+                covers = self.covers,
                 cover_cache = self.cover_cache,
                 on_tap = function(t) self:onTileTap(t) end,
                 on_hold = function(t) self:onTileHold(t) end,
             }
             if tile.needs_cover then
                 local b = tile.book or (tile.group and tile.group.cover_book)
-                if b then table.insert(self.missing_covers, b.path) end
+                if b then table.insert(self.missing_covers, b) end
             end
             table.insert(self.tiles, tile)
             table.insert(row, tile)
@@ -376,14 +381,14 @@ function LibraryView:buildList(items, kind, layout, height)
             thumb_h = layout.thumb_h,
             book = kind == "books" and item or nil,
             group = kind == "groups" and item or nil,
-            bim = self.plugin:getBIM(),
+            covers = self.covers,
             cover_cache = self.cover_cache,
             on_tap = function(t) self:onTileTap(t) end,
             on_hold = function(t) self:onTileHold(t) end,
         }
         if row.needs_cover then
             local b = row.book or (row.group and row.group.cover_book)
-            if b then table.insert(self.missing_covers, b.path) end
+            if b then table.insert(self.missing_covers, b) end
         end
         table.insert(self.tiles, row)
         table.insert(list, row)
@@ -420,12 +425,12 @@ function LibraryView:buildContinue(books, cl)
             cover_h = cl.cover_h,
             one_line = true,
             book = books[i],
-            bim = self.plugin:getBIM(),
+            covers = self.covers,
             cover_cache = self.cover_cache,
             on_tap = function(t) self:onTileTap(t) end,
             on_hold = function(t) self:onTileHold(t) end,
         }
-        if tile.needs_cover then table.insert(self.missing_covers, books[i].path) end
+        if tile.needs_cover then table.insert(self.missing_covers, books[i]) end
         table.insert(self.continue_tiles, tile)
         table.insert(row, tile)
         table.insert(row, HorizontalSpan:new{ width = self.gap })
@@ -734,6 +739,8 @@ end
 function LibraryView:onCloseWidget()
     if self._search_action then UIManager:unschedule(self._search_action) end
     if self._cover_poll then UIManager:unschedule(self._cover_poll) end
+    if self._cover_submit then UIManager:unschedule(self._cover_submit) end
+    if not self.covers.bim then Covers.cancel() end
     self.cover_cache:clear()
     -- Cover buffers live in C memory the Lua GC does not see: collect now.
     collectgarbage("collect")
@@ -773,16 +780,65 @@ function LibraryView:setColumns(cols)
 end
 
 ----------------------------------------------------------------------------
--- Covers not yet in the BookInfoManager database
+-- Covers not extracted yet
 ----------------------------------------------------------------------------
 
 function LibraryView:scheduleCoverExtraction()
-    local bim = self.plugin:getBIM()
-    if not bim or not self.missing_covers or #self.missing_covers == 0 then return end
+    if not self.missing_covers then return end
+    if self.covers.bim then return self:scheduleBIMExtraction() end
+    return self:scheduleBuiltinExtraction()
+end
+
+--- Built-in covers: queue the visible books first, then the rest of the
+-- current list, and redraw when a visible cover lands.
+function LibraryView:scheduleBuiltinExtraction()
+    local store = self.covers.store
+    self.pending_covers = self.missing_covers
+    if #self.pending_covers == 0 and Covers.isRunning() then return end
+    local rest = {}
+    for _, b in ipairs(self.continue_books or {}) do rest[#rest + 1] = b end
+    for _, it in ipairs(self.current and self.current.items or {}) do
+        local b = it.path and it or it.cover_book
+        if b then rest[#rest + 1] = b end
+    end
+    local items = Covers.order(self.pending_covers, rest, function(b) return store:state(b) ~= nil end)
+    if #items == 0 then return end
+    -- Same work at the head of the queue as last time: nothing to rewrite.
+    local sig = items[1].key .. "|" .. #items
+    if sig == self._cover_sig and Covers.isRunning() then return end
+    self._cover_sig = sig
+    -- After the first paint, so opening the Library is not slowed by the fork.
+    if self._cover_submit then UIManager:unschedule(self._cover_submit) end
+    self._cover_submit = function()
+        self._cover_submit = nil
+        Covers.submit(items, function(done) self:onCoversProgress(done) end)
+    end
+    UIManager:nextTick(self._cover_submit)
+end
+
+--- Called by the background job while it runs: redraw if a visible cover is ready.
+function LibraryView:onCoversProgress(done)
+    local landed = false
+    for _, b in ipairs(self.pending_covers or {}) do
+        if self.covers.store:refresh(b) then landed = true end
+    end
+    if landed then
+        self.timings.covers_landed = (self.timings.covers_landed or 0) + 1
+        self:refreshBody()
+    elseif done then
+        self._cover_sig = nil
+    end
+end
+
+--- Project: Title or Cover browser loaded: let its BookInfoManager extract
+-- into its database, as before.
+function LibraryView:scheduleBIMExtraction()
+    local bim = self.covers.bim
+    if #self.missing_covers == 0 then return end
     if self._cover_poll then return end -- a job is already running for an earlier page
     local files = {}
-    for _, path in ipairs(self.missing_covers) do
-        table.insert(files, { filepath = path, cover_specs = { max_cover_w = 600, max_cover_h = 600 } })
+    for _, b in ipairs(self.missing_covers) do
+        table.insert(files, { filepath = b.path, cover_specs = { max_cover_w = 600, max_cover_h = 600 } })
     end
     UIManager:nextTick(function()
         local ok, launched = pcall(bim.extractInBackground, bim, files)
