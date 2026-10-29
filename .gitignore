@@ -1,0 +1,36 @@
+# Build output
+dist/
+*.zip
+
+# KOReader per-book and per-device data: never commit these
+*.sdr/
+settings.reader.lua
+settings.reader.lua.old
+history.lua
+metadata.*.lua
+custom_metadata.lua
+crash.log
+cache/
+settings/
+statistics.sqlite3
+bookinfo_cache.sqlite3
+vocabulary_builder.sqlite3
+
+# Real books (tests use in-memory fixtures only)
+*.epub
+*.pdf
+*.mobi
+*.azw
+*.azw3
+*.kfx
+*.fb2
+*.djvu
+*.cbz
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/
