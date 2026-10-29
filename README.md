@@ -1,10 +1,10 @@
-# library-search-toolbar
+# koreader-library-search-toolbar
 
 **Library** (`library.koplugin`) is a KOReader plugin that gives you a Kindle-style library: a cover grid sorted by the book you opened last, a search bar that stays at the top of the screen and filters as you type, and one-tap filters for All / Unread / Reading / Finished. Collections, Authors and Series are top-level tabs.
 
 It works alongside KOReader's file browser, History and Collections. It reuses the cover cache of **Project: Title** (or the built-in Cover browser), so covers you already have show up straight away. It never moves or renames your books.
 
-> **Early release (v0.1.0).** It has been tested in the KOReader desktop emulator (v2026.07.1), but not yet on many real devices. Please [open an issue](https://github.com/voantony/library-search-toolbar/issues) if something looks wrong on yours.
+> **Early release (v0.1.0).** It has been tested in the KOReader desktop emulator (v2026.07.1), but not yet on many real devices. Please [open an issue](https://github.com/voantony/koreader-library-search-toolbar/issues) if something looks wrong on yours.
 
 ## Screenshots
 
@@ -16,7 +16,7 @@ More are in [screenshots/](screenshots/). They were taken in the emulator with d
 
 ## Install
 
-1. Download **`library.koplugin.zip`** from the [latest release](https://github.com/voantony/library-search-toolbar/releases/latest).
+1. Download **`library.koplugin.zip`** from the [latest release](https://github.com/voantony/koreader-library-search-toolbar/releases/latest).
 2. Unzip it into KOReader's `plugins/` folder, so you end up with `…/koreader/plugins/library.koplugin/main.lua`:
 
    | Device | Plugins folder |

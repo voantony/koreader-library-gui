@@ -21,7 +21,7 @@ Over MTP the Kindle's storage root is `/mnt/us`, so `/mnt/us/koreader/plugins` a
 
 ## 0. Prepare on the Mac (no Kindle needed)
 
-From a checkout of [library-search-toolbar](https://github.com/voantony/library-search-toolbar):
+From a checkout of [koreader-library-search-toolbar](https://github.com/voantony/koreader-library-search-toolbar):
 
 ```sh
 tools/stage_for_kindle.sh ~/kindle-stage     # copies the 6 files, prints SHA-256 sums
