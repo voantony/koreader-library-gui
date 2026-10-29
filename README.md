@@ -1,10 +1,37 @@
-# Library for KOReader
+# library-search-toolbar
 
-A KOReader plugin that gives you a Kindle-style library: a cover grid sorted by the book you opened last, a search bar that stays at the top of the screen and filters as you type, and one-tap filters for All / Unread / Reading / Finished. Collections, Authors and Series are top-level tabs.
+**Library** (`library.koplugin`) is a KOReader plugin that gives you a Kindle-style library: a cover grid sorted by the book you opened last, a search bar that stays at the top of the screen and filters as you type, and one-tap filters for All / Unread / Reading / Finished. Collections, Authors and Series are top-level tabs.
 
 It works alongside KOReader's file browser, History and Collections. It reuses the cover cache of **Project: Title** (or the built-in Cover browser), so covers you already have show up straight away. It never moves or renames your books.
 
-![Library, sorted by recent](screenshots/01-library-recent.png)
+> **Early release (v0.1.0).** It has been tested in the KOReader desktop emulator (v2026.07.1), but not yet on many real devices. Please [open an issue](https://github.com/voantony/library-search-toolbar/issues) if something looks wrong on yours.
+
+## Screenshots
+
+| Library, sorted by recent | Searching as you type |
+|---|---|
+| ![Library, sorted by recent](screenshots/01-library-recent.png) | ![Search results while typing](screenshots/03-search-results.png) |
+
+More are in [screenshots/](screenshots/). They were taken in the emulator with dummy public-domain books.
+
+## Install
+
+1. Download **`library.koplugin.zip`** from the [latest release](https://github.com/voantony/library-search-toolbar/releases/latest).
+2. Unzip it into KOReader's `plugins/` folder, so you end up with `…/koreader/plugins/library.koplugin/main.lua`:
+
+   | Device | Plugins folder |
+   |---|---|
+   | Kindle | `/mnt/us/koreader/plugins/` |
+   | Kobo | `/mnt/onboard/.adds/koreader/plugins/` |
+   | PocketBook | `/mnt/ext1/applications/koreader/plugins/` |
+   | Android | `koreader/plugins/` on internal storage |
+   | Linux desktop | `~/.config/koreader/plugins/` |
+
+3. Restart KOReader.
+4. Open ☰ → **Library** → **Open Library**. If **Library** isn't in the menu, enable it under ☰ → Tools → More tools → Plugin management.
+5. Optional: tick ☰ → Library → **Open Library at startup**.
+
+For covers, enable Project: Title or Cover browser. Updating works the same way: replace the `library.koplugin` folder with the new one. Kindles that only connect over MTP, such as the Colorsoft: see [INSTALL_PLAN.md](INSTALL_PLAN.md).
 
 ## Features
 
@@ -34,26 +61,11 @@ Reading status and progress always come from the sidecar. *Last opened* comes fr
 - KOReader **v2025.04 or newer**. Tested on **v2026.07.1**, in the desktop emulator.
 - Project: Title or the Cover browser plugin is needed for covers. Either one can be enabled. Without them you get placeholders.
 
-## Install
+## Install from source
 
-1. Copy the `library.koplugin` folder (the folder itself) into KOReader's `plugins/` folder. Only the six `.lua` files inside it are needed.
+Copy the `library.koplugin` folder from this repository into KOReader's `plugins/` folder, using the table above. Only the six `.lua` files inside it are needed.
 
-   | Device | Plugins folder |
-   |---|---|
-   | Kindle | `/mnt/us/koreader/plugins/` |
-   | Kobo | `/mnt/onboard/.adds/koreader/plugins/` |
-   | PocketBook | `/mnt/ext1/applications/koreader/plugins/` |
-   | Android | `koreader/plugins/` on internal storage |
-   | Linux desktop | `~/.config/koreader/plugins/` |
-
-   You should end up with `…/plugins/library.koplugin/main.lua`.
-2. Restart KOReader.
-3. Open ☰ → **Library** → **Open Library**. If the plugin isn't listed, enable it under ☰ → Tools → More tools → Plugin management.
-4. Optional: tick ☰ → Library → **Open Library at startup**.
-
-Kindle Colorsoft and other MTP-only Kindles: see [INSTALL_PLAN.md](INSTALL_PLAN.md) for a copy plan that uses a single `mtp-connect` session.
-
-### Settings
+## Settings
 
 You can change these under ☰ → Library, or with the ☰ button in the Library's top-left corner:
 
