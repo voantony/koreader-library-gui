@@ -668,6 +668,15 @@ function LibraryView:clearSearch()
     self:applySearch("")
 end
 
+-- On devices KOReader treats as having a D-pad (the Kindle Colorsoft on
+-- v2026.07, the desktop emulator), InputText's tap handler also asks its
+-- parent for FocusManager:getFocusableWidgetXY() and moveFocusTo(). This view
+-- is not a FocusManager, so tapping the search bar crashed with "attempt to
+-- call method 'getFocusableWidgetXY' (a nil value)". The search bar is the only
+-- focusable widget here, so there is never a D-pad focus to move.
+function LibraryView:getFocusableWidgetXY() return nil end
+function LibraryView:moveFocusTo() return false end
+
 -- Called by InputText when its box is tapped.
 function LibraryView:onSwitchFocus(inputbox)
     if not inputbox.focused then inputbox:focus() end
