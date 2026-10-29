@@ -84,6 +84,11 @@ function Bench:start()
     R.screen = { w = Screen:getWidth(), h = Screen:getHeight(), dpi = Screen:getDPI() }
     R.bim = lib:getBIM() and (lib:getBIM().db_location or "loaded") or "none"
     if shared.view then UIManager:close(shared.view); UIManager:forceRePaint() end
+    -- Start without built-in thumbnails, so the cover browser path is what gets measured.
+    local Covers = require("librarycovers")
+    Covers.kill()
+    Covers.getStore():clear()
+    if os.getenv("LIBRARY_BENCH_MODE") == "covers" then return self:startCovers() end
 
     -- 1. Scans: first (no disk cache) and cached (fresh index object, warm disk cache).
     self:queue(function()
@@ -367,6 +372,190 @@ function Bench:queueUI()
         UIManager:forceRePaint()
         self:shot("11-file-browser-fallback")
     end, 1)
+end
+
+----------------------------------------------------------------------------
+-- LIBRARY_BENCH_MODE=covers: built-in covers (run with Project: Title and
+-- Cover browser disabled). First extraction from an empty cache, with page
+-- turns and taps while it runs, then warm opens with the cache filled.
+----------------------------------------------------------------------------
+
+function Bench:startCovers()
+    local lib = self.ui.library
+    local shared = lib.shared
+    local R = self.results
+    local Covers = require("librarycovers")
+    local Event = require("ui/event")
+    local Geom = require("ui/geometry")
+    local store = Covers.getStore()
+    R.mode = "covers"
+    R.thumb_box = { Covers.screenBox() }
+
+    local function gesture(view, kind, widget)
+        local d = widget.dimen
+        local pos = Geom:new{ x = d.x + math.floor(d.w / 2), y = d.y + math.floor(d.h / 2), w = 0, h = 0 }
+        view:handleEvent(Event:new("Gesture", { ges = kind, pos = pos, time = time.now() }))
+    end
+
+    -- Event-loop lateness probe: a callback every 50 ms, how late does it run?
+    local probe = { late = {}, on = false }
+    local function tick()
+        if not probe.on then return end
+        local t = now()
+        if probe.expect then probe.late[#probe.late + 1] = math.max(0, t - probe.expect) end
+        probe.expect = t + 50
+        UIManager:scheduleIn(0.05, tick)
+    end
+
+    self:queue(function()
+        lib:ensureIndex()
+        R.books = #shared.index.books
+        -- 1. Cold open: placeholders. The job starts on the next tick.
+        local t0 = now()
+        lib:onShowLibrary()
+        local build = now() - t0
+        local paint = self:paint()
+        R.cold_open_ms = { build = build, paint = paint }
+        self:shot("15-covers-placeholders")
+        self.cov = { t0 = now(), turns = {}, taps = {}, last_turn = now(), first_landed = nil }
+        probe.on = true
+        tick()
+    end, 0.5)
+
+    local function wait()
+        local view = shared.view
+        local c = self.cov
+        local elapsed = now() - c.t0
+        if not c.first_landed and (view.timings.covers_landed or 0) > 0 then
+            c.first_landed = elapsed
+            self:shot("15b-covers-first-page")
+            probe.expect = nil -- the screenshot is ours, not the extraction's
+        end
+        if c.first_landed and now() - c.last_turn > 700 and #c.turns < 12 then
+            -- page turn while extracting (the view re-orders the queue)
+            local t1 = now()
+            view:onNextPage()
+            c.turns[#c.turns + 1] = now() - t1 + self:paint()
+            c.last_turn = now()
+            -- tap a tile: does the tap reach the handler, and how fast?
+            local open = lib.openBook
+            local hit
+            lib.openBook = function() hit = now() end
+            local t2 = now()
+            gesture(view, "tap", view.tiles[1])
+            lib.openBook = open
+            c.taps[#c.taps + 1] = hit and (hit - t2) or -1
+            probe.expect = nil -- don't count our own page turn as lateness
+        end
+        local running = Covers.isRunning()
+        if (running or elapsed < 1500) and elapsed < 600000 then
+            table.insert(self.steps, 1, { fn = wait, delay = 0.1 })
+            return
+        end
+        probe.on = false
+        R.first_extraction_ms = elapsed
+        R.first_visible_covers_ms = c.first_landed
+        R.page_turn_during_extraction_ms = stats(c.turns)
+        R.tap_during_extraction_ms = stats(c.taps)
+        R.tap_hits = #c.taps
+        R.loop_lateness_ms = stats(probe.late)
+        local sorted = {}
+        for i, v in ipairs(probe.late) do sorted[i] = v end
+        table.sort(sorted)
+        R.loop_lateness_p95_ms = sorted[math.max(1, math.floor(#sorted * 0.95))]
+        local n, bytes = store:usage()
+        local none = 0
+        store:scan()
+        for name in pairs(store.files) do if name:match("%.none$") then none = none + 1 end end
+        R.cache = { files = n, bytes = bytes, none = none, dir = store.dir }
+    end
+    self:queue(wait, 0.1)
+
+    -- 2. After: page 1 with covers, and the list view.
+    self:queue(function()
+        local view = shared.view
+        view.cover_cache:clear()
+        view:goToPage(1)
+        self:shot("16-covers-built-in")
+        view:setViewMode("list")
+        self:shot("17-covers-list")
+        view:setViewMode("grid")
+    end, 0.5)
+
+    -- 3. Warm opens: cache on disk, nothing in memory.
+    self:queue(function()
+        local opens, turns = {}, {}
+        for _ = 1, 5 do
+            UIManager:close(shared.view)
+            UIManager:forceRePaint()
+            collectgarbage("collect")
+            local t0 = now()
+            lib:onShowLibrary()
+            local b = now() - t0
+            opens[#opens + 1] = b + self:paint()
+        end
+        local view = shared.view
+        for p = 2, math.min(view.pages, 7) do
+            view.cover_cache:clear()
+            local t0 = now(); view:goToPage(p); local b = now() - t0
+            turns[#turns + 1] = b + self:paint()
+        end
+        R.warm_open_ms = stats(opens)
+        R.warm_page_turn_ms = stats(turns)
+        R.per_page = view.layout.per_page
+        R.covers_on_page = 0
+        for _, t in ipairs(view.tiles) do if not t.needs_cover then R.covers_on_page = R.covers_on_page + 1 end end
+        view:goToPage(1)
+    end, 0.5)
+    -- 4. A custom cover (Book information > Set custom cover) replaces the thumbnail.
+    self:queue(function()
+        R.job_running_after_warm_open = Covers.isRunning()
+        local DocSettings = require("docsettings")
+        local view = shared.view
+        local book = view.tiles[1].book
+        self.custom = { book = book, before = select(2, store:state(book)) }
+        DocSettings:flushCustomCover(book.path, OUT .. "/15-covers-placeholders.png")
+        UIManager:broadcastEvent(Event:new("InvalidateMetadataCache", book.path))
+        self.custom.t0 = now()
+    end, 0.5)
+    local function waitCustom()
+        local c = self.custom
+        if (Covers.isRunning() or now() - c.t0 < 1500) and now() - c.t0 < 30000 then
+            table.insert(self.steps, 1, { fn = waitCustom, delay = 0.2 })
+            return
+        end
+        local state, path = store:refresh(c.book)
+        local bb = path and Covers.loadThumb(path)
+        R.custom_cover = { state = state, w = bb and bb:getWidth(), h = bb and bb:getHeight(), ms = now() - c.t0 }
+        if bb then bb:free() end
+        self:shot("18-covers-custom")
+        -- put the book back as it was
+        local DocSettings = require("docsettings")
+        local custom = DocSettings:findCustomCoverFile(c.book.path)
+        if custom then os.remove(custom) end
+        UIManager:broadcastEvent(Event:new("InvalidateMetadataCache", c.book.path))
+    end
+    self:queue(waitCustom, 0.2)
+    -- 5. Clear cover cache with the Library open: everything is extracted again.
+    self:queue(function()
+        lib:clearCoverCache()
+        R.after_clear = { files = (store:usage()) }
+        self.clear_t0 = now()
+    end, 3)
+    local function waitClear()
+        if (Covers.isRunning() or now() - self.clear_t0 < 1500) and now() - self.clear_t0 < 60000 then
+            table.insert(self.steps, 1, { fn = waitClear, delay = 0.2 })
+            return
+        end
+        R.after_clear.refilled = (store:usage())
+        R.after_clear.ms = now() - self.clear_t0
+    end
+    self:queue(waitClear, 0.2)
+    self:queue(function()
+        UIManager:close(shared.view)
+        UIManager:forceRePaint()
+    end, 3)
+    self:next()
 end
 
 function Bench:finish()
