@@ -419,3 +419,21 @@ describe("grid under the Continue reading strip", function()
         eq(l.rows * (l.tile_h + 12) <= 846, true)
     end)
 end)
+
+describe("Library in the file browser", function()
+    local on = { start_with_library = true, return_to_library = true }
+    it("shows the Library at start-up only when asked", function()
+        eq(Core.showLibraryInFileManager(on, { started = false }), true)
+        eq(Core.showLibraryInFileManager({ start_with_library = false, return_to_library = true },
+            { started = false, reopen = true }), false)
+    end)
+    it("comes back after a book opened from the Library", function()
+        eq(Core.showLibraryInFileManager(on, { started = true, reopen = true }), true)
+        eq(Core.showLibraryInFileManager({ start_with_library = true, return_to_library = false },
+            { started = true, reopen = true }), false)
+    end)
+    it("stays out of the way when the file browser was asked for", function()
+        -- File browser / Show folder from inside a book clear `reopen`
+        eq(Core.showLibraryInFileManager(on, { started = true, reopen = false }), false)
+    end)
+end)

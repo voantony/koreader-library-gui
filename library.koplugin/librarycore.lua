@@ -593,6 +593,18 @@ function Core.showContinue(state)
     return true
 end
 
+--- Whether the file browser should cover itself with the Library as it opens.
+-- `state.started`: the start-up Library was already shown once;
+-- `state.reopen`: we are coming back from a book that was opened from the
+-- Library (cleared when the user explicitly asks for the file browser).
+-- @tparam table settings `{ start_with_library, return_to_library }`
+-- @tparam table state `{ started, reopen }`
+function Core.showLibraryInFileManager(settings, state)
+    if not settings.start_with_library then return false end
+    if not state.started then return true end
+    return (state.reopen and settings.return_to_library) and true or false
+end
+
 --- Size the Continue reading strip.
 -- `body_h` is the height of the grid area before the strip takes its share;
 -- `label_h` is the text under each cover and `header_h` the strip's heading.

@@ -82,14 +82,10 @@ function Library:init()
 
     -- In the file browser: show the Library at start-up, or again after reading.
     -- (file_chooser is only created after plugins, so test for the reader instead.)
-    if not self.ui.document and self.settings.start_with_library then
-        local first = not shared.started
-        local back_from_book = shared.reopen and self.settings.return_to_library
-        if first or back_from_book then
-            shared.started = true
-            shared.reopen = false
-            UIManager:nextTick(function() self:onShowLibrary() end)
-        end
+    if not self.ui.document and Core.showLibraryInFileManager(self.settings, shared) then
+        shared.started = true
+        shared.reopen = false
+        UIManager:nextTick(function() self:onShowLibrary() end)
     end
 end
 
@@ -319,6 +315,9 @@ function Library:showBookDialog(book, view)
             filemanagerutil.genShowFolderButton(file, function()
                 close()
                 if view then UIManager:close(view) end
+                -- From inside a book this closes the reader: show the folder,
+                -- not the Library (return_to_library).
+                shared.reopen = false
             end),
             filemanagerutil.genBookInformationButton(doc_settings_or_file, props, close),
         },
@@ -419,12 +418,25 @@ function Library:showLibraryMenu(view)
                     callback = function()
                         close()
                         UIManager:close(view)
+                        self:showFileBrowser()
                     end,
                 },
             },
         },
     }
     UIManager:show(dialog)
+end
+
+--- Go to the file browser. Over a book (the Library opened from the reader
+-- menu or a gesture), close the book the way the reader's file browser tab
+-- does, but without return_to_library putting the Library back on top.
+function Library:showFileBrowser()
+    local reader = self.ui.document and self.ui
+    if not reader then return end -- already in the file browser
+    local file = reader.document.file
+    shared.reopen = false
+    reader:onClose()
+    reader:showFileManager(file)
 end
 
 ----------------------------------------------------------------------------
