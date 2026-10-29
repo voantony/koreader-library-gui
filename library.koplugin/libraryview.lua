@@ -79,9 +79,13 @@ local LibraryView = InputContainer:extend{
     filter = "all",
     view_mode = "grid",     -- "grid" | "list"
     show_continue = true,   -- the Continue reading strip on the Books tab
+    top_row = "continue",   -- what that strip shows: "continue" | "recent" (Recently opened)
     continue_slots = 5,
     barely_threshold = 0.10, -- "Barely started": opened, below this fraction
 }
+
+local lfs = require("libs/libkoreader-lfs")
+local function fileExists(p) return lfs.attributes(p, "mode") == "file" end
 
 local function lower(s) return util.stringLower and util.stringLower(s) or s:lower() end
 LibraryView.lower = lower
@@ -430,22 +434,29 @@ function LibraryView:buildList(items, kind, layout, height)
     }
 end
 
---- "43 % · 3 h ago" under a Continue reading cover.
+--- "43 % · 3 h ago" under a top-row cover; "Finished · 2 d ago" or
+-- "On hold · …" for those books in Recently opened.
 function LibraryView:resumeCaption(book, now)
     local parts = {}
     local pct = Core.percentText(book.percent)
-    if pct then parts[#parts + 1] = pct end
+    if book.status == "complete" or book.status == "abandoned" then
+        parts[#parts + 1] = Tiles.statusLine(book)
+    elseif book.status ~= "new" and pct then
+        parts[#parts + 1] = pct
+    end
     local ago = Core.relativeTime(book.last_opened, now or os.time())
     if not ago and book.last_opened then ago = os.date("%d %b", book.last_opened) end
     if ago then parts[#parts + 1] = ago end
     return table.concat(parts, " · ")
 end
 
---- The strip's heading: "Continue reading" and a one-tap Resume button for
--- the most recently read book (the first cover).
+--- The strip's heading: "Continue reading" or "Recently opened", and a
+-- one-tap Resume button for the most recently opened book still being read
+-- (in Continue reading, the first cover). No button when there is none.
 function LibraryView:buildContinueHeader(book)
     local f = Font:getFace("cfont", 15)
-    local label = TextWidget:new{ text = _("Continue reading"), face = f, bold = true }
+    local heading = Core.topRow(self.top_row) == "recent" and _("Recently opened") or _("Continue reading")
+    local label = TextWidget:new{ text = heading, face = f, bold = true }
     local row = HorizontalGroup:new{ align = "center", label }
     self.resume_chip = nil
     if book then
@@ -472,7 +483,7 @@ end
 
 --- The Continue reading strip: a heading with Resume, and up to `slots` large covers.
 function LibraryView:buildContinue(books, cl)
-    local header = self:buildContinueHeader(books[1])
+    local header = self:buildContinueHeader(self.resume_book)
     local row = HorizontalGroup:new{ align = "top", HorizontalSpan:new{ width = self.gap } }
     self.continue_tiles = {}
     local now = os.time()
@@ -534,15 +545,17 @@ function LibraryView:buildBody()
     local strip
     self.continue_tiles = nil
     self.continue_books = nil
+    self.resume_book = nil
     if data.kind == "books" and Core.showContinue{
             enabled = self.show_continue, tab = self.tab, group = self.group,
             query = self.query, filter = self.filter, keyboard = keyboard_h > 0 } then
-        local cbooks = Core.continueReading(self.all_books, self.continue_slots)
+        local cbooks = Core.topRowBooks(self.top_row, self.all_books, self.continue_slots, fileExists)
         local min_rest = self.view_mode == "list" and 3 * self.list_row_h or (self.label_h + 100)
         local cl = Core.continueLayout(self.width, grid_h, #cbooks, self.continue_label_h,
             self:continueHeaderHeight(), self.gap, { slots = self.continue_slots, min_rest = min_rest })
         if cl then
             self.continue_books = cbooks
+            self.resume_book = Core.resumeBook(self.all_books)
             self.continue_layout = cl
             grid_h = grid_h - cl.height
             strip = cl
@@ -821,7 +834,7 @@ end
 
 function LibraryView:onResume()
     self:keyboardGuard()
-    local book = self.continue_books and self.continue_books[1] or Core.resumeBook(self.all_books)
+    local book = self.resume_book or Core.resumeBook(self.all_books)
     if book then self.plugin:openBook(book.path, self) end
 end
 
@@ -879,6 +892,12 @@ end
 
 function LibraryView:setShowContinue(on)
     self.show_continue = on and true or false
+    self.page = 1
+    self:refreshBody(true)
+end
+
+function LibraryView:setTopRow(mode)
+    self.top_row = Core.topRow(mode)
     self.page = 1
     self:refreshBody(true)
 end

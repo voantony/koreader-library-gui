@@ -613,6 +613,47 @@ function Core.continueReading(books, n)
     return out
 end
 
+--- Books you have opened, most recently opened first, whatever their status
+-- (reading, finished, on hold, or opened but still unread). Books with no
+-- History entry are left out, and so are books whose file is gone, when
+-- `exists(path)` is given (it is only asked about the books that would show).
+function Core.recentlyOpened(books, n, exists)
+    local picked = {}
+    for _, b in ipairs(books) do
+        if type(b.last_opened) == "number" and b.last_opened > 0 then picked[#picked + 1] = b end
+    end
+    table.sort(picked, Core.comparator("recent"))
+    local out = {}
+    n = n or 5
+    for _, b in ipairs(picked) do
+        if #out >= n then break end
+        if not exists or exists(b.path) then out[#out + 1] = b end
+    end
+    return out
+end
+
+--- The top row of the Books tab: "continue" (Continue reading, the default)
+-- or "recent" (Recently opened).
+Core.TOP_ROWS = { "continue", "recent" }
+function Core.topRow(v)
+    if v == "recent" then return "recent" end
+    return "continue"
+end
+
+--- Store the top row choice in the plugin's `settings` and save them with
+-- `save()`. Returns the stored value ("continue" for anything unknown).
+function Core.setTopRow(settings, mode, save)
+    settings.top_row = Core.topRow(mode)
+    if save then save() end
+    return settings.top_row
+end
+
+--- The books for the top row in `mode`.
+function Core.topRowBooks(mode, books, n, exists)
+    if Core.topRow(mode) == "recent" then return Core.recentlyOpened(books, n, exists) end
+    return Core.continueReading(books, n)
+end
+
 --- Whether the Continue reading strip belongs on screen now.
 -- @tparam table state `{ enabled, tab, group, query, filter, keyboard }`
 function Core.showContinue(state)

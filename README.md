@@ -47,6 +47,7 @@ Updating works the same way: replace the `library.koplugin` folder with the new 
 - **Cover grid** with a reading-progress bar and the percentage read, a **✓** on finished books, **NEW** on books you haven't opened and **on hold** on abandoned ones. Books with no cover yet get a plain placeholder with the title until the cover is extracted.
 - **List view.** ☰ → **View: List** shows one book per row: a small cover, the title, the author (and series), and on the right the percentage read with a bar, or **✓**, **NEW** or **on hold**. About 9 rows fit on a page on a Kindle Colorsoft (up to 10 on bigger screens). Tap a row to open the book; long-press it for the same menu as on a cover. Collections, Authors and Series show one group per row with its book count. ☰ → **View: Grid** switches back.
 - **Continue reading.** At the top of the Books tab, a row of up to five larger covers shows the books you're reading, most recently opened first, each with its progress bar and a caption such as *43 % · 3 h ago* (older than a month: the date). Tap one to pick up where you left off: the book opens on the page you were on, not page 1. The **▶ Resume *title* 43 %** button next to the heading opens the most recent one in one tap. The row hides while you search, when a filter other than *All* is selected, while the keyboard is up, and when nothing is in progress. Turn it off with ☰ → **Show Continue reading**.
+- **Recently opened.** ☰ → Library → **Top row** switches the row at the top of the Books tab between *Continue reading* (the default) and *Recently opened*, which shows the last five books you opened, newest first, whatever their status: finished books (with **✓**), books on hold, and books you opened but haven't started. Books you have never opened, and books whose file is gone, are left out. The order comes from KOReader's History. The **▶ Resume** button stays on the most recent book you are still reading (it is hidden if there is none), so one tap still takes you back into your current book even when the newest cover is one you finished.
 - **Sort**: Recent (last opened; the default), Title, Author, Series, Date added.
 - **Tabs**: Books · Collections · Authors · Series. Opening a group shows its books, with a **← group** chip to go back.
 - **Series.** Opening a series lists its books in series order, each titled with its number (*3 · Ozma of Oz*); books without a number come last, by title. The footer shows how far you are (*2 of 7 read · series 5 of 10*). Swiping past the last page of a series opens the next series, and swiping back past the first page opens the previous one, so you can page through all your series without going back to the list.
@@ -113,6 +114,7 @@ You can change these under ☰ → Library, or with the ☰ button in the Librar
 | Sort | Recent |
 | View | Grid (Grid / List) |
 | Show Continue reading | on |
+| Top row | Continue reading (Continue reading / Recently opened) |
 | Columns | 4 (3–6) |
 | Library folder | KOReader home folder |
 | Include hidden folders | off |

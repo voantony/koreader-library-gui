@@ -261,3 +261,78 @@ describe("sleep screen: cover of last book", function()
         eq(t.screensaver_type, "disable")
     end)
 end)
+
+describe("recently opened", function()
+    local books = {
+        bk{ path = "/reading", status = "reading", percent = 0.4, last_opened = 300 },
+        bk{ path = "/finished", status = "complete", percent = 1, last_opened = 500 },
+        bk{ path = "/onhold", status = "abandoned", percent = 0.2, last_opened = 400 },
+        bk{ path = "/opened-unread", status = "new", last_opened = 200 },
+        bk{ path = "/never", status = "new" },
+        bk{ path = "/never-reading", status = "reading", percent = 0.1 },
+        bk{ path = "/gone", status = "reading", percent = 0.5, last_opened = 450 },
+        bk{ path = "/old", status = "reading", percent = 0.9, last_opened = 100 },
+    }
+    local function exists(p) return p ~= "/gone" end
+    it("lists every opened book, newest first, whatever its status", function()
+        same(paths(Core.recentlyOpened(books, 10)),
+            { "/finished", "/gone", "/onhold", "/reading", "/opened-unread", "/old" })
+    end)
+    it("keeps finished, on-hold and opened-but-unread books Continue reading drops", function()
+        same(paths(Core.continueReading(books, 10)), { "/gone", "/reading", "/old", "/never-reading" })
+    end)
+    it("skips books never opened and books whose file is gone", function()
+        same(paths(Core.recentlyOpened(books, 10, exists)),
+            { "/finished", "/onhold", "/reading", "/opened-unread", "/old" })
+    end)
+    it("stops at n, still skipping missing files", function()
+        same(paths(Core.recentlyOpened(books, 2, exists)), { "/finished", "/onhold" })
+        same(paths(Core.recentlyOpened(books, 0, exists)), {})
+        same(paths(Core.recentlyOpened({}, 5)), {})
+    end)
+    it("defaults to five books", function()
+        local many = {}
+        for i = 1, 8 do many[i] = bk{ path = "/b" .. i, status = "complete", last_opened = i } end
+        same(paths(Core.recentlyOpened(many)), { "/b8", "/b7", "/b6", "/b5", "/b4" })
+    end)
+    it("does not change the order of the list it is given", function()
+        local copy = {}
+        for i, b in ipairs(books) do copy[i] = b end
+        Core.recentlyOpened(copy, 10)
+        same(paths(copy), paths(books))
+    end)
+    it("Resume stays on the most recent book still being read", function()
+        local top = Core.recentlyOpened(books, 5, exists)
+        eq(top[1].path, "/finished")
+        eq(Core.resumeBook(books).path, "/gone")
+    end)
+end)
+
+describe("top row setting", function()
+    it("defaults to Continue reading", function()
+        eq(Core.topRow(nil), "continue")
+        eq(Core.topRow("bogus"), "continue")
+        eq(Core.topRow("recent"), "recent")
+    end)
+    it("picks the books for the chosen row", function()
+        local books = {
+            bk{ path = "/r", status = "reading", last_opened = 1 },
+            bk{ path = "/f", status = "complete", last_opened = 2 },
+        }
+        same(paths(Core.topRowBooks(nil, books, 5)), { "/r" })
+        same(paths(Core.topRowBooks("continue", books, 5)), { "/r" })
+        same(paths(Core.topRowBooks("recent", books, 5)), { "/f", "/r" })
+    end)
+    it("saves the choice in the plugin settings", function()
+        local settings, saved = { sort = "recent" }, 0
+        local save = function() saved = saved + 1 end
+        eq(Core.setTopRow(settings, "recent", save), "recent")
+        eq(settings.top_row, "recent")
+        eq(saved, 1)
+        eq(Core.setTopRow(settings, "continue", save), "continue")
+        eq(settings.top_row, "continue")
+        eq(saved, 2)
+        eq(Core.setTopRow(settings, "nonsense", save), "continue")
+        eq(settings.sort, "recent")
+    end)
+end)

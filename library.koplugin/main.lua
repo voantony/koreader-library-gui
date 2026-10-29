@@ -38,6 +38,7 @@ local DEFAULTS = {
     columns = 4,
     view = "grid",           -- "grid" | "list"
     show_continue = true,    -- Continue reading strip on the Books tab
+    top_row = "continue",    -- what that strip shows: "continue" | "recent" (Recently opened)
     max_depth = 10,
     show_hidden = false,
     start_with_library = false, -- open the Library instead of the file browser
@@ -244,6 +245,7 @@ function Library:newView()
         cols = self.settings.columns,
         view_mode = Core.viewMode(self.settings.view),
         show_continue = self.settings.show_continue ~= false,
+        top_row = Core.topRow(self.settings.top_row),
         sort = self.settings.sort,
         debounce_s = (self.settings.debounce_ms or 150) / 1000,
         barely_threshold = Core.barelyThreshold(self.settings.barely_threshold),
@@ -457,7 +459,8 @@ function Library:showLibraryMenu(view)
         })
     end
     table.insert(view_row, {
-        text = (self.settings.show_continue ~= false and "✓ " or "") .. _("Show Continue reading"),
+        text = (self.settings.show_continue ~= false and "✓ " or "")
+            .. (Core.topRow(self.settings.top_row) == "recent" and _("Show Recently opened") or _("Show Continue reading")),
         callback = function()
             close()
             self.settings.show_continue = self.settings.show_continue == false
@@ -576,6 +579,34 @@ function Library:barelyMenu()
                 math.floor(Core.barelyThreshold(self.settings.barely_threshold) * 100 + 0.5))
         end,
         help_text = _("The Barely started filter shows books you have opened and read less than this much of. Books never opened are not included."),
+        sub_item_table = items,
+    }
+end
+
+--- ☰ → Library → Top row: Continue reading (books in progress, the default)
+-- or Recently opened (every book opened, newest first, whatever its status).
+local TOP_ROW_NAMES = { continue = _("Continue reading"), recent = _("Recently opened") }
+
+function Library:setTopRow(mode)
+    Core.setTopRow(self.settings, mode, function() self:saveSettings() end)
+    if shared.view then shared.view:setTopRow(self.settings.top_row) end
+end
+
+function Library:topRowMenu()
+    local items = {}
+    for _i, mode in ipairs(Core.TOP_ROWS) do
+        table.insert(items, {
+            text = TOP_ROW_NAMES[mode],
+            radio = true,
+            checked_func = function() return Core.topRow(self.settings.top_row) == mode end,
+            callback = function() self:setTopRow(mode) end,
+        })
+    end
+    return {
+        text_func = function()
+            return T(_("Top row: %1"), TOP_ROW_NAMES[Core.topRow(self.settings.top_row)])
+        end,
+        help_text = _("The row of large covers at the top of the Books tab. Continue reading shows the books you are reading. Recently opened shows every book you have opened, newest first, including finished and on-hold ones. The Resume button always opens the most recent book you are still reading."),
         sub_item_table = items,
     }
 end
@@ -707,6 +738,7 @@ function Library:addToMainMenu(menu_items)
                 separator = true,
             },
             self:barelyMenu(),
+            self:topRowMenu(),
             self:sleepCoverMenu(),
             {
                 text = _("Library tab in the reader menu"),
