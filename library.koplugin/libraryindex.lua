@@ -192,6 +192,7 @@ function Index:build(force)
     local t0 = self:clock()
     local scanned, truncated = Core.scan(o.root, o.fs, o.is_book, {
         max_depth = o.max_depth, show_hidden = o.show_hidden, limit = o.limit,
+        skip_dirs = o.skip_dirs,
     })
     local t_scan = self:clock()
 
