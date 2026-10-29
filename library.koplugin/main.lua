@@ -34,6 +34,8 @@ local DEFAULTS = {
     root = nil,              -- nil: the KOReader home folder
     sort = "recent",
     columns = 4,
+    view = "grid",           -- "grid" | "list"
+    show_continue = true,    -- Continue reading strip on the Books tab
     max_depth = 10,
     show_hidden = false,
     start_with_library = false, -- open the Library instead of the file browser
@@ -201,7 +203,7 @@ function Library:getCollections()
         return a < b
     end)
     local groups = {}
-    for _, name in ipairs(names) do
+    for _i, name in ipairs(names) do
         local items = ReadCollection.getOrderedCollection and ReadCollection:getOrderedCollection(name) or {}
         local books = {}
         for _, item in ipairs(items) do
@@ -227,6 +229,8 @@ function Library:newView()
     return LibraryView:new{
         plugin = self,
         cols = self.settings.columns,
+        view_mode = Core.viewMode(self.settings.view),
+        show_continue = self.settings.show_continue ~= false,
         sort = self.settings.sort,
         debounce_s = (self.settings.debounce_ms or 150) / 1000,
     }
@@ -352,7 +356,29 @@ function Library:showLibraryMenu(view)
             end,
         })
     end
-    for _, n in ipairs({ 3, 4, 5, 6 }) do
+    local view_row = {}
+    for _i, mode in ipairs(Core.VIEWS) do
+        local name = mode == "list" and _("List") or _("Grid")
+        table.insert(view_row, {
+            text = (Core.viewMode(self.settings.view) == mode and "✓ " or "") .. T(_("View: %1"), name),
+            callback = function()
+                close()
+                self.settings.view = mode
+                self:saveSettings()
+                view:setViewMode(mode)
+            end,
+        })
+    end
+    table.insert(view_row, {
+        text = (self.settings.show_continue ~= false and "✓ " or "") .. _("Show Continue reading"),
+        callback = function()
+            close()
+            self.settings.show_continue = self.settings.show_continue == false
+            self:saveSettings()
+            view:setShowContinue(self.settings.show_continue)
+        end,
+    })
+    for _i, n in ipairs({ 3, 4, 5, 6 }) do
         table.insert(col_row, {
             text = (self.settings.columns == n and "✓ " or "") .. T(_("%1 columns"), n),
             callback = function()
@@ -368,6 +394,7 @@ function Library:showLibraryMenu(view)
         title_align = "center",
         buttons = {
             sort_row,
+            view_row,
             col_row,
             {
                 {

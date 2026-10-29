@@ -24,6 +24,19 @@ All 200 books got their metadata from `metadata.calibre` when it was present, an
 
 A page holds 8 books (4 columns × 2 rows) at this screen size. Extracting covers for all 200 books into an empty Project: Title cover DB took about 8 s in the emulator. This is a one-time cost, and it runs in the background.
 
+## Continue reading and list view (v0.2.0)
+
+Same emulator and library, 4 columns:
+
+| | books per page |
+|---|---|
+| Grid, no Continue reading row | 8 (4 × 2) |
+| Grid under the Continue reading row (5 covers, 274 px tall) | 8 (4 × 2, covers 298 px instead of 453 px) |
+| List | 9 rows of 138 px |
+| List under the Continue reading row | 6 rows |
+
+The bench also taps and long-presses a list row and a Continue reading cover, and checks that they open the book and show the book menu, like a grid tile.
+
 ## Search (per keystroke)
 
 52 keystrokes, made by typing `sherlock`, `jane austen`, `oz`, `mars`, `dickens`, `collected works 3` and `zzz` one character at a time:

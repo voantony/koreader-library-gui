@@ -319,3 +319,103 @@ describe("Library core: grid, filters, search index, calibre, cache", function()
         eq(Core.deserialize("garbage("), nil)
     end)
 end)
+
+describe("list view", function()
+    it("fits whole rows and stretches them to fill the height", function()
+        local l = Core.listLayout(1300, 130, 6)
+        eq(l.rows, 10); eq(l.row_h, 130); eq(l.per_page, 10)
+        eq(l.thumb_h, 118); eq(l.thumb_w, 79)
+        local s = Core.listLayout(1000, 130, 6)
+        eq(s.rows, 7); eq(s.row_h, 142)
+        eq(s.rows * s.row_h <= 1000, true)
+    end)
+    it("gives 8 to 10 rows on a Kindle Colorsoft body", function()
+        -- body height and row height measured in the emulator at 1264x1680, 300 dpi
+        for _, h in ipairs({ 1180, 1250, 1320 }) do
+            local l = Core.listLayout(h, 128, 6)
+            eq(l.rows >= 8 and l.rows <= 10, true, "rows for " .. h)
+        end
+    end)
+    it("keeps one row, shrunk, when the space is tiny", function()
+        local l = Core.listLayout(50, 130, 6)
+        eq(l.rows, 1); eq(l.row_h, 50); eq(l.thumb_h, 38)
+    end)
+    it("reads saved view modes", function()
+        eq(Core.viewMode("list"), "list")
+        eq(Core.viewMode("grid"), "grid")
+        eq(Core.viewMode(nil), "grid")
+        eq(Core.viewMode("tiles"), "grid")
+    end)
+end)
+
+describe("continue reading", function()
+    local function b(name, status, opened, mod)
+        return { name = name, title = name, path = "/" .. name, status = status, last_opened = opened, modification = mod or 0 }
+    end
+    local books = {
+        b("old", "reading", 10),
+        b("done", "complete", 100),
+        b("new", "new", nil, 500),
+        b("current", "reading", 90),
+        b("hold", "abandoned", 80),
+        b("mid", "reading", 50),
+        b("nohistory", "reading", nil, 300),
+        b("recent2", "reading", 70),
+        b("recent3", "reading", 60),
+    }
+    it("picks in-progress books, most recently opened first", function()
+        same(names(Core.continueReading(books, 5)), { "current", "recent2", "recent3", "mid", "old" })
+        same(names(Core.continueReading(books, 10)), { "current", "recent2", "recent3", "mid", "old", "nohistory" })
+        same(names(Core.continueReading(books, 2)), { "current", "recent2" })
+    end)
+    it("is empty when nothing is in progress", function()
+        eq(#Core.continueReading({ b("a", "new"), b("b", "complete", 5) }, 5), 0)
+        eq(#Core.continueReading({}, 5), 0)
+    end)
+    it("shows only on the unfiltered Books tab with no search", function()
+        local base = { enabled = true, tab = "books", query = "", filter = "all" }
+        local function with(k, v)
+            local s = {}
+            for kk, vv in pairs(base) do s[kk] = vv end
+            s[k] = v
+            return s
+        end
+        eq(Core.showContinue(base), true)
+        eq(Core.showContinue(with("query", "   ")), true)
+        eq(Core.showContinue(with("query", "oz")), false)
+        eq(Core.showContinue(with("filter", "reading")), false)
+        eq(Core.showContinue(with("tab", "authors")), false)
+        eq(Core.showContinue(with("group", { name = "x" })), false)
+        eq(Core.showContinue(with("enabled", false)), false)
+        eq(Core.showContinue(with("keyboard", true)), false)
+    end)
+    it("sizes the strip and leaves room for the books below", function()
+        local c = Core.continueLayout(1264, 1300, 3, 70, 40, 12, { slots = 5, frac = 0.24, min_rest = 400 })
+        eq(c.count, 3); eq(c.slots, 5)
+        eq(c.slot_w, 238); eq(c.cover_h, 312); eq(c.tile_h, 382); eq(c.height, 434)
+        eq(Core.continueLayout(1264, 1300, 9, 70, 40, 12).count, 5)
+        eq(Core.continueLayout(1264, 1300, 0, 70, 40, 12), nil)
+        -- too little room left below: no strip
+        eq(Core.continueLayout(1264, 600, 3, 70, 40, 12, { min_rest = 400 }), nil)
+        -- covers never get wider than their slot
+        local narrow = Core.continueLayout(300, 2000, 2, 20, 10, 0, { slots = 5 })
+        eq(narrow.cover_h, 90)
+    end)
+end)
+
+describe("list view caps", function()
+    it("caps rows and makes them taller instead", function()
+        local l = Core.listLayout(1300, 100, 6, { max_rows = 10 })
+        eq(l.rows, 10); eq(l.row_h, 130)
+    end)
+end)
+
+describe("grid under the Continue reading strip", function()
+    it("takes a second row with smaller covers when allowed", function()
+        -- 4 columns in what is left under the strip on a Colorsoft
+        eq(Core.gridLayout(1264, 846, 4, 108, 12).rows, 1)
+        local l = Core.gridLayout(1264, 846, 4, 108, 12, 0.6)
+        eq(l.rows, 2); eq(l.per_page, 8)
+        eq(l.rows * (l.tile_h + 12) <= 846, true)
+    end)
+end)

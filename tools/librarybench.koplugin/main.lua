@@ -289,6 +289,78 @@ function Bench:queueUI()
         view:resort("recent")
     end)
 
+    -- 6b. Continue reading strip and list view (0.2.0).
+    self:queue(function()
+        local view = shared.view
+        view:setViewMode("grid")
+        view:setShowContinue(true)
+        view:setTab("books")
+        view:setFilter("all")
+        R.continue_books = view.continue_books and #view.continue_books or 0
+        R.grid_per_page_with_continue = view.layout.per_page
+        R.dims = { label_h = view.label_h, list_row_h = view.list_row_h,
+            continue_h = view.continue_layout and view.continue_layout.height, continue_cover_h = view.continue_layout and view.continue_layout.cover_h,
+            grid_rows = view.layout.rows, grid_cover_h = view.layout.cover_h }
+        self:shot("12-grid-continue-reading")
+        view:goToPage(2)
+        self:shot("x-grid-continue-page2")
+        view:goToPage(1)
+        view:setViewMode("list")
+        R.list_rows_with_continue = view.layout.rows
+        self:shot("x-list-continue")
+        view:setShowContinue(false)
+        R.list_rows = view.layout.rows
+        R.list_row_h_used = view.layout.row_h
+        -- Tap and hold on a list row and on a Continue reading cover go
+        -- through the same callbacks as grid tiles.
+        local Event = require("ui/event")
+        local Geom = require("ui/geometry")
+        local function gesture(kind, widget)
+            local d = widget.dimen
+            local pos = Geom:new{ x = d.x + math.floor(d.w / 2), y = d.y + math.floor(d.h / 2), w = 0, h = 0 }
+            view:handleEvent(Event:new("Gesture", { ges = kind, pos = pos, time = time.now() }))
+        end
+        local open, dialog = lib.openBook, lib.showBookDialog
+        local hits = {}
+        lib.openBook = function(_self, path) hits[#hits + 1] = "open " .. path:match("[^/]+$") end
+        lib.showBookDialog = function(_self, book) hits[#hits + 1] = "hold " .. book.path:match("[^/]+$") end
+        self:paint() -- tiles learn their screen position when painted
+        gesture("tap", view.tiles[2])
+        gesture("hold", view.tiles[2])
+        R.list_row_2 = view.tiles[2].book.path:match("[^/]+$")
+        view:setShowContinue(true)
+        self:paint()
+        gesture("tap", view.continue_tiles[1])
+        gesture("hold", view.continue_tiles[1])
+        R.continue_1 = view.continue_tiles[1].book.path:match("[^/]+$")
+        lib.openBook, lib.showBookDialog = open, dialog
+        R.gesture_hits = hits
+        view:setShowContinue(false)
+        self:shot("13-list-view")
+        view:setShowContinue(true)
+        view:setTab("authors")
+        self:shot("x-list-authors")
+        view:setTab("collections")
+        self:shot("x-list-collections")
+        view:setTab("books")
+        view:setFilter("reading")
+        self:shot("x-list-filter-reading")
+        view:setFilter("all")
+        view.search_input:setText("jane austen")
+        view:applySearch("jane austen")
+        self:shot("14-list-search")
+        view:openKeyboard()
+        self:paint()
+        self:shot("x-list-search-keyboard")
+        view:closeKeyboard()
+        view:clearSearch()
+        lib:showLibraryMenu(view)
+        self:shot("x-menu")
+        local top = UIManager.getTopmostVisibleWidget and UIManager:getTopmostVisibleWidget()
+        if top and top ~= view then UIManager:close(top) end
+        view:setViewMode("grid")
+    end)
+
     -- 7. Close -> file browser (Project: Title).
     self:queue(function()
         UIManager:close(shared.view)

@@ -1,16 +1,20 @@
 # koreader-library-search-toolbar
 
-**Library** (`library.koplugin`) is a KOReader plugin that gives you a Kindle-style library: a cover grid sorted by the book you opened last, a search bar that stays at the top of the screen and filters as you type, and one-tap filters for All / Unread / Reading / Finished. Collections, Authors and Series are top-level tabs.
+**Library** (`library.koplugin`) is a KOReader plugin that gives you a Kindle-style library: a cover grid (or a compact list) sorted by the book you opened last, a **Continue reading** row with the books you're in the middle of, a search bar that stays at the top of the screen and filters as you type, and one-tap filters for All / Unread / Reading / Finished. Collections, Authors and Series are top-level tabs.
 
 It works alongside KOReader's file browser, History and Collections. It reuses the cover cache of **Project: Title** (or the built-in Cover browser), so covers you already have show up straight away. It never moves or renames your books.
 
-> **Early release (v0.1.0).** It has been tested in the KOReader desktop emulator (v2026.07.1), but not yet on many real devices. Please [open an issue](https://github.com/voantony/koreader-library-search-toolbar/issues) if something looks wrong on yours.
+> **Early release (v0.2.0).** It has been tested in the KOReader desktop emulator (v2026.07.1), but not yet on many real devices. Please [open an issue](https://github.com/voantony/koreader-library-search-toolbar/issues) if something looks wrong on yours.
 
 ## Screenshots
 
 | Library, sorted by recent | Searching as you type |
 |---|---|
 | ![Library, sorted by recent](screenshots/01-library-recent.png) | ![Search results while typing](screenshots/03-search-results.png) |
+
+| Continue reading row | List view | List view, searching |
+|---|---|---|
+| ![Grid with the Continue reading row](screenshots/12-grid-continue-reading.png) | ![List view](screenshots/13-list-view.png) | ![List view with a search](screenshots/14-list-search.png) |
 
 More are in [screenshots/](screenshots/). They were taken in the emulator with dummy public-domain books.
 
@@ -37,6 +41,8 @@ For covers, enable Project: Title or Cover browser. Updating works the same way:
 
 - **Search bar, always on screen.** It is part of the Library screen, not a pop-up. Tap it and type: results update as you type, matching title, author, series and file name. Every word must match, case is ignored, and a search for `jane aus` finds *Jane Austen*. Searching runs on an in-memory index, waits 150 ms after the last key and redraws only the grid area below the bar. Tap **Enter** or anywhere outside the keyboard to hide the keyboard and keep the results. Tap **✕** to clear.
 - **Cover grid** with a reading-progress bar and the percentage read, a **✓** on finished books, **NEW** on books you haven't opened and **on hold** on abandoned ones. Books with no cover yet get a plain placeholder with the title until the cover is extracted.
+- **List view.** ☰ → **View: List** shows one book per row: a small cover, the title, the author (and series), and on the right the percentage read with a bar, or **✓**, **NEW** or **on hold**. About 9 rows fit on a page on a Kindle Colorsoft (up to 10 on bigger screens). Tap a row to open the book; long-press it for the same menu as on a cover. Collections, Authors and Series show one group per row with its book count. ☰ → **View: Grid** switches back.
+- **Continue reading.** At the top of the Books tab, a row of up to five larger covers shows the books you're reading, most recently opened first, each with its progress bar. Tap one to pick up where you left off. The row hides while you search, when a filter other than *All* is selected, while the keyboard is up, and when nothing is in progress. Turn it off with ☰ → **Show Continue reading**.
 - **Sort**: Recent (last opened; the default), Title, Author, Series, Date added.
 - **Tabs**: Books · Collections · Authors · Series. Opening a group shows its books, with a **← group** chip to go back.
 - **Filters**: All / Unread / Reading / Finished, each with a count. On-hold books appear only under *All*.
@@ -74,6 +80,8 @@ You can change these under ☰ → Library, or with the ☰ button in the Librar
 | Open Library at startup | off |
 | Return to Library after closing a book | on |
 | Sort | Recent |
+| View | Grid (Grid / List) |
+| Show Continue reading | on |
 | Columns | 4 (3–6) |
 | Library folder | KOReader home folder |
 | Include hidden folders | off |
@@ -114,10 +122,10 @@ A Kindle is much slower than a desktop and e-ink refreshes take their own time, 
 library.koplugin/
   _meta.lua          plugin name and description
   main.lua           menus, settings, startup, dialogs, gestures
-  libraryview.lua    the Library screen: title bar, search bar, tabs, chips, grid, footer
-  librarytile.lua    cover tiles, badges, chips, LRU cache of scaled covers
+  libraryview.lua    the Library screen: title bar, search bar, tabs, chips, Continue reading, grid or list, footer
+  librarytile.lua    cover tiles, list rows, badges, chips, LRU cache of scaled covers
   libraryindex.lua   scan + metadata (calibre > cover DB > sidecar) + on-disk cache
-  librarycore.lua    pure logic: sorting, grouping, filters, search index, grid maths
+  librarycore.lua    pure logic: sorting, grouping, filters, search index, grid and list maths, Continue reading picks
 spec/                tests (run.lua is a tiny runner for LuaJIT / Lua 5.1)
 tools/
   make_dummy_library.py     generates N public-domain EPUBs with covers + metadata.calibre
