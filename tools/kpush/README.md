@@ -3,7 +3,7 @@
 A small command-line tool that copies files to a Kindle Colorsoft (1st gen) over MTP
 in a single session. It **leaves the USB connection up when it finishes**.
 
-**Status: experimental. It has been built, but not yet run against a Kindle.**
+**Status: experimental. Tested on one Kindle Colorsoft (1st gen) on 29 Oct 2026: a `--check` run and a six-file copy, with no USB drop.**
 
 ## Why it exists
 

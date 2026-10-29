@@ -1,5 +1,5 @@
 // kpush: copy files into a Kindle folder over MTP in ONE session.
-// v2: no USB reset on close.
+// v3: no USB reset on close; walks folders by listing (works uncached).
 // usage: kpush /path/on/kindle file1 [file2 ...]   (creates missing folders; never deletes)
 #include <libmtp.h>
 #include <stdio.h>
@@ -35,13 +35,6 @@ static int no_reset_on_close(LIBMTP_mtpdevice_t *d){
     u->rawdevice.device_entry.vendor_id, u->rawdevice.device_entry.product_id);
   return 0;
 }
-static uint32_t find_child(LIBMTP_folder_t *f, uint32_t parent, const char *name){
-  for(; f; f=f->sibling){
-    if(f->parent_id==parent && strcmp(f->name,name)==0) return f->folder_id;
-    uint32_t r=find_child(f->child,parent,name); if(r) return r;
-  }
-  return 0;
-}
 int main(int argc,char**argv){
   if(strcmp(LIBMTP_VERSION_STRING,"1.1.23")){fprintf(stderr,"built for libmtp 1.1.23 only, found %s\n",LIBMTP_VERSION_STRING);return 6;}
   int check_only = argc==2 && !strcmp(argv[1],"--check");
@@ -71,17 +64,25 @@ int main(int argc,char**argv){
   if(check_only){ no_reset_on_close(d); LIBMTP_Release_Device(d); printf("check done, nothing written\n"); return 0; }
   LIBMTP_Get_Storage(d,LIBMTP_STORAGE_SORTBY_NOTSORTED);
   uint32_t storage=d->storage?d->storage->id:0;
-  LIBMTP_folder_t *tree=LIBMTP_Get_Folder_List(d);
+  // Walk the path one level at a time by listing each folder on the device.
+  // (The device is opened uncached, so LIBMTP_Get_Folder_List() has no tree.)
   char path[1024]; strncpy(path,argv[1],sizeof path-1); path[sizeof path-1]=0;
-  uint32_t parent=0; char *save=NULL;
-  for(char *p=strtok_r(path,"/",&save);p;p=strtok_r(NULL,"/",&save)){
-    uint32_t id=find_child(tree,parent,p);
-    if(!id){ char *nm=strdup(p); id=LIBMTP_Create_Folder(d,nm,parent,storage); free(nm);
+  uint32_t parent=LIBMTP_FILES_AND_FOLDERS_ROOT; int depth=0; char *save=NULL;
+  for(char *p=strtok_r(path,"/",&save);p;p=strtok_r(NULL,"/",&save),depth++){
+    uint32_t id=0;
+    LIBMTP_file_t *ls=LIBMTP_Get_Files_And_Folders(d,storage,parent);
+    for(LIBMTP_file_t *f=ls;f;f=f->next) if(!id && f->filetype==LIBMTP_FILETYPE_FOLDER && strcmp(f->filename,p)==0) id=f->item_id;
+    while(ls){LIBMTP_file_t *n=ls->next; LIBMTP_destroy_file_t(ls); ls=n;}
+    if(!id){
+      if(depth==0){fprintf(stderr,"top-level folder %s not found on the Kindle; refusing to create folders at the root\n",p);
+        no_reset_on_close(d);LIBMTP_Release_Device(d);return 4;}
+      char *nm=strdup(p); id=LIBMTP_Create_Folder(d,nm,parent,storage); free(nm);
       if(!id){fprintf(stderr,"mkdir %s failed\n",p);LIBMTP_Dump_Errorstack(d);no_reset_on_close(d);LIBMTP_Release_Device(d);return 4;}
       printf("created %s (%u)\n",p,id);
-      LIBMTP_destroy_folder_t(tree); tree=LIBMTP_Get_Folder_List(d);}
+    }
     parent=id;
   }
+  if(parent==LIBMTP_FILES_AND_FOLDERS_ROOT){fprintf(stderr,"refusing to copy into the Kindle's root\n");no_reset_on_close(d);LIBMTP_Release_Device(d);return 4;}
   printf("target folder id %u\n",parent);
   // existing files in target, to replace same-named ones
   LIBMTP_file_t *files=LIBMTP_Get_Files_And_Folders(d,storage,parent);
