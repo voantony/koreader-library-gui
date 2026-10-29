@@ -49,6 +49,7 @@ local util = require("util")
 local Core = require("librarycore")
 local Tiles = require("librarytile")
 local Covers = require("librarycovers")
+local Keyboard = require("librarykeyboard")
 local Screen = Device.screen
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -82,7 +83,29 @@ local LibraryView = InputContainer:extend{
     top_row = "continue",   -- what that strip shows: "continue" | "recent" (Recently opened)
     continue_slots = 5,
     barely_threshold = 0.10, -- "Barely started": opened, below this fraction
+    rounded_keyboard = true, -- "Rounded keyboard in search"
 }
+
+--- The search bar's text box: KOReader's InputText, with our own keyboard
+-- (see librarykeyboard.lua) when "Rounded keyboard in search" is on. Only
+-- this text box gets it; every other one in KOReader keeps the stock keyboard.
+local SearchInput = InputText:extend{ rounded_keyboard = true }
+LibraryView.SearchInput = SearchInput
+
+function SearchInput:initKeyboard()
+    if self.rounded_keyboard and (Device:isTouchDevice() or Device:hasDPad()) then
+        local RoundedKeyboard = Keyboard.class()
+        if RoundedKeyboard then
+            self.key_events = {}
+            self.keyboard = RoundedKeyboard:new{
+                keyboard_layer = self.input_type == "number" and 4 or 2,
+                inputbox = self,
+            }
+            return
+        end
+    end
+    return InputText.initKeyboard(self)
+end
 
 local lfs = require("libs/libkoreader-lfs")
 local function fileExists(p) return lfs.attributes(p, "mode") == "file" end
@@ -142,8 +165,25 @@ function LibraryView:buildChrome()
         show_parent = self,
     }
 
-    local margin = Size.margin.default
-    local icon_size = Screen:scaleBySize(32)
+    self:buildSearchRow()
+end
+
+--- The search bar: a rounded field with a magnifier, the text box and a
+-- clear button inside it, the full width of the screen.
+function LibraryView:buildSearchRow(text)
+    local margin = Size.margin.default + Size.padding.default
+    local icon_size = Screen:scaleBySize(22)
+    local hpad = Size.padding.large
+    local border = Size.border.button
+    local face = Font:getFace("smallinfofont")
+    local magnifier = IconButton:new{
+        icon = "appbar.search",
+        width = icon_size,
+        height = icon_size,
+        padding = 0,
+        callback = function() self:openKeyboard() end,
+        show_parent = self,
+    }
     local clear = IconButton:new{
         icon = "close",
         width = icon_size,
@@ -152,36 +192,76 @@ function LibraryView:buildChrome()
         callback = function() self:clearSearch() end,
         show_parent = self,
     }
-    local avail_w = self.width - 2 * margin - clear:getSize().w - Size.padding.default
-    -- InputText adds its own border/padding around `width`: measure and fit.
-    local probe = InputText:new{ text = "", width = avail_w, face = Font:getFace("smallinfofont"), scroll = false }
-    local input_w = avail_w - (probe:getSize().w - avail_w)
-    probe:free()
-    self.search_input = InputText:new{
-        text = "",
+    local field_w = self.width - 2 * margin
+    local input_w = field_w - 2 * border - 2 * hpad - magnifier:getSize().w - clear:getSize().w - 2 * Size.padding.default
+    if self.search_input then
+        text = text or self.search_input:getText()
+        self.search_input:onCloseWidget() -- frees its keyboard
+    end
+    self.search_input = SearchInput:new{
+        text = text or "",
         hint = _("Search title, author, series"),
         width = input_w,
-        face = Font:getFace("smallinfofont"),
+        face = face,
         focused = false,
         scroll = false,
         parent = self,
+        bordersize = 0,
+        margin = 0,
+        padding = Size.padding.small,
+        rounded_keyboard = self.rounded_keyboard,
         edit_callback = function(edited)
             if edited then self:onSearchEdited() end
         end,
         enter_callback = function() self:closeKeyboard() end,
     }
+    local inner_h = math.max(self.search_input:getSize().h, Tiles.minTouch() - 2 * border)
+    self.search_field = FrameContainer:new{
+        padding = 0,
+        padding_left = hpad,
+        padding_right = Size.padding.small,
+        bordersize = border,
+        color = Blitbuffer.COLOR_GRAY_7,
+        radius = math.floor((inner_h + 2 * border) / 2),
+        background = Blitbuffer.COLOR_WHITE,
+        CenterContainer:new{
+            dimen = Geom:new{ w = field_w - 2 * border - hpad - Size.padding.small, h = inner_h },
+            HorizontalGroup:new{
+                align = "center",
+                magnifier,
+                HorizontalSpan:new{ width = Size.padding.default },
+                self.search_input,
+                HorizontalSpan:new{ width = Size.padding.default },
+                clear,
+            },
+        },
+    }
     self.search_row = FrameContainer:new{
         padding = 0,
         padding_left = margin,
         padding_right = margin,
+        padding_bottom = Size.padding.small,
         bordersize = 0,
-        HorizontalGroup:new{
-            align = "center",
-            self.search_input,
-            HorizontalSpan:new{ width = Size.padding.default },
-            clear,
-        },
+        self.search_field,
     }
+end
+
+--- The field's border follows the keyboard: dark while typing.
+function LibraryView:markSearchFocus(on)
+    if self.search_field then
+        self.search_field.color = on and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_7
+    end
+end
+
+--- Turn "Rounded keyboard in search" on or off: the search bar gets a new
+-- text box (and keyboard); what was typed is kept.
+function LibraryView:setRoundedKeyboard(on)
+    on = on and true or false
+    if on == self.rounded_keyboard then return end
+    if self.search_input:isKeyboardVisible() then self:keyboardGuard() end
+    self.rounded_keyboard = on
+    self:buildSearchRow()
+    self:refreshBody(true)
 end
 
 ----------------------------------------------------------------------------
@@ -262,11 +342,11 @@ function LibraryView:keyboardHeight()
 end
 
 function LibraryView:buildTabs()
-    local row = HorizontalGroup:new{ align = "center" }
-    local w = math.floor((self.width - 2 * Size.margin.default - (#TABS - 1) * Size.padding.small) / #TABS)
-    for i, tab in ipairs(TABS) do
-        if i > 1 then table.insert(row, HorizontalSpan:new{ width = Size.padding.small }) end
-        table.insert(row, Tiles.Chip:new{
+    local margin = Size.margin.default + Size.padding.default
+    local row = HorizontalGroup:new{ align = "bottom" }
+    local w = math.floor((self.width - 2 * margin) / #TABS)
+    for _, tab in ipairs(TABS) do
+        table.insert(row, Tiles.Tab:new{
             text = tab.text,
             width = w,
             selected = (self.group == nil and self.query == "" and self.tab == tab.id)
@@ -274,16 +354,23 @@ function LibraryView:buildTabs()
             callback = function() self:setTab(tab.id) end,
         })
     end
-    return CenterContainer:new{
-        dimen = Geom:new{ w = self.width, h = row:getSize().h + Size.padding.small },
-        row,
+    -- the tabs sit on a hairline, the selected one marked by a thick underline
+    return VerticalGroup:new{
+        align = "center",
+        CenterContainer:new{ dimen = Geom:new{ w = self.width, h = row:getSize().h }, row },
+        LineWidget:new{
+            background = Blitbuffer.COLOR_GRAY_B,
+            dimen = Geom:new{ w = self.width - 2 * margin, h = Size.line.thin },
+        },
     }
 end
 
 local FILTER_SHORT = { barely = _("Barely") }
 
 function LibraryView:buildChips(counts)
-    local avail = self.width - 2 * Size.margin.default
+    local margin = Size.margin.default + Size.padding.default
+    local gap = Size.padding.default
+    local avail = self.width - 2 * margin
     -- Narrow screens: drop the counts of unselected filters, then shorten names.
     local row
     for compact = 0, 2 do
@@ -297,7 +384,7 @@ function LibraryView:buildChips(counts)
             table.insert(row, HorizontalSpan:new{ width = Size.padding.large })
         end
         for i, f in ipairs(Core.FILTERS) do
-            if i > 1 then table.insert(row, HorizontalSpan:new{ width = Size.padding.small }) end
+            if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
             local selected = self.filter == f
             local text = (compact >= 2 and FILTER_SHORT[f]) or FILTER_NAMES[f]
             if counts and (compact == 0 or selected) then text = text .. " " .. (counts[f] or 0) end
@@ -309,17 +396,20 @@ function LibraryView:buildChips(counts)
         end
         if row:getSize().w <= avail then break end
     end
+    local pad = Size.padding.default
     return FrameContainer:new{
         padding = 0,
-        padding_left = Size.margin.default,
+        padding_left = margin,
+        padding_top = pad,
         bordersize = 0,
         width = self.width,
-        height = row:getSize().h + Size.padding.small,
+        height = row:getSize().h + 2 * pad,
         row,
     }
 end
 
 function LibraryView:buildFooter(page, pages, total, kind)
+    local margin = Size.margin.default + Size.padding.default
     local f = Font:getFace("cfont", 15)
     local left = kind == "books" and T(_("%1 books · %2"), total, self.plugin:sortName(self.sort))
         or T(_("%1 groups"), total)
@@ -329,13 +419,36 @@ function LibraryView:buildFooter(page, pages, total, kind)
         local pos, count = self:seriesPosition()
         if pos then left = left .. " · " .. T(_("series %1 of %2 · swipe on for the next"), pos, count) end
     end
-    local text = TextWidget:new{ text = left, face = f, fgcolor = Blitbuffer.COLOR_GRAY_3 }
-    local pager = TextWidget:new{ text = T(_("‹  %1 / %2  ›"), page, pages), face = f, bold = true }
-    local h = math.max(text:getSize().h, pager:getSize().h) + Size.padding.small
-    local spacer = self.width - 2 * Size.margin.default - text:getSize().w - pager:getSize().w
+    -- Page arrows are real buttons (a thumb-sized target each), as well as swipes.
+    local touch = Tiles.minTouch()
+    local icon = Screen:scaleBySize(20)
+    local function arrow(name, dir, enabled)
+        local btn = IconButton:new{
+            icon = name,
+            width = icon, height = icon,
+            padding = math.floor((touch - icon) / 2),
+            enabled = enabled,
+            allow_flash = false, -- the page redraw is the feedback: one refresh, not two
+            callback = function() self:turnPage(dir, false) end,
+            show_parent = self,
+        }
+        if not enabled and btn.image then btn.image.dim = true end
+        return btn
+    end
+    local more = self:inSeries() -- past the last page: the next series
+    local pager = HorizontalGroup:new{
+        align = "center",
+        arrow("chevron.left", -1, page > 1 or more),
+        TextWidget:new{ text = T(_("%1 / %2"), page, pages), face = f, bold = true },
+        arrow("chevron.right", 1, page < pages or more),
+    }
+    local text = TextWidget:new{ text = left, face = f, fgcolor = Blitbuffer.COLOR_GRAY_4,
+        max_width = self.width - 2 * margin - pager:getSize().w - Size.padding.default }
+    local h = math.max(text:getSize().h, pager:getSize().h)
+    local spacer = self.width - 2 * margin - text:getSize().w - pager:getSize().w + math.floor((touch - icon) / 2)
     return FrameContainer:new{
         padding = 0,
-        padding_left = Size.margin.default,
+        padding_left = margin,
         bordersize = 0,
         width = self.width,
         height = h,
@@ -348,8 +461,9 @@ function LibraryView:buildGrid(items, kind, layout, height)
     self.tiles = {}
     self.missing_covers = {}
     -- Spread spare height between rows (same spacing on every page).
-    local vgap = math.max(self.gap,
-        math.floor((height - layout.rows * layout.tile_h) / (layout.rows + 1)))
+    -- (capped: a lone row under Continue reading should not float mid-page)
+    local vgap = math.max(self.gap, math.min(3 * Size.padding.large,
+        math.floor((height - layout.rows * layout.tile_h) / (layout.rows + 1))))
     local i = 1
     for _ = 1, layout.rows do
         if i > #items then break end
@@ -441,8 +555,8 @@ function LibraryView:resumeCaption(book, now)
     local pct = Core.percentText(book.percent)
     if book.status == "complete" or book.status == "abandoned" then
         parts[#parts + 1] = Tiles.statusLine(book)
-    elseif book.status ~= "new" and pct then
-        parts[#parts + 1] = pct
+    elseif book.status ~= "new" and pct and book.status ~= "reading" then
+        parts[#parts + 1] = pct -- (books being read show it on the bar)
     end
     local ago = Core.relativeTime(book.last_opened, now or os.time())
     if not ago and book.last_opened then ago = os.date("%d %b", book.last_opened) end
@@ -454,7 +568,7 @@ end
 -- one-tap Resume button for the most recently opened book still being read
 -- (in Continue reading, the first cover). No button when there is none.
 function LibraryView:buildContinueHeader(book)
-    local f = Font:getFace("cfont", 15)
+    local f = Font:getFace("cfont", 17)
     local heading = Core.topRow(self.top_row) == "recent" and _("Recently opened") or _("Continue reading")
     local label = TextWidget:new{ text = heading, face = f, bold = true }
     local row = HorizontalGroup:new{ align = "center", label }
@@ -475,7 +589,7 @@ function LibraryView:buildContinueHeader(book)
     return FrameContainer:new{
         padding = 0,
         padding_left = Size.margin.default + self.gap,
-        padding_top = Size.padding.small,
+        padding_top = Size.padding.default,
         bordersize = 0,
         row,
     }
@@ -513,9 +627,9 @@ end
 
 function LibraryView:continueHeaderHeight()
     if not self._continue_header_h then
-        local t = TextWidget:new{ text = "Ag", face = Font:getFace("cfont", 15), bold = true }
+        local t = TextWidget:new{ text = "Ag", face = Font:getFace("cfont", 17), bold = true }
         local chip = Tiles.Chip:new{ text = "Ag" }
-        self._continue_header_h = math.max(t:getSize().h, chip:getSize().h) + Size.padding.small
+        self._continue_header_h = math.max(t:getSize().h, chip:getSize().h) + Size.padding.default
         t:free()
     end
     return self._continue_header_h
@@ -529,10 +643,7 @@ function LibraryView:buildBody()
 
     local tabs = self:buildTabs()
     local chips = data.kind == "books" and self:buildChips(data.counts) or nil
-    local sep = LineWidget:new{
-        background = Blitbuffer.COLOR_GRAY_9,
-        dimen = Geom:new{ w = self.width, h = Size.line.thin },
-    }
+    local sep = VerticalSpan:new{ width = Size.padding.small }
     local footer_probe = self:buildFooter(1, 1, 0, data.kind)
     local fixed = self.title_bar:getHeight() + self.search_row:getSize().h + Size.padding.small
         + tabs:getSize().h + (chips and chips:getSize().h or 0) + sep:getSize().h
@@ -552,7 +663,7 @@ function LibraryView:buildBody()
         local cbooks = Core.topRowBooks(self.top_row, self.all_books, self.continue_slots, fileExists)
         local min_rest = self.view_mode == "list" and 3 * self.list_row_h or (self.label_h + 100)
         local cl = Core.continueLayout(self.width, grid_h, #cbooks, self.continue_label_h,
-            self:continueHeaderHeight(), self.gap, { slots = self.continue_slots, min_rest = min_rest })
+            self:continueHeaderHeight(), self.gap, { slots = self.continue_slots, min_rest = min_rest, frac = 0.3 })
         if cl then
             self.continue_books = cbooks
             self.resume_book = Core.resumeBook(self.all_books)
@@ -688,6 +799,7 @@ end
 function LibraryView:openKeyboard()
     self.search_input:focus()
     self.search_input:onShowKeyboard()
+    self:markSearchFocus(true)
     -- While the (modal) keyboard is up, taps outside it must still reach the grid.
     self.is_always_active = true
     self:refreshBody()
@@ -698,6 +810,7 @@ function LibraryView:closeKeyboard()
         self.search_input:onCloseKeyboard()
     end
     self.search_input:unfocus()
+    self:markSearchFocus(false)
     self.is_always_active = false
     self:refreshBody(true)
 end
@@ -733,6 +846,7 @@ function LibraryView:keyboardGuard()
     if self.search_input:isKeyboardVisible() then
         self.search_input:onCloseKeyboard()
         self.search_input:unfocus()
+        self:markSearchFocus(false)
         self.is_always_active = false
     end
 end

@@ -17,6 +17,7 @@ Seven files, all from `library.koplugin/` in this repository. Copy nothing else:
 | `~/kindle-stage/library.koplugin/libraryview.lua` | `/mnt/us/koreader/plugins/library.koplugin/libraryview.lua` |
 | `~/kindle-stage/library.koplugin/librarytile.lua` | `/mnt/us/koreader/plugins/library.koplugin/librarytile.lua` |
 | `~/kindle-stage/library.koplugin/librarycovers.lua` | `/mnt/us/koreader/plugins/library.koplugin/librarycovers.lua` |
+| `~/kindle-stage/library.koplugin/librarykeyboard.lua` | `/mnt/us/koreader/plugins/library.koplugin/librarykeyboard.lua` |
 
 Over MTP the Kindle's storage root is `/mnt/us`, so `/mnt/us/koreader/plugins` appears as **`/koreader/plugins`** in libmtp paths. This is the same folder Project: Title was copied into.
 

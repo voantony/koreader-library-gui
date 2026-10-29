@@ -1077,4 +1077,47 @@ function Core.sleepCoverDisable(gs, prev)
     end
 end
 
+----------------------------------------------------------------------------
+-- Look
+----------------------------------------------------------------------------
+
+--- How to put a `src_w` x `src_h` cover into a `box_w` x `box_h` slot so every
+-- tile in a row has the same shape. Covers close to the slot's shape (within
+-- `tolerance`, default 0.15) are scaled to fill it and the overflow is
+-- cropped evenly from both sides; anything further off (square covers, wide
+-- comics pages) is scaled to fit inside instead, so nothing important is cut.
+-- @treturn table `{ mode = "fill"|"fit", w, h, crop_x, crop_y }`: the scaled
+-- size, and where the slot starts inside it when filling.
+function Core.coverPlacement(src_w, src_h, box_w, box_h, tolerance)
+    tolerance = tolerance or 0.15
+    src_w, src_h = math.max(1, src_w), math.max(1, src_h)
+    box_w, box_h = math.max(1, box_w), math.max(1, box_h)
+    local src_ratio, box_ratio = src_w / src_h, box_w / box_h
+    if math.abs(src_ratio - box_ratio) / box_ratio <= tolerance then
+        local scale = math.max(box_w / src_w, box_h / src_h)
+        local w = math.max(box_w, math.floor(src_w * scale + 0.5))
+        local h = math.max(box_h, math.floor(src_h * scale + 0.5))
+        return { mode = "fill", w = w, h = h,
+            crop_x = math.floor((w - box_w) / 2), crop_y = math.floor((h - box_h) / 2) }
+    end
+    local scale = math.min(box_w / src_w, box_h / src_h)
+    return { mode = "fit", w = math.max(1, math.floor(src_w * scale + 0.5)),
+        h = math.max(1, math.floor(src_h * scale + 0.5)), crop_x = 0, crop_y = 0 }
+end
+
+--- Width of the filled part of a progress bar `w` wide for `fraction`
+-- (clamped to 0..1). A started book always shows at least `min_w` pixels so
+-- 1 % does not look like unread.
+function Core.barFill(w, fraction, min_w)
+    fraction = tonumber(fraction) or 0
+    if fraction <= 0 then return 0 end
+    if fraction >= 1 then return w end
+    return math.min(w, math.max(min_w or 0, math.floor(w * fraction + 0.5)))
+end
+
+--- "Rounded keyboard in search": on unless turned off.
+function Core.roundedKeyboard(settings)
+    return not (settings and settings.rounded_keyboard == false)
+end
+
 return Core

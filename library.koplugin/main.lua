@@ -47,6 +47,7 @@ local DEFAULTS = {
     barely_threshold = 0.10,    -- "Barely started" filter: opened and below this fraction
     series_skip_finished = true, -- Next in series skips books already finished
     reader_tab = true,          -- a Library tab (book icon) in the reader's top menu bar
+    rounded_keyboard = true,    -- "Rounded keyboard in search": softer keys for the search bar only
     -- sleep_cover_prev: KOReader's sleep screen settings from before
     -- "Sleep screen: cover of last book" was turned on (restored when turned off)
 }
@@ -264,6 +265,7 @@ function Library:newView()
         sort = self.settings.sort,
         debounce_s = (self.settings.debounce_ms or 150) / 1000,
         barely_threshold = Core.barelyThreshold(self.settings.barely_threshold),
+        rounded_keyboard = Core.roundedKeyboard(self.settings),
     }
 end
 
@@ -764,6 +766,16 @@ function Library:addToMainMenu(menu_items)
                     self:saveSettings()
                     -- the reader rebuilds its menu tabs the next time the menu opens
                     if self.ui.document and self.ui.menu then self.ui.menu.tab_item_table = nil end
+                end,
+            },
+            {
+                text = _("Rounded keyboard in search"),
+                help_text = _("Give the Library's search bar a softer on-screen keyboard: rounded keys with gaps between them on a light background, like the Kindle or a phone. Only the Library's search uses it; every other keyboard in KOReader stays as it is."),
+                checked_func = function() return Core.roundedKeyboard(self.settings) end,
+                callback = function()
+                    self.settings.rounded_keyboard = not Core.roundedKeyboard(self.settings)
+                    self:saveSettings()
+                    if shared.view then shared.view:setRoundedKeyboard(self.settings.rounded_keyboard) end
                 end,
             },
             {

@@ -170,8 +170,9 @@ library.koplugin/
   _meta.lua          plugin name and description
   main.lua           menus, settings, startup, dialogs, gestures
   libraryview.lua    the Library screen: title bar, search bar, tabs, chips, Continue reading, grid or list, footer
-  librarytile.lua    cover tiles, list rows, badges, chips, LRU cache of scaled covers
+  librarytile.lua    cover tiles, list rows, badges, chips, tabs, progress bars, LRU cache of scaled covers
   librarycovers.lua  built-in covers: thumbnail files, extraction queue, background process
+  librarykeyboard.lua  "Rounded keyboard in search": a restyled keyboard for the search bar only
   libraryindex.lua   scan + metadata (calibre > cover DB > sidecar) + on-disk cache
   librarycore.lua    pure logic: sorting, grouping, filters, search index, grid and list maths, Continue reading picks
 spec/                tests (run.lua is a tiny runner for LuaJIT / Lua 5.1)

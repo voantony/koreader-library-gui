@@ -98,3 +98,24 @@ describe("search bar tap on a D-pad device", function()
         end)
     end)
 end)
+
+describe("tapping a search result", function()
+    it("hides the keyboard before opening the book", function()
+        withStubbedUI(function()
+            local LibraryView = require("libraryview")
+            local view = setmetatable({}, LibraryView)
+            local log = {}
+            view.search_input = {
+                isKeyboardVisible = function() return true end,
+                onCloseKeyboard = function() table.insert(log, "close keyboard") end,
+                unfocus = function() table.insert(log, "unfocus") end,
+            }
+            view.is_always_active = true
+            view.plugin = { openBook = function(_, path) table.insert(log, "open " .. path) end }
+            view:onTileTap({ book = { path = "/b.epub" } })
+            eq(log[1], "close keyboard")
+            eq(log[#log], "open /b.epub")
+            eq(view.is_always_active, false)
+        end)
+    end)
+end)
