@@ -934,4 +934,50 @@ function Core.placeMenuButton(buttons, id, before, enabled)
     return buttons
 end
 
+----------------------------------------------------------------------------
+-- Sleep screen: cover of the last book (KOReader's own "cover" screensaver)
+----------------------------------------------------------------------------
+-- `gs` is a small view of G_reader_settings: { read = f(key), save = f(key, value), del = f(key) }.
+-- KOReader's "cover" sleep screen shows the cover of `lastfile` (the last book
+-- opened), in the reader and in the file browser, unless
+-- screensaver_hide_cover_in_filemanager is set. With no cover it falls back
+-- to its own random-image / default picture.
+
+local SLEEP_KEYS = { "screensaver_type", "screensaver_hide_cover_in_filemanager" }
+
+--- True when KOReader will show the last book's cover everywhere.
+function Core.sleepCoverOn(gs)
+    return gs.read("screensaver_type") == "cover"
+        and gs.read("screensaver_hide_cover_in_filemanager") ~= true
+end
+
+--- Switch KOReader's sleep screen to the last book's cover. Returns the
+-- previous values (to keep for sleepCoverOff), or nil when it was already on.
+function Core.sleepCoverEnable(gs)
+    if Core.sleepCoverOn(gs) then return nil end
+    local prev = {} -- prev[key] = { value = v }; {} when the key was unset
+    for _, k in ipairs(SLEEP_KEYS) do
+        prev[k] = { value = gs.read(k) }
+    end
+    gs.save("screensaver_type", "cover")
+    if gs.read("screensaver_hide_cover_in_filemanager") == true then
+        gs.save("screensaver_hide_cover_in_filemanager", false)
+    end
+    return prev
+end
+
+--- Put back what sleepCoverEnable replaced. Without saved values (cover was
+-- chosen in KOReader's own menu), fall back to KOReader's default: "disable"
+-- (leave the screen as it is).
+function Core.sleepCoverDisable(gs, prev)
+    if not prev then
+        gs.save("screensaver_type", "disable")
+        return
+    end
+    for _, k in ipairs(SLEEP_KEYS) do
+        local v = prev[k] and prev[k].value
+        if v == nil then gs.del(k) else gs.save(k, v) end
+    end
+end
+
 return Core

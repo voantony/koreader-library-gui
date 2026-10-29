@@ -46,6 +46,8 @@ local DEFAULTS = {
     barely_threshold = 0.10,    -- "Barely started" filter: opened and below this fraction
     series_skip_finished = true, -- Next in series skips books already finished
     reader_tab = true,          -- a Library tab (book icon) in the reader's top menu bar
+    -- sleep_cover_prev: KOReader's sleep screen settings from before
+    -- "Sleep screen: cover of last book" was turned on (restored when turned off)
 }
 
 local SORT_NAMES = {
@@ -608,6 +610,38 @@ function Library:addReaderTab(menu_items)
     }
 end
 
+--- G_reader_settings, as the small interface Core's sleep screen helpers use.
+local function readerSettings()
+    return {
+        read = function(k) return G_reader_settings:readSetting(k) end,
+        save = function(k, v) G_reader_settings:saveSetting(k, v) end,
+        del = function(k) G_reader_settings:delSetting(k) end,
+    }
+end
+
+--- ☰ → Library → Sleep screen: cover of last book. A shortcut to KOReader's
+-- own "Show book cover on sleep screen", which also covers the file browser
+-- and the Library; turning it off restores the previous sleep screen.
+function Library:sleepCoverMenu()
+    return {
+        text = _("Sleep screen: cover of last book"),
+        help_text = _("When the device sleeps, show the cover of the book you read last, also when you are in the Library or the file browser. This turns on KOReader's own \"Show book cover on sleep screen\" (Settings → Screen → Sleep screen). If the book has no cover, KOReader shows its usual sleep screen image. Turning this off brings back the sleep screen you had before."),
+        checked_func = function() return Core.sleepCoverOn(readerSettings()) end,
+        callback = function()
+            local gs = readerSettings()
+            if Core.sleepCoverOn(gs) then
+                Core.sleepCoverDisable(gs, self.settings.sleep_cover_prev)
+                self.settings.sleep_cover_prev = nil
+            else
+                self.settings.sleep_cover_prev = Core.sleepCoverEnable(gs)
+            end
+            self:saveSettings()
+            logger.info("Library: sleep screen", G_reader_settings:readSetting("screensaver_type"),
+                "hide in file browser:", G_reader_settings:readSetting("screensaver_hide_cover_in_filemanager"))
+        end,
+    }
+end
+
 function Library:addToMainMenu(menu_items)
     menu_items.library = {
         text = _("Library"),
@@ -673,6 +707,7 @@ function Library:addToMainMenu(menu_items)
                 separator = true,
             },
             self:barelyMenu(),
+            self:sleepCoverMenu(),
             {
                 text = _("Library tab in the reader menu"),
                 help_text = _("Show a Library tab (book icon) in the top menu bar while reading, next to the file browser tab."),

@@ -52,6 +52,7 @@ Updating works the same way: replace the `library.koplugin` folder with the new 
 - **Series.** Opening a series lists its books in series order, each titled with its number (*3 · Ozma of Oz*); books without a number come last, by title. The footer shows how far you are (*2 of 7 read · series 5 of 10*). Swiping past the last page of a series opens the next series, and swiping back past the first page opens the previous one, so you can page through all your series without going back to the list.
 - **Next in series, from inside a book.** ☰ → Library shows **Next in series: 4 · Dorothy and the Wizard in Oz** and **Previous in series: 2 · …** while you read a book that is part of a series. *Next* skips books you have already finished (turn that off in ☰ → Library); if every later book is finished it opens the very next one. Books open where you left off.
 - **Library tab in the reader menu.** While reading, the top menu bar has a Library tab (the open-book icon, next to the file browser's folder). Tap the top of the screen, then the icon, and the Library opens over the book. Turn it off with ☰ → Library → **Library tab in the reader menu**.
+- **Sleep screen: cover of last book.** ☰ → Library → **Sleep screen: cover of last book** makes the sleep screen show the cover of the book you read last, both while reading and from the Library or file browser. It switches on KOReader's own *Show book cover on sleep screen* (Settings → Screen → Sleep screen) and, if *hide the cover in the file browser* was on, turns that off. If the book has no cover, or KOReader can't read one, you get your usual sleep screen image (or the KOReader logo). Turning the option off puts back the sleep screen you had before. Off by default.
 - **Filters**: All / Unread / Reading / Barely started / Finished, each with a count. On-hold books appear only under *All*. **Barely started** shows books you have opened but read less than 10 % of (5, 10, 20 or 25 %; set it in ☰ → Library or the Library's ☰ menu). Books you have never opened, and books at 0 %, are not included. On narrow screens the chips drop the counts of the unselected filters to fit.
 - **Long-press a book** to set its status, show its folder, view book information or open it.
 - **Swipe** left and right, or use the page keys, to turn pages. The **‹ 1 / 25 ›** buttons do the same.
@@ -117,6 +118,7 @@ You can change these under ☰ → Library, or with the ☰ button in the Librar
 | Include hidden folders | off |
 | Barely started: below | 10 % (5 / 10 / 20 / 25 %) |
 | Library tab in the reader menu | on |
+| Sleep screen: cover of last book | off |
 | Next in series skips finished books | on |
 
 Settings are stored in `settings.reader.lua` under the key `library_plugin`.

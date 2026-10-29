@@ -211,3 +211,53 @@ describe("reader menu Library tab", function()
         eq(table.concat(b, ","), "navi,main")
     end)
 end)
+
+describe("sleep screen: cover of last book", function()
+    local function store(init)
+        local t = {}
+        for k, v in pairs(init or {}) do t[k] = v end
+        return t, {
+            read = function(k) return t[k] end,
+            save = function(k, v) t[k] = v end,
+            del = function(k) t[k] = nil end,
+        }
+    end
+    it("is off by default (KOReader's default sleep screen)", function()
+        local _, gs = store{ screensaver_type = "disable" }
+        eq(Core.sleepCoverOn(gs), false)
+    end)
+    it("turns on KOReader's cover sleep screen and restores the previous one", function()
+        local t, gs = store{ screensaver_type = "random_image", screensaver_dir = "/pics" }
+        local prev = Core.sleepCoverEnable(gs)
+        eq(t.screensaver_type, "cover")
+        eq(Core.sleepCoverOn(gs), true)
+        Core.sleepCoverDisable(gs, prev)
+        eq(t.screensaver_type, "random_image")
+        eq(t.screensaver_dir, "/pics")
+        eq(t.screensaver_hide_cover_in_filemanager, nil)
+        eq(Core.sleepCoverOn(gs), false)
+    end)
+    it("shows the cover in the file browser too, and puts that option back", function()
+        local t, gs = store{ screensaver_type = "cover", screensaver_hide_cover_in_filemanager = true }
+        eq(Core.sleepCoverOn(gs), false)
+        local prev = Core.sleepCoverEnable(gs)
+        eq(t.screensaver_hide_cover_in_filemanager, false)
+        eq(Core.sleepCoverOn(gs), true)
+        Core.sleepCoverDisable(gs, prev)
+        eq(t.screensaver_type, "cover")
+        eq(t.screensaver_hide_cover_in_filemanager, true)
+    end)
+    it("restores an unset sleep screen as unset", function()
+        local t, gs = store{}
+        local prev = Core.sleepCoverEnable(gs)
+        Core.sleepCoverDisable(gs, prev)
+        eq(t.screensaver_type, nil)
+    end)
+    it("leaves settings alone when already on, and turns off to KOReader's default", function()
+        local t, gs = store{ screensaver_type = "cover" }
+        eq(Core.sleepCoverEnable(gs), nil)
+        eq(t.screensaver_type, "cover")
+        Core.sleepCoverDisable(gs, nil)
+        eq(t.screensaver_type, "disable")
+    end)
+end)
