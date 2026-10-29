@@ -34,3 +34,12 @@ Thumbs.db
 *~
 .vscode/
 .idea/
+
+# Emulator / benchmark output (screenshots/ holds the curated, dummy-data shots)
+bench-out/
+dummy/
+dummy-library/
+results.lua
+*.png
+!screenshots/*.png
+library_index.lua

@@ -203,7 +203,7 @@ local function firstAuthor(book)
     return book.authors and book.authors[1] or Core.UNKNOWN
 end
 
-Core.SORTS = { "title", "author", "series", "added", "size" }
+Core.SORTS = { "recent", "title", "author", "series", "added", "size" }
 
 --- Return a comparator for `mode`.
 -- @tparam[opt] function collate locale-aware `a < b` for strings
@@ -234,6 +234,16 @@ function Core.comparator(mode, collate)
             if ai and bi and ai ~= bi then return ai < bi end
             if ai and not bi then return true end
             if bi and not ai then return false end
+            return byTitle(a, b)
+        end
+    elseif mode == "recent" then
+        -- Last opened first; never-opened books after them, newest file first.
+        return function(a, b)
+            local ao, bo = a.last_opened or 0, b.last_opened or 0
+            if ao ~= bo then return ao > bo end
+            if a.modification ~= b.modification then
+                return (a.modification or 0) > (b.modification or 0)
+            end
             return byTitle(a, b)
         end
     elseif mode == "added" then
@@ -390,6 +400,295 @@ function Core.label(book, show_series_index)
         text = text .. " — " .. table.concat(book.authors, ", ")
     end
     return text
+end
+
+----------------------------------------------------------------------------
+-- Status filters (the chips under the search bar)
+----------------------------------------------------------------------------
+
+Core.FILTERS = { "all", "unread", "reading", "finished" }
+
+local FILTER_STATUS = {
+    unread = { new = true },
+    reading = { reading = true },
+    finished = { complete = true },
+}
+
+function Core.filterStatus(books, filter)
+    local wanted = FILTER_STATUS[filter]
+    if not wanted then return books end
+    local out = {}
+    for _, b in ipairs(books) do
+        if wanted[b.status or "new"] then table.insert(out, b) end
+    end
+    return out
+end
+
+function Core.countFilters(books)
+    local counts = { all = #books, unread = 0, reading = 0, finished = 0 }
+    for _, b in ipairs(books) do
+        for f, wanted in pairs(FILTER_STATUS) do
+            if wanted[b.status or "new"] then counts[f] = counts[f] + 1 end
+        end
+    end
+    return counts
+end
+
+----------------------------------------------------------------------------
+-- Search index
+----------------------------------------------------------------------------
+
+--- Precompute the lower-cased text searched for each book: title, authors,
+-- series and file name. `lower` defaults to string.lower; KOReader passes a
+-- Unicode-aware one.
+function Core.buildSearchKey(book, lower)
+    lower = lower or string.lower
+    book.search_key = lower(table.concat({
+        book.title or "",
+        table.concat(book.authors or {}, " "),
+        book.series or "",
+        book.name or "",
+    }, "\n"))
+    return book.search_key
+end
+
+function Core.indexBooks(books, lower)
+    for _, b in ipairs(books) do Core.buildSearchKey(b, lower) end
+    return books
+end
+
+--- Split a query into lower-cased words.
+function Core.queryWords(query, lower)
+    lower = lower or string.lower
+    local words = {}
+    if type(query) ~= "string" then return words end
+    for w in lower(query):gmatch("%S+") do table.insert(words, w) end
+    return words
+end
+
+--- Fast search over precomputed keys. Every word must appear somewhere.
+-- When `previous` (the results for a shorter prefix of this query) is
+-- given, only those are scanned: typing narrows, it never widens.
+function Core.searchIndexed(books, query, lower, previous)
+    local words = Core.queryWords(query, lower)
+    if #words == 0 then return books end
+    local source = previous or books
+    local out = {}
+    local find = string.find
+    for i = 1, #source do
+        local b = source[i]
+        local key = b.search_key or Core.buildSearchKey(b, lower)
+        local ok = true
+        for j = 1, #words do
+            if not find(key, words[j], 1, true) then ok = false; break end
+        end
+        if ok then out[#out + 1] = b end
+    end
+    return out
+end
+
+--- True when `new_query` only extends `old_query` (so old results can be narrowed).
+function Core.isRefinement(old_query, new_query)
+    if not old_query or old_query == "" then return false end
+    old_query = old_query:gsub("%s+$", "")
+    if old_query == "" then return false end
+    return new_query:sub(1, #old_query) == old_query
+end
+
+----------------------------------------------------------------------------
+-- Paging
+----------------------------------------------------------------------------
+
+--- Return the slice for `page` (1-based) and the clamped page and page count.
+function Core.page(list, per_page, page)
+    local pages = math.max(1, math.ceil(#list / per_page))
+    page = math.max(1, math.min(page or 1, pages))
+    local out = {}
+    local first = (page - 1) * per_page + 1
+    for i = first, math.min(#list, first + per_page - 1) do
+        out[#out + 1] = list[i]
+    end
+    return out, page, pages
+end
+
+--- How many columns/rows of tiles fit. Covers keep a 2:3 aspect ratio.
+function Core.gridLayout(width, height, cols, label_h, gap)
+    cols = math.max(1, cols)
+    gap = gap or 0
+    local tile_w = math.floor((width - gap * (cols + 1)) / cols)
+    local cover_h = math.floor(tile_w * 1.5)
+    local tile_h = cover_h + label_h
+    local rows = math.max(1, math.floor((height - gap) / (tile_h + gap)))
+    -- If one more row fits with covers at least 70% as tall, prefer it:
+    -- a fuller page beats big covers and a blank strip at the bottom.
+    local more = rows + 1
+    local cover_more = math.floor((height - gap) / more) - gap - label_h
+    if cover_more >= 0.7 * cover_h then
+        rows, cover_h = more, cover_more
+        tile_h = cover_h + label_h
+    end
+    -- If even one row does not fit, shrink covers to the space we have.
+    if tile_h + 2 * gap > height then
+        tile_h = math.max(label_h + 10, height - 2 * gap)
+        cover_h = tile_h - label_h
+    end
+    return { cols = cols, rows = rows, tile_w = tile_w, tile_h = tile_h, cover_h = cover_h, per_page = cols * rows }
+end
+
+----------------------------------------------------------------------------
+-- Calibre metadata (metadata.calibre written by calibre or the Calibre plugin)
+----------------------------------------------------------------------------
+
+local function plain(v)
+    -- rapidjson null and other userdata/cdata become nil
+    if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then return v end
+    return nil
+end
+
+--- Turn calibre's list into `{ [absolute path] = props }`.
+-- `entries` is the decoded JSON array; `base_dir` is the folder holding the
+-- metadata.calibre file (calibre's lpath values are relative to it).
+function Core.calibreIndex(entries, base_dir)
+    local map = {}
+    base_dir = (base_dir or ""):gsub("/+$", "")
+    if type(entries) ~= "table" then return map end
+    for _, e in ipairs(entries) do
+        local lpath = type(e) == "table" and plain(e.lpath)
+        if type(lpath) == "string" and lpath ~= "" then
+            local authors = {}
+            if type(e.authors) == "table" then
+                for _, a in ipairs(e.authors) do
+                    if type(a) == "string" and a ~= "" then table.insert(authors, a) end
+                end
+            end
+            local path = lpath:sub(1, 1) == "/" and lpath or (base_dir .. "/" .. lpath)
+            map[path] = {
+                title = plain(e.title),
+                authors = #authors > 0 and table.concat(authors, "\n") or nil,
+                series = plain(e.series),
+                series_index = tonumber(plain(e.series_index)),
+                keywords = type(e.tags) == "table" and table.concat(e.tags, "\n") or nil,
+            }
+        end
+    end
+    return map
+end
+
+--- Candidate folders that may hold a metadata.calibre for `root`:
+-- the root and each parent (calibre writes it at the device root,
+-- e.g. /mnt/us, with lpaths like "documents/...").
+function Core.calibreCandidateDirs(root, extra)
+    local dirs, seen = {}, {}
+    local function add(d)
+        if d and d ~= "" and not seen[d] then seen[d] = true; table.insert(dirs, d) end
+    end
+    local d = root:gsub("/+$", "")
+    while d and d ~= "" do
+        add(d)
+        d = d:match("^(.*)/[^/]*$")
+    end
+    for _, e in ipairs(extra or {}) do add((e:gsub("/+$", ""))) end
+    return dirs
+end
+
+----------------------------------------------------------------------------
+-- Incremental index cache
+----------------------------------------------------------------------------
+
+Core.CACHE_VERSION = 2
+
+--- Decide which scanned files can reuse cached metadata.
+-- A cached entry is reused when path, size, mtime and the calibre stamp match.
+-- @treturn table list of books (cached metadata copied in where valid)
+-- @treturn table list of books that need fresh metadata
+function Core.reconcile(scanned, cache_entries, calibre_stamp)
+    local reused, stale = {}, {}
+    cache_entries = cache_entries or {}
+    for _, f in ipairs(scanned) do
+        local c = cache_entries[f.path]
+        if c and c.size == f.size and c.modification == f.modification
+                and c.cal == calibre_stamp and c.src ~= "file" then
+            f.title, f.authors, f.series, f.series_index = c.title, c.authors, c.series, c.series_index
+            f.keywords, f.src, f.cal = c.keywords, c.src, c.cal
+            f.sc_mtime, f.status, f.percent = c.sc_mtime, c.status, c.percent
+            table.insert(reused, f)
+        else
+            -- keep reading state; only metadata is stale
+            if c then f.sc_mtime, f.status, f.percent = c.sc_mtime, c.status, c.percent end
+            table.insert(stale, f)
+        end
+    end
+    return reused, stale
+end
+
+local CACHED_FIELDS = {
+    "size", "modification", "title", "authors", "series", "series_index",
+    "keywords", "src", "cal", "sc_mtime", "status", "percent",
+}
+
+function Core.toCacheEntries(books)
+    local entries = {}
+    for _, b in ipairs(books) do
+        local e = {}
+        for _, k in ipairs(CACHED_FIELDS) do e[k] = b[k] end
+        entries[b.path] = e
+    end
+    return entries
+end
+
+--- Serialize a plain table (strings, numbers, booleans, nested tables) to Lua source.
+function Core.serialize(value)
+    local buf = {}
+    local function emit(v)
+        local t = type(v)
+        if t == "string" then
+            buf[#buf + 1] = string.format("%q", v)
+        elseif t == "number" then
+            if v ~= v or v == math.huge or v == -math.huge then
+                buf[#buf + 1] = "0"
+            elseif v == math.floor(v) and math.abs(v) < 2^53 then
+                buf[#buf + 1] = string.format("%d", v)
+            else
+                buf[#buf + 1] = string.format("%.17g", v)
+            end
+        elseif t == "boolean" then
+            buf[#buf + 1] = tostring(v)
+        elseif t == "table" then
+            buf[#buf + 1] = "{"
+            local n = #v
+            for i = 1, n do emit(v[i]); buf[#buf + 1] = "," end
+            local keys = {}
+            for k in pairs(v) do
+                if not (type(k) == "number" and k >= 1 and k <= n and k == math.floor(k)) then
+                    table.insert(keys, k)
+                end
+            end
+            table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+            for _, k in ipairs(keys) do
+                buf[#buf + 1] = "["
+                emit(k)
+                buf[#buf + 1] = "]="
+                emit(v[k])
+                buf[#buf + 1] = ","
+            end
+            buf[#buf + 1] = "}"
+        else
+            buf[#buf + 1] = "nil"
+        end
+    end
+    emit(value)
+    return "return " .. table.concat(buf)
+end
+
+--- Load serialized data in an empty environment. Returns nil on any error.
+function Core.deserialize(source)
+    if type(source) ~= "string" then return nil end
+    local fn = loadstring(source)
+    if not fn then return nil end
+    setfenv(fn, {})
+    local ok, data = pcall(fn)
+    if ok and type(data) == "table" then return data end
+    return nil
 end
 
 return Core

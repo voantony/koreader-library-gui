@@ -55,7 +55,7 @@ _G.same = function(actual, expected, msg)
     end
 end
 
-for _, spec in ipairs({ "librarycore_spec", "main_smoke_spec" }) do
+for _, spec in ipairs({ "librarycore_spec", "libraryindex_spec" }) do
     require(spec)
 end
 
