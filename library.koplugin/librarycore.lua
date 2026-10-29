@@ -77,6 +77,52 @@ function Core.splitAuthors(authors)
 end
 
 ----------------------------------------------------------------------------
+-- What counts as a book
+----------------------------------------------------------------------------
+
+-- Book formats the Library lists. KOReader's DocumentRegistry also accepts
+-- scripts and config files (crengine registers .sh, .lua, .py, .js, .json,
+-- .ini, .log ... as plain text), so "KOReader can open it" is not enough.
+Core.BOOK_EXTENSIONS = {
+    epub = true, pdf = true, mobi = true, azw3 = true, azw = true, prc = true,
+    fb2 = true, cbz = true, cbr = true, cb7 = true, djvu = true, djv = true,
+    xps = true, chm = true, docx = true, rtf = true, odt = true, txt = true,
+}
+
+-- Never books, even if a later edit adds them above by mistake.
+Core.NON_BOOK_EXTENSIONS = {
+    sh = true, lua = true, py = true, js = true, json = true, ini = true, log = true,
+}
+
+--- True when the file name has a book format extension (case-insensitive).
+-- `foo.fb2.zip` counts; a bare `.zip` does not.
+function Core.isBookName(name)
+    if type(name) ~= "string" then return false end
+    local _, base = Core.splitPath(name)
+    local l = base:lower()
+    if l:match("%.fb2%.zip$") then return true end
+    local ext = Core.extension(l)
+    if Core.NON_BOOK_EXTENSIONS[ext] then return false end
+    return Core.BOOK_EXTENSIONS[ext] == true
+end
+
+--- Build an `is_book(path)` predicate: a book format AND openable by KOReader.
+-- @tparam[opt] function has_provider `function(path) -> bool`
+function Core.makeIsBook(has_provider)
+    return function(path)
+        if not Core.isBookName(path) then return false end
+        if has_provider then
+            local ok, res = pcall(has_provider, path)
+            return ok and res and true or false
+        end
+        return true
+    end
+end
+
+--- Folder names never scanned: KOReader's own install folder.
+Core.SKIP_DIR_NAMES = { koreader = true }
+
+----------------------------------------------------------------------------
 -- Scanning
 ----------------------------------------------------------------------------
 
@@ -86,7 +132,9 @@ end
 --   attributes = function(path) -> { mode=, size=, modification= } | nil }`
 --   (shape-compatible with LuaFileSystem)
 -- @tparam function is_book `function(path) -> bool`
--- @tparam[opt] table opts `{ max_depth = 10, show_hidden = false, limit = 20000 }`
+-- @tparam[opt] table opts `{ max_depth = 10, show_hidden = false, limit = 20000,
+--   skip_dirs = { "/abs/path", ... } }`. Folders named `koreader` (the
+--   install folder) and every path in `skip_dirs` are never walked.
 -- @treturn table list of book records
 -- @treturn bool true when the scan stopped early because of `limit`
 function Core.scan(root, fs, is_book, opts)
@@ -95,6 +143,12 @@ function Core.scan(root, fs, is_book, opts)
     local limit = opts.limit or 20000
     local show_hidden = opts.show_hidden
     root = root:gsub("/+$", "")
+    local skip = {}
+    for _, d in ipairs(opts.skip_dirs or {}) do
+        if type(d) == "string" and d ~= "" then
+            skip[(d:gsub("/+$", ""))] = true
+        end
+    end
     local books = {}
     local truncated = false
 
@@ -118,7 +172,9 @@ function Core.scan(root, fs, is_book, opts)
                 if attr then
                     if attr.mode == "directory" then
                         -- *.sdr folders hold KOReader's per-book settings, never books
-                        if depth < max_depth and not name:match("%.sdr$") then
+                        if depth < max_depth and not name:match("%.sdr$")
+                                and not Core.SKIP_DIR_NAMES[name:lower()]
+                                and not skip[path] then
                             walk(path, depth + 1)
                         end
                     elseif attr.mode == "file" and is_book(path) then

@@ -154,6 +154,20 @@ local function loadCalibre(path)
     return load(path)
 end
 
+--- KOReader's own folders, never scanned for books.
+function Library:getSkipDirs()
+    local dirs = {}
+    local ok, data_dir = pcall(DataStorage.getDataDir, DataStorage)
+    if ok and data_dir then table.insert(dirs, data_dir) end
+    local ok2, full = pcall(DataStorage.getFullDataDir, DataStorage)
+    if ok2 and full then table.insert(dirs, full) end
+    local cwd = lfs.currentdir and lfs.currentdir()
+    if cwd and lfs.attributes(cwd .. "/reader.lua", "mode") == "file" then
+        table.insert(dirs, cwd) -- the install folder (KOReader runs from it)
+    end
+    return dirs
+end
+
 function Library:getIndex()
     local root = self:getRoot()
     if shared.index and shared.index.opts.root == root
@@ -168,7 +182,8 @@ function Library:getIndex()
         max_depth = self.settings.max_depth,
         cache_file = DataStorage:getSettingsDir() .. "/library_index.lua",
         fs = lfs,
-        is_book = function(path) return DocumentRegistry:hasProvider(path) end,
+        is_book = Core.makeIsBook(function(path) return DocumentRegistry:hasProvider(path) end),
+        skip_dirs = self:getSkipDirs(),
         lower = util.stringLower,
         bim = self:getBIM(),
         docsettings = DocSettings,
