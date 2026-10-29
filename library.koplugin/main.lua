@@ -43,6 +43,9 @@ local DEFAULTS = {
     start_with_library = false, -- open the Library instead of the file browser
     return_to_library = true,   -- when the Library is the home screen, come back to it after reading
     debounce_ms = 150,
+    barely_threshold = 0.10,    -- "Barely started" filter: opened and below this fraction
+    series_skip_finished = true, -- Next in series skips books already finished
+    reader_tab = true,          -- a Library tab (book icon) in the reader's top menu bar
 }
 
 local SORT_NAMES = {
@@ -100,8 +103,14 @@ function Library:onDispatcherRegisterActions()
         { category = "none", event = "ShowLibrary", title = _("Library"), general = true })
     Dispatcher:registerAction("library_search",
         { category = "none", event = "SearchLibrary", title = _("Search library"), general = true })
+    Dispatcher:registerAction("library_resume",
+        { category = "none", event = "LibraryResume", title = _("Resume last book (Library)"), general = true })
     Dispatcher:registerAction("library_rescan",
         { category = "none", event = "RescanLibrary", title = _("Rescan library"), general = true, separator = true })
+    Dispatcher:registerAction("library_next_in_series",
+        { category = "none", event = "LibraryNextInSeries", title = _("Next in series"), reader = true })
+    Dispatcher:registerAction("library_prev_in_series",
+        { category = "none", event = "LibraryPrevInSeries", title = _("Previous in series"), reader = true, separator = true })
 end
 
 function Library:saveSettings()
@@ -235,7 +244,81 @@ function Library:newView()
         show_continue = self.settings.show_continue ~= false,
         sort = self.settings.sort,
         debounce_s = (self.settings.debounce_ms or 150) / 1000,
+        barely_threshold = Core.barelyThreshold(self.settings.barely_threshold),
     }
+end
+
+----------------------------------------------------------------------------
+-- Series navigation and resume
+----------------------------------------------------------------------------
+
+--- The open book's record and its series, in reading order.
+function Library:currentSeries()
+    local doc = self.ui.document
+    if not doc or not doc.file then return nil end
+    local index = self:ensureIndex()
+    local current = index.by_path[doc.file] or index:recordFor(doc.file)
+    if not current or not current.series then return nil, nil, current end
+    local books = Core.seriesBooks(index.books, current.series, collate)
+    local found = false
+    for _, b in ipairs(books) do if b.path == current.path then found = true; break end end
+    if not found then -- opened from outside the Library folder
+        table.insert(books, current)
+        books = Core.seriesOrder(books, collate)
+    end
+    return books, current.series, current
+end
+
+--- The book Next (dir = 1) or Previous (dir = -1) in series would open.
+function Library:seriesTarget(dir)
+    local books, _series, current = self:currentSeries()
+    if not books then return nil, current end
+    return Core.seriesNeighbour(books, current, dir,
+        { skip_finished = self.settings.series_skip_finished ~= false }), current
+end
+
+--- "3 · Title" for menus and messages.
+function Library:seriesLabel(book)
+    local n = Core.seriesNumber(book.series_index)
+    return (n and (n .. " · ") or "") .. (book.title or book.name)
+end
+
+function Library:openInSeries(dir)
+    if not self.ui.document then
+        UIManager:show(InfoMessage:new{ text = _("Open a book first."), timeout = 2 })
+        return true
+    end
+    local target, current = self:seriesTarget(dir)
+    if not target then
+        local text
+        if not (current and current.series) then
+            text = _("This book is not part of a series.")
+        elseif dir > 0 then
+            text = T(_("“%1” is the last book of %2."), current.title or current.name, current.series)
+        else
+            text = T(_("“%1” is the first book of %2."), current.title or current.name, current.series)
+        end
+        UIManager:show(InfoMessage:new{ text = text, timeout = 3 })
+        return true
+    end
+    logger.info("Library: series", dir > 0 and "next" or "previous", "->", target.path)
+    filemanagerutil.openFile(self.ui, target.path)
+    return true
+end
+
+function Library:onLibraryNextInSeries() return self:openInSeries(1) end
+function Library:onLibraryPrevInSeries() return self:openInSeries(-1) end
+
+--- Open the most recently read book that is not finished, at its saved position.
+function Library:onLibraryResume()
+    local book = Core.resumeBook(self:getBooks())
+    if not book then
+        UIManager:show(InfoMessage:new{ text = _("No book in progress."), timeout = 2 })
+        return true
+    end
+    if self.ui.document and self.ui.document.file == book.path then return true end
+    self:openBook(book.path, shared.view)
+    return true
 end
 
 function Library:onShowLibrary(focus_search)
@@ -391,6 +474,19 @@ function Library:showLibraryMenu(view)
             end,
         })
     end
+    local barely_row = {}
+    local th = Core.barelyThreshold(self.settings.barely_threshold)
+    for _i, t in ipairs(Core.BARELY_THRESHOLDS) do
+        table.insert(barely_row, {
+            text = (th == t and "✓ " or "") .. T(_("Barely started < %1 %"), math.floor(t * 100 + 0.5)),
+            callback = function()
+                close()
+                self.settings.barely_threshold = t
+                self:saveSettings()
+                view:setBarelyThreshold(t)
+            end,
+        })
+    end
     dialog = ButtonDialog:new{
         title = _("Library"),
         title_align = "center",
@@ -398,6 +494,7 @@ function Library:showLibraryMenu(view)
             sort_row,
             view_row,
             col_row,
+            barely_row,
             {
                 {
                     text = (self.settings.start_with_library and "✓ " or "") .. _("Start with Library"),
@@ -432,6 +529,84 @@ end
 ----------------------------------------------------------------------------
 -- Main menu (file browser and reader)
 ----------------------------------------------------------------------------
+
+--- Next / Previous in series entries for the reader's Library menu.
+function Library:seriesMenuItems()
+    local function item(dir)
+        return {
+            text_func = function()
+                local ok, target = pcall(self.seriesTarget, self, dir)
+                local name = dir > 0 and _("Next in series") or _("Previous in series")
+                if ok and target then return name .. ": " .. self:seriesLabel(target) end
+                return name
+            end,
+            enabled_func = function()
+                local ok, target = pcall(self.seriesTarget, self, dir)
+                return ok and target ~= nil
+            end,
+            callback = function(touchmenu_instance)
+                if touchmenu_instance then touchmenu_instance:closeMenu() end
+                self:openInSeries(dir)
+            end,
+            separator = dir < 0,
+        }
+    end
+    return item(1), item(-1)
+end
+
+function Library:barelyMenu()
+    local items = {}
+    for _i, t in ipairs(Core.BARELY_THRESHOLDS) do
+        table.insert(items, {
+            text = T(_("Below %1 %"), math.floor(t * 100 + 0.5)),
+            radio = true,
+            checked_func = function() return Core.barelyThreshold(self.settings.barely_threshold) == t end,
+            callback = function()
+                self.settings.barely_threshold = t
+                self:saveSettings()
+                if shared.view then shared.view:setBarelyThreshold(t) end
+            end,
+        })
+    end
+    return {
+        text_func = function()
+            return T(_("Barely started: below %1 %"),
+                math.floor(Core.barelyThreshold(self.settings.barely_threshold) * 100 + 0.5))
+        end,
+        help_text = _("The Barely started filter shows books you have opened and read less than this much of. Books never opened are not included."),
+        sub_item_table = items,
+    }
+end
+
+--- Put (or take) our tab into the reader's top menu bar, just before the
+-- file browser tab. reader_menu_order is a cached module table, so this is
+-- idempotent: drop any earlier copy first.
+local READER_TAB_ID = "library_tab"
+local function placeReaderTab(enabled)
+    local ok, order = pcall(require, "ui/elements/reader_menu_order")
+    if not ok or type(order) ~= "table" then return end
+    local buttons = order["KOMenu:menu_buttons"]
+    if type(buttons) ~= "table" then return end
+    Core.placeMenuButton(buttons, READER_TAB_ID, "filemanager", enabled)
+    -- a top-level entry with no items: tapping it runs the callback
+    order[READER_TAB_ID] = enabled and {} or nil
+end
+
+function Library:addReaderTab(menu_items)
+    local enabled = self.settings.reader_tab ~= false
+    placeReaderTab(enabled)
+    if not enabled then return end
+    menu_items[READER_TAB_ID] = {
+        icon = "book.opened",
+        text = _("Library"), -- only shown if a custom menu order leaves the tab out
+        remember = false,
+        callback = function()
+            if self.ui.menu then self.ui.menu:onTapCloseMenu() end
+            -- let the menu close before the Library opens over the book
+            UIManager:nextTick(function() self:onShowLibrary() end)
+        end,
+    }
+end
 
 function Library:addToMainMenu(menu_items)
     menu_items.library = {
@@ -495,9 +670,38 @@ function Library:addToMainMenu(menu_items)
                     self:saveSettings()
                     shared.index = nil
                 end,
+                separator = true,
+            },
+            self:barelyMenu(),
+            {
+                text = _("Library tab in the reader menu"),
+                help_text = _("Show a Library tab (book icon) in the top menu bar while reading, next to the file browser tab."),
+                checked_func = function() return self.settings.reader_tab ~= false end,
+                callback = function()
+                    self.settings.reader_tab = self.settings.reader_tab == false
+                    self:saveSettings()
+                    -- the reader rebuilds its menu tabs the next time the menu opens
+                    if self.ui.document and self.ui.menu then self.ui.menu.tab_item_table = nil end
+                end,
+            },
+            {
+                text = _("Next in series skips finished books"),
+                help_text = _("Next in series opens the next book you have not finished. Turn this off to always open the very next book."),
+                checked_func = function() return self.settings.series_skip_finished ~= false end,
+                callback = function()
+                    self.settings.series_skip_finished = self.settings.series_skip_finished == false
+                    self:saveSettings()
+                end,
             },
         },
     }
+    if self.ui.document then
+        self:addReaderTab(menu_items)
+        -- inside a book: Next / Previous in series right under Open Library
+        local next_item, prev_item = self:seriesMenuItems()
+        table.insert(menu_items.library.sub_item_table, 2, next_item)
+        table.insert(menu_items.library.sub_item_table, 3, prev_item)
+    end
 end
 
 ----------------------------------------------------------------------------

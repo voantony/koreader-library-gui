@@ -24,6 +24,7 @@ local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
+local Core = require("librarycore")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -274,6 +275,16 @@ local function decorate(cover, w, h, book)
     return layers
 end
 
+--- "3 · Title" inside a series (when the book has a number), else the title.
+function M.bookTitle(book, series_number)
+    local title = book.title or book.name or ""
+    if series_number then
+        local n = Core.seriesNumber(book.series_index)
+        if n then return n .. " · " .. title end
+    end
+    return title
+end
+
 function M.statusLine(book)
     if book.status == "complete" then return _("Finished") end
     if book.status == "abandoned" then return _("On hold") end
@@ -298,6 +309,8 @@ local Tile = InputContainer:extend{
     on_tap = nil,
     on_hold = nil,
     one_line = false, -- title only under the cover
+    caption = nil,    -- second line instead of status/author (Continue reading)
+    series_number = false, -- "3 · Title" (inside a series)
 }
 M.Tile = Tile
 
@@ -351,8 +364,8 @@ function Tile:init()
         line2 = T(_("%1 books"), #self.group.books)
         if #self.group.books == 1 then line2 = _("1 book") end
     else
-        line1 = book.title
-        line2 = M.statusLine(book) or (book.authors and book.authors[1]) or ""
+        line1 = M.bookTitle(book, self.series_number)
+        line2 = self.caption or M.statusLine(book) or (book.authors and book.authors[1]) or ""
     end
     local label = VerticalGroup:new{
         align = "center",
@@ -443,6 +456,7 @@ local ListRow = InputContainer:extend{
     cover_cache = nil,
     on_tap = nil,
     on_hold = nil,
+    series_number = false, -- "3 · Title" (inside a series)
 }
 M.ListRow = ListRow
 
@@ -509,7 +523,7 @@ function ListRow:init()
         line1 = self.group.name
         line2 = #self.group.books == 1 and _("1 book") or T(_("%1 books"), #self.group.books)
     else
-        line1 = book.title
+        line1 = M.bookTitle(book, self.series_number)
         line2 = book.authors and table.concat(book.authors, ", ") or ""
         if book.series then
             local s = book.series
@@ -558,6 +572,7 @@ local Chip = InputContainer:extend{
     selected = false,
     callback = nil,
     width = nil,
+    max_text_w = nil, -- truncate long text (no fixed width)
 }
 M.Chip = Chip
 
@@ -566,7 +581,7 @@ function Chip:init()
     local fg = self.selected and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
     local bg = self.selected and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE
     local text = TextWidget:new{ text = self.text, face = f.chip, bold = self.selected, fgcolor = fg, bgcolor = bg,
-        max_width = self.width and (self.width - 2 * Size.padding.default) or nil }
+        max_width = self.width and (self.width - 2 * Size.padding.default) or self.max_text_w }
     local frame = FrameContainer:new{
         padding = Size.padding.small,
         padding_left = Size.padding.default,

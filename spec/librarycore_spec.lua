@@ -238,7 +238,7 @@ describe("Library core: grid, filters, search index, calibre, cache", function()
         eq(Core.filterStatus(books, "unread")[1].path, "/c")
         eq(Core.filterStatus(books, "reading")[1].path, "/b")
         eq(Core.filterStatus(books, "finished")[1].path, "/a")
-        same(Core.countFilters(books), { all = 4, unread = 1, reading = 1, finished = 1 })
+        same(Core.countFilters(books), { all = 4, unread = 1, reading = 1, barely = 0, finished = 1 })
     end)
 
     it("searches precomputed keys and narrows previous results", function()

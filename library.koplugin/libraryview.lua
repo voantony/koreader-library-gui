@@ -6,10 +6,16 @@ Layout, top to bottom:
     title bar        (menu, title, close -> file browser)
     search bar       (always visible InputText; filters as you type)
     tabs             Books | Collections | Authors | Series
-    status chips     All | Unread | Reading | Finished
-    continue reading (Books tab, no search or filter: books in progress)
+    status chips     All | Unread | Reading | Barely started | Finished
+    continue reading (Books tab, no search or filter: a Resume button and
+                     the books in progress, with percent and last-read time)
     cover grid or list
-    footer           page x of y, sort
+    footer           page x of y, sort (in a series: "2 of 5 read")
+
+Inside a series the books are in series order and numbered ("3 · Title").
+Paging past the last page (swipe or page key) opens the next series, and
+before the first page the previous one, so a whole shelf of series can be
+flipped through without going back to the list.
 
 The search bar is a real InputText embedded in this widget, not a popup:
 tapping it shows the on-screen keyboard and every keystroke re-filters the
@@ -58,6 +64,7 @@ local FILTER_NAMES = {
     all = _("All"),
     unread = _("Unread"),
     reading = _("Reading"),
+    barely = _("Barely started"),
     finished = _("Finished"),
 }
 
@@ -73,6 +80,7 @@ local LibraryView = InputContainer:extend{
     view_mode = "grid",     -- "grid" | "list"
     show_continue = true,   -- the Continue reading strip on the Books tab
     continue_slots = 5,
+    barely_threshold = 0.10, -- "Barely started": opened, below this fraction
 }
 
 local function lower(s) return util.stringLower and util.stringLower(s) or s:lower() end
@@ -105,7 +113,7 @@ function LibraryView:init()
     self.timings = {}
     self.label_h = Tiles.labelHeight()
     self.list_row_h = Tiles.listRowHeight()
-    self.continue_label_h = Tiles.labelHeight(true)
+    self.continue_label_h = Tiles.labelHeight()
     self.gap = Size.padding.default
 
     self:buildChrome()
@@ -202,9 +210,7 @@ function LibraryView:groupsFor(tab)
         end
         if tab == "series" then
             for _, g in ipairs(groups) do
-                table.sort(g.books, function(a, b)
-                    return (a.series_index or math.huge) < (b.series_index or math.huge)
-                end)
+                g.books = Core.seriesOrder(g.books, self.plugin.collate)
             end
         end
     end
@@ -227,13 +233,14 @@ end
 
 --- What the grid should show now: { kind = "books"|"groups", items = {...}, counts = }.
 function LibraryView:currentItems()
+    local th = self.barely_threshold
     if self.group then
         local books = self:searchBooks(self.group.books)
-        return { kind = "books", items = Core.filterStatus(books, self.filter), counts = Core.countFilters(books) }
+        return { kind = "books", items = Core.filterStatus(books, self.filter, th), counts = Core.countFilters(books, th) }
     end
     if self.tab == "books" or self.query ~= "" then
         local books = self:searchBooks(self.sorted)
-        return { kind = "books", items = Core.filterStatus(books, self.filter), counts = Core.countFilters(books) }
+        return { kind = "books", items = Core.filterStatus(books, self.filter, th), counts = Core.countFilters(books, th) }
     end
     return { kind = "groups", items = self:groupsFor(self.tab) }
 end
@@ -269,26 +276,35 @@ function LibraryView:buildTabs()
     }
 end
 
+local FILTER_SHORT = { barely = _("Barely") }
+
 function LibraryView:buildChips(counts)
-    local row = HorizontalGroup:new{ align = "center" }
-    if self.group then
-        table.insert(row, Tiles.Chip:new{
-            text = "\u{2190} " .. self.group.name,
-            callback = function() self:closeGroup() end,
-        })
-        table.insert(row, HorizontalSpan:new{ width = Size.padding.large })
+    local avail = self.width - 2 * Size.margin.default
+    -- Narrow screens: drop the counts of unselected filters, then shorten names.
+    local row
+    for compact = 0, 2 do
+        row = HorizontalGroup:new{ align = "center" }
+        if self.group then
+            table.insert(row, Tiles.Chip:new{
+                text = "\u{2190} " .. self.group.name,
+                max_text_w = math.floor(self.width * 0.22),
+                callback = function() self:closeGroup() end,
+            })
+            table.insert(row, HorizontalSpan:new{ width = Size.padding.large })
+        end
+        for i, f in ipairs(Core.FILTERS) do
+            if i > 1 then table.insert(row, HorizontalSpan:new{ width = Size.padding.small }) end
+            local selected = self.filter == f
+            local text = (compact >= 2 and FILTER_SHORT[f]) or FILTER_NAMES[f]
+            if counts and (compact == 0 or selected) then text = text .. " " .. (counts[f] or 0) end
+            table.insert(row, Tiles.Chip:new{
+                text = text,
+                selected = selected,
+                callback = function() self:setFilter(f) end,
+            })
+        end
+        if row:getSize().w <= avail then break end
     end
-    for i, f in ipairs(Core.FILTERS) do
-        if i > 1 then table.insert(row, HorizontalSpan:new{ width = Size.padding.small }) end
-        local text = FILTER_NAMES[f]
-        if counts then text = text .. " " .. (counts[f] or 0) end
-        table.insert(row, Tiles.Chip:new{
-            text = text,
-            selected = self.filter == f,
-            callback = function() self:setFilter(f) end,
-        })
-    end
-    -- keep the row within the screen if a long group name is shown
     return FrameContainer:new{
         padding = 0,
         padding_left = Size.margin.default,
@@ -303,6 +319,12 @@ function LibraryView:buildFooter(page, pages, total, kind)
     local f = Font:getFace("cfont", 15)
     local left = kind == "books" and T(_("%1 books · %2"), total, self.plugin:sortName(self.sort))
         or T(_("%1 groups"), total)
+    if self:inSeries() then
+        local pr = Core.seriesProgress(self.group.books)
+        left = T(_("%1 of %2 read"), pr.read, pr.total)
+        local pos, count = self:seriesPosition()
+        if pos then left = left .. " · " .. T(_("series %1 of %2 · swipe on for the next"), pos, count) end
+    end
     local text = TextWidget:new{ text = left, face = f, fgcolor = Blitbuffer.COLOR_GRAY_3 }
     local pager = TextWidget:new{ text = T(_("‹  %1 / %2  ›"), page, pages), face = f, bold = true }
     local h = math.max(text:getSize().h, pager:getSize().h) + Size.padding.small
@@ -337,6 +359,7 @@ function LibraryView:buildGrid(items, kind, layout, height)
                 cover_h = layout.cover_h,
                 book = kind == "books" and item or nil,
                 group = kind == "groups" and item or nil,
+                series_number = kind == "books" and self:inSeries(),
                 covers = self.covers,
                 cover_cache = self.cover_cache,
                 on_tap = function(t) self:onTileTap(t) end,
@@ -381,6 +404,7 @@ function LibraryView:buildList(items, kind, layout, height)
             thumb_h = layout.thumb_h,
             book = kind == "books" and item or nil,
             group = kind == "groups" and item or nil,
+            series_number = kind == "books" and self:inSeries(),
             covers = self.covers,
             cover_cache = self.cover_cache,
             on_tap = function(t) self:onTileTap(t) end,
@@ -406,24 +430,58 @@ function LibraryView:buildList(items, kind, layout, height)
     }
 end
 
---- The Continue reading strip: a heading and up to `slots` large covers.
-function LibraryView:buildContinue(books, cl)
+--- "43 % · 3 h ago" under a Continue reading cover.
+function LibraryView:resumeCaption(book, now)
+    local parts = {}
+    local pct = Core.percentText(book.percent)
+    if pct then parts[#parts + 1] = pct end
+    local ago = Core.relativeTime(book.last_opened, now or os.time())
+    if not ago and book.last_opened then ago = os.date("%d %b", book.last_opened) end
+    if ago then parts[#parts + 1] = ago end
+    return table.concat(parts, " · ")
+end
+
+--- The strip's heading: "Continue reading" and a one-tap Resume button for
+-- the most recently read book (the first cover).
+function LibraryView:buildContinueHeader(book)
     local f = Font:getFace("cfont", 15)
-    local header = FrameContainer:new{
+    local label = TextWidget:new{ text = _("Continue reading"), face = f, bold = true }
+    local row = HorizontalGroup:new{ align = "center", label }
+    self.resume_chip = nil
+    if book then
+        local pct = Core.percentText(book.percent)
+        local avail = self.width - 2 * (Size.margin.default + self.gap) - label:getSize().w - Size.padding.large
+        local chip = Tiles.Chip:new{
+            text = "\u{25B6} " .. T(_("Resume %1"), book.title or book.name) .. (pct and ("  " .. pct) or ""),
+            selected = true,
+            max_text_w = math.max(50, avail - 2 * Size.padding.default - 2 * Size.border.thin),
+            callback = function() self:onResume() end,
+        }
+        self.resume_chip = chip
+        table.insert(row, HorizontalSpan:new{ width = math.max(Size.padding.large, avail - chip:getSize().w) })
+        table.insert(row, chip)
+    end
+    return FrameContainer:new{
         padding = 0,
         padding_left = Size.margin.default + self.gap,
         padding_top = Size.padding.small,
         bordersize = 0,
-        TextWidget:new{ text = _("Continue reading"), face = f, bold = true },
+        row,
     }
+end
+
+--- The Continue reading strip: a heading with Resume, and up to `slots` large covers.
+function LibraryView:buildContinue(books, cl)
+    local header = self:buildContinueHeader(books[1])
     local row = HorizontalGroup:new{ align = "top", HorizontalSpan:new{ width = self.gap } }
     self.continue_tiles = {}
+    local now = os.time()
     for i = 1, cl.count do
         local tile = Tiles.Tile:new{
             width = cl.slot_w,
             height = cl.tile_h,
             cover_h = cl.cover_h,
-            one_line = true,
+            caption = self:resumeCaption(books[i], now),
             book = books[i],
             covers = self.covers,
             cover_cache = self.cover_cache,
@@ -445,7 +503,8 @@ end
 function LibraryView:continueHeaderHeight()
     if not self._continue_header_h then
         local t = TextWidget:new{ text = "Ag", face = Font:getFace("cfont", 15), bold = true }
-        self._continue_header_h = t:getSize().h + Size.padding.small
+        local chip = Tiles.Chip:new{ text = "Ag" }
+        self._continue_header_h = math.max(t:getSize().h, chip:getSize().h) + Size.padding.small
         t:free()
     end
     return self._continue_header_h
@@ -688,6 +747,46 @@ function LibraryView:onLeftIcon()
     self.plugin:showLibraryMenu(self)
 end
 
+--- True inside a series opened from the Series tab.
+function LibraryView:inSeries()
+    return self.group ~= nil and self.group.kind == "series"
+end
+
+--- Position of the open series among the Series tab's groups: pos, count.
+function LibraryView:seriesPosition()
+    if not self:inSeries() then return nil end
+    local groups = self:groupsFor("series")
+    for i, g in ipairs(groups) do
+        if g.name == self.group.name then return i, #groups end
+    end
+    return nil, #groups
+end
+
+--- Open the next (dir = 1) or previous (-1) series in place. Returns true
+-- when there was one. Lands on the first page going forward and on the
+-- last page going back, so paging feels continuous.
+function LibraryView:stepSeries(dir)
+    local pos = self:seriesPosition()
+    if not pos then return false end
+    local groups = self:groupsFor("series")
+    local g = groups[pos + dir]
+    if not g then return false end
+    self.group = g
+    self.page = dir > 0 and 1 or math.huge
+    self:refreshBody(true)
+    return true
+end
+
+--- One page forward or back; in a series, past either end steps to the
+-- neighbouring series instead of wrapping.
+function LibraryView:turnPage(dir, wrap)
+    if not self.pages then return end
+    local target = self.page + dir
+    if target >= 1 and target <= self.pages then return self:goToPage(target) end
+    if self:inSeries() and self:stepSeries(dir) then return end
+    if wrap then self:goToPage(dir > 0 and 1 or self.pages) end
+end
+
 function LibraryView:goToPage(page)
     if not self.pages then return end
     page = math.max(1, math.min(page, self.pages))
@@ -696,15 +795,15 @@ function LibraryView:goToPage(page)
     self:refreshBody()
 end
 
-function LibraryView:onNextPage() self:goToPage(self.page + 1); return true end
-function LibraryView:onPrevPage() self:goToPage(self.page - 1); return true end
+function LibraryView:onNextPage() self:turnPage(1); return true end
+function LibraryView:onPrevPage() self:turnPage(-1); return true end
 
 function LibraryView:onSwipe(_, ges)
     local dir = ges.direction
     if dir == "west" or dir == "north" then
-        self:goToPage(self.page < self.pages and self.page + 1 or 1)
+        self:turnPage(1, true)
     elseif dir == "east" or dir == "south" then
-        self:goToPage(self.page > 1 and self.page - 1 or self.pages)
+        self:turnPage(-1, true)
     else
         return false
     end
@@ -718,6 +817,18 @@ function LibraryView:onTileTap(tile)
     else
         self.plugin:openBook(tile.book.path, self)
     end
+end
+
+function LibraryView:onResume()
+    self:keyboardGuard()
+    local book = self.continue_books and self.continue_books[1] or Core.resumeBook(self.all_books)
+    if book then self.plugin:openBook(book.path, self) end
+end
+
+function LibraryView:setBarelyThreshold(t)
+    self.barely_threshold = Core.barelyThreshold(t)
+    self.page = 1
+    self:refreshBody(true)
 end
 
 function LibraryView:onTileHold(tile)

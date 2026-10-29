@@ -406,7 +406,7 @@ end
 -- Status filters (the chips under the search bar)
 ----------------------------------------------------------------------------
 
-Core.FILTERS = { "all", "unread", "reading", "finished" }
+Core.FILTERS = { "all", "unread", "reading", "barely", "finished" }
 
 local FILTER_STATUS = {
     unread = { new = true },
@@ -414,21 +414,52 @@ local FILTER_STATUS = {
     finished = { complete = true },
 }
 
-function Core.filterStatus(books, filter)
+--- Thresholds offered for "Barely started" (fractions of the book).
+Core.BARELY_THRESHOLDS = { 0.05, 0.10, 0.20, 0.25 }
+Core.BARELY_DEFAULT = 0.10
+
+--- A saved threshold, or the default when it is not one of the offered values.
+function Core.barelyThreshold(v)
+    v = tonumber(v)
+    for _, t in ipairs(Core.BARELY_THRESHOLDS) do
+        if v and math.abs(v - t) < 1e-9 then return t end
+    end
+    return Core.BARELY_DEFAULT
+end
+
+--- Opened, read past 0 % and below `threshold`, and not marked finished.
+-- Never-opened books have no percent (no sidecar), so they never count.
+function Core.isBarelyStarted(book, threshold)
+    local p = tonumber(book.percent)
+    if not p or p <= 0 then return false end
+    if book.status == "complete" or book.status == "new" then return false end
+    return p < Core.barelyThreshold(threshold)
+end
+
+local function wants(filter, book, threshold)
+    if filter == "barely" then return Core.isBarelyStarted(book, threshold) end
     local wanted = FILTER_STATUS[filter]
-    if not wanted then return books end
+    return wanted ~= nil and wanted[book.status or "new"] == true
+end
+
+--- Books matching a filter chip. `threshold` is for "barely".
+function Core.filterStatus(books, filter, threshold)
+    if filter ~= "barely" and not FILTER_STATUS[filter] then return books end
     local out = {}
     for _, b in ipairs(books) do
-        if wanted[b.status or "new"] then table.insert(out, b) end
+        if wants(filter, b, threshold) then table.insert(out, b) end
     end
     return out
 end
 
-function Core.countFilters(books)
-    local counts = { all = #books, unread = 0, reading = 0, finished = 0 }
+function Core.countFilters(books, threshold)
+    local counts = { all = #books }
+    for _, f in ipairs(Core.FILTERS) do
+        if f ~= "all" then counts[f] = 0 end
+    end
     for _, b in ipairs(books) do
-        for f, wanted in pairs(FILTER_STATUS) do
-            if wanted[b.status or "new"] then counts[f] = counts[f] + 1 end
+        for _, f in ipairs(Core.FILTERS) do
+            if f ~= "all" and wants(f, b, threshold) then counts[f] = counts[f] + 1 end
         end
     end
     return counts
@@ -624,6 +655,114 @@ function Core.continueLayout(width, body_h, n_books, label_h, header_h, gap, opt
     }
 end
 
+--- The book to resume: the most recently opened book still being read.
+function Core.resumeBook(books)
+    return Core.continueReading(books, 1)[1]
+end
+
+--- "just now", "5 min ago", "3 h ago", "yesterday", "4 days ago", or nil
+-- (no time, or older than `max_days`, default 30: the caller shows a date).
+function Core.relativeTime(ts, now, max_days)
+    ts, now = tonumber(ts), tonumber(now)
+    if not ts or not now or ts <= 0 then return nil end
+    local d = math.max(0, now - ts)
+    if d < 60 then return "just now" end
+    if d < 3600 then return string.format("%d min ago", math.floor(d / 60)) end
+    if d < 86400 then return string.format("%d h ago", math.floor(d / 3600)) end
+    local days = math.floor(d / 86400)
+    if days == 1 then return "yesterday" end
+    if days <= (max_days or 30) then return string.format("%d days ago", days) end
+    return nil
+end
+
+--- Whole percent read, e.g. 0.426 -> 43. nil without a percent.
+function Core.percentText(p)
+    p = tonumber(p)
+    if not p then return nil end
+    return string.format("%d %%", math.floor(math.max(0, math.min(1, p)) * 100 + 0.5))
+end
+
+----------------------------------------------------------------------------
+-- Series
+----------------------------------------------------------------------------
+
+--- "3", "2.5" or nil.
+function Core.seriesNumber(idx)
+    idx = tonumber(idx)
+    if not idx then return nil end
+    if idx == math.floor(idx) then return string.format("%d", idx) end
+    return (string.format("%.2f", idx):gsub("0+$", ""):gsub("%.$", ""))
+end
+
+--- A series' books in reading order: by series_index; books without one
+-- go last, by title (then path, so the order is stable).
+function Core.seriesOrder(books, collate)
+    local copy = {}
+    for i, b in ipairs(books) do copy[i] = b end
+    table.sort(copy, function(a, b)
+        local ai, bi = tonumber(a.series_index), tonumber(b.series_index)
+        if ai and bi and ai ~= bi then return ai < bi end
+        if ai and not bi then return true end
+        if bi and not ai then return false end
+        local at, bt = a.title or a.name or "", b.title or b.name or ""
+        if at ~= bt then return cmpText(at, bt, collate) end
+        return (a.path or "") < (b.path or "")
+    end)
+    return copy
+end
+
+--- Every book of `series`, in reading order.
+function Core.seriesBooks(books, series, collate)
+    local out = {}
+    if not series then return out end
+    for _, b in ipairs(books) do
+        if b.series == series then out[#out + 1] = b end
+    end
+    return Core.seriesOrder(out, collate)
+end
+
+--- `{ read = finished books, total = books }` for a series.
+function Core.seriesProgress(books)
+    local read = 0
+    for _, b in ipairs(books) do
+        if b.status == "complete" then read = read + 1 end
+    end
+    return { read = read, total = #books }
+end
+
+--- Which book to open after (`dir` = 1) or before (`dir` = -1) `current`
+-- in its series. `ordered` is Core.seriesOrder output and holds `current`
+-- (matched by path).
+-- Next: the first later book that is not finished; if every later book is
+-- finished, simply the next one. Previous: the one just before.
+-- Copies of the current book (same series number, e.g. an EPUB and a PDF)
+-- are skipped. Returns nil at either end, or when `current` is not there.
+-- `opts.skip_finished = false` makes Next the plain next book.
+function Core.seriesNeighbour(ordered, current, dir, opts)
+    if not current then return nil end
+    local pos
+    for i, b in ipairs(ordered) do
+        if b.path == current.path then pos = i; break end
+    end
+    if not pos then return nil end
+    local cur_idx = tonumber(current.series_index)
+    local function same_number(b)
+        return cur_idx ~= nil and tonumber(b.series_index) == cur_idx
+    end
+    local first
+    local i = pos + dir
+    while ordered[i] do
+        local b = ordered[i]
+        if not same_number(b) then
+            if dir < 0 then return b end
+            first = first or b
+            if b.status ~= "complete" or (opts and opts.skip_finished == false) then return b end
+        end
+        i = i + dir
+    end
+    return first
+end
+
 ----------------------------------------------------------------------------
 -- Calibre metadata (metadata.calibre written by calibre or the Calibre plugin)
 ----------------------------------------------------------------------------
@@ -778,6 +917,21 @@ function Core.deserialize(source)
     local ok, data = pcall(fn)
     if ok and type(data) == "table" then return data end
     return nil
+end
+
+--- Put `id` into a menu-order list just before `before` (at the end when
+-- `before` is missing), or take it out when not `enabled`. Idempotent.
+function Core.placeMenuButton(buttons, id, before, enabled)
+    for i = #buttons, 1, -1 do
+        if buttons[i] == id then table.remove(buttons, i) end
+    end
+    if not enabled then return buttons end
+    local at = #buttons + 1
+    for i, v in ipairs(buttons) do
+        if v == before then at = i; break end
+    end
+    table.insert(buttons, at, id)
+    return buttons
 end
 
 return Core

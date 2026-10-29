@@ -46,14 +46,26 @@ Updating works the same way: replace the `library.koplugin` folder with the new 
 - **Search bar, always on screen.** It is part of the Library screen, not a pop-up. Tap it and type: results update as you type, matching title, author, series and file name. Every word must match, case is ignored, and a search for `jane aus` finds *Jane Austen*. Searching runs on an in-memory index, waits 150 ms after the last key and redraws only the grid area below the bar. Tap **Enter** or anywhere outside the keyboard to hide the keyboard and keep the results. Tap **✕** to clear.
 - **Cover grid** with a reading-progress bar and the percentage read, a **✓** on finished books, **NEW** on books you haven't opened and **on hold** on abandoned ones. Books with no cover yet get a plain placeholder with the title until the cover is extracted.
 - **List view.** ☰ → **View: List** shows one book per row: a small cover, the title, the author (and series), and on the right the percentage read with a bar, or **✓**, **NEW** or **on hold**. About 9 rows fit on a page on a Kindle Colorsoft (up to 10 on bigger screens). Tap a row to open the book; long-press it for the same menu as on a cover. Collections, Authors and Series show one group per row with its book count. ☰ → **View: Grid** switches back.
-- **Continue reading.** At the top of the Books tab, a row of up to five larger covers shows the books you're reading, most recently opened first, each with its progress bar. Tap one to pick up where you left off. The row hides while you search, when a filter other than *All* is selected, while the keyboard is up, and when nothing is in progress. Turn it off with ☰ → **Show Continue reading**.
+- **Continue reading.** At the top of the Books tab, a row of up to five larger covers shows the books you're reading, most recently opened first, each with its progress bar and a caption such as *43 % · 3 h ago* (older than a month: the date). Tap one to pick up where you left off: the book opens on the page you were on, not page 1. The **▶ Resume *title* 43 %** button next to the heading opens the most recent one in one tap. The row hides while you search, when a filter other than *All* is selected, while the keyboard is up, and when nothing is in progress. Turn it off with ☰ → **Show Continue reading**.
 - **Sort**: Recent (last opened; the default), Title, Author, Series, Date added.
 - **Tabs**: Books · Collections · Authors · Series. Opening a group shows its books, with a **← group** chip to go back.
-- **Filters**: All / Unread / Reading / Finished, each with a count. On-hold books appear only under *All*.
+- **Series.** Opening a series lists its books in series order, each titled with its number (*3 · Ozma of Oz*); books without a number come last, by title. The footer shows how far you are (*2 of 7 read · series 5 of 10*). Swiping past the last page of a series opens the next series, and swiping back past the first page opens the previous one, so you can page through all your series without going back to the list.
+- **Next in series, from inside a book.** ☰ → Library shows **Next in series: 4 · Dorothy and the Wizard in Oz** and **Previous in series: 2 · …** while you read a book that is part of a series. *Next* skips books you have already finished (turn that off in ☰ → Library); if every later book is finished it opens the very next one. Books open where you left off.
+- **Library tab in the reader menu.** While reading, the top menu bar has a Library tab (the open-book icon, next to the file browser's folder). Tap the top of the screen, then the icon, and the Library opens over the book. Turn it off with ☰ → Library → **Library tab in the reader menu**.
+- **Filters**: All / Unread / Reading / Barely started / Finished, each with a count. On-hold books appear only under *All*. **Barely started** shows books you have opened but read less than 10 % of (5, 10, 20 or 25 %; set it in ☰ → Library or the Library's ☰ menu). Books you have never opened, and books at 0 %, are not included. On narrow screens the chips drop the counts of the unselected filters to fit.
 - **Long-press a book** to set its status, show its folder, view book information or open it.
 - **Swipe** left and right, or use the page keys, to turn pages. The **‹ 1 / 25 ›** buttons do the same.
 - **Startup**: optionally show the Library instead of the file browser when KOReader starts, and go back to it after closing a book. Closing the Library (✕) always takes you to the normal file browser, so it is a safe fallback.
-- **Gestures**: *Library*, *Search library* and *Rescan library* are actions you can assign under *Taps and gestures*.
+- **Gestures**: these actions can be assigned under *Taps and gestures*:
+
+  | Action | Where | What it does |
+  |---|---|---|
+  | Library (`library_show`) | everywhere | Open the Library |
+  | Search library (`library_search`) | everywhere | Open the Library with the keyboard up |
+  | Resume last book (`library_resume`) | everywhere | Open the most recently read unfinished book where you left off |
+  | Rescan library (`library_rescan`) | everywhere | Re-read the library folder |
+  | Next in series (`library_next_in_series`) | while reading | Open the next unread book of this book's series (or the very next one, see above) |
+  | Previous in series (`library_prev_in_series`) | while reading | Open the book before this one in its series |
 
 ### Where the metadata comes from
 
@@ -103,6 +115,9 @@ You can change these under ☰ → Library, or with the ☰ button in the Librar
 | Columns | 4 (3–6) |
 | Library folder | KOReader home folder |
 | Include hidden folders | off |
+| Barely started: below | 10 % (5 / 10 / 20 / 25 %) |
+| Library tab in the reader menu | on |
+| Next in series skips finished books | on |
 
 Settings are stored in `settings.reader.lua` under the key `library_plugin`.
 
