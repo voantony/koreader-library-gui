@@ -201,7 +201,7 @@ function Library:getCollections()
         return a < b
     end)
     local groups = {}
-    for _, name in ipairs(names) do
+    for _i, name in ipairs(names) do
         local items = ReadCollection.getOrderedCollection and ReadCollection:getOrderedCollection(name) or {}
         local books = {}
         for _, item in ipairs(items) do
@@ -352,7 +352,7 @@ function Library:showLibraryMenu(view)
             end,
         })
     end
-    for _, n in ipairs({ 3, 4, 5, 6 }) do
+    for _i, n in ipairs({ 3, 4, 5, 6 }) do
         table.insert(col_row, {
             text = (self.settings.columns == n and "✓ " or "") .. T(_("%1 columns"), n),
             callback = function()
