@@ -512,8 +512,11 @@ function Core.page(list, per_page, page)
 end
 
 --- How many columns/rows of tiles fit. Covers keep a 2:3 aspect ratio.
-function Core.gridLayout(width, height, cols, label_h, gap)
+-- `min_ratio` (default 0.7) is how much smaller covers may get to fit one
+-- more row.
+function Core.gridLayout(width, height, cols, label_h, gap, min_ratio)
     cols = math.max(1, cols)
+    min_ratio = min_ratio or 0.7
     gap = gap or 0
     local tile_w = math.floor((width - gap * (cols + 1)) / cols)
     local cover_h = math.floor(tile_w * 1.5)
@@ -523,7 +526,7 @@ function Core.gridLayout(width, height, cols, label_h, gap)
     -- a fuller page beats big covers and a blank strip at the bottom.
     local more = rows + 1
     local cover_more = math.floor((height - gap) / more) - gap - label_h
-    if cover_more >= 0.7 * cover_h then
+    if cover_more >= min_ratio * cover_h then
         rows, cover_h = more, cover_more
         tile_h = cover_h + label_h
     end
@@ -533,6 +536,92 @@ function Core.gridLayout(width, height, cols, label_h, gap)
         cover_h = tile_h - label_h
     end
     return { cols = cols, rows = rows, tile_w = tile_w, tile_h = tile_h, cover_h = cover_h, per_page = cols * rows }
+end
+
+--- How many list rows fit, one book (or group) per row.
+-- `min_row_h` is the smallest row that fits the text; rows are stretched to
+-- fill the height exactly so the footer stays put. The thumbnail keeps the
+-- 2:3 cover ratio inside the row's padding. `opts.max_rows` caps the rows
+-- (taller rows instead of a crowded page on big screens).
+-- @treturn table `{ rows, row_h, thumb_w, thumb_h, per_page }`
+function Core.listLayout(height, min_row_h, pad, opts)
+    pad = pad or 0
+    min_row_h = math.max(1, min_row_h)
+    local rows = math.max(1, math.floor(height / min_row_h))
+    if opts and opts.max_rows then rows = math.min(rows, opts.max_rows) end
+    local row_h = math.max(min_row_h, math.floor(height / rows))
+    if rows == 1 then row_h = math.max(1, math.min(row_h, height)) end
+    local thumb_h = math.max(1, row_h - 2 * pad)
+    local thumb_w = math.max(1, math.floor(thumb_h * 2 / 3 + 0.5))
+    return { rows = rows, row_h = row_h, thumb_w = thumb_w, thumb_h = thumb_h, per_page = rows }
+end
+
+Core.VIEWS = { "grid", "list" }
+
+--- A saved view mode, falling back to "grid".
+function Core.viewMode(v)
+    if v == "list" then return "list" end
+    return "grid"
+end
+
+----------------------------------------------------------------------------
+-- Continue reading
+----------------------------------------------------------------------------
+
+--- Books being read (status "reading"), most recently opened first.
+-- Finished, on-hold and unread books are left out. Books with no history
+-- entry come after opened ones, then by file date.
+function Core.continueReading(books, n)
+    local picked = {}
+    for _, b in ipairs(books) do
+        if b.status == "reading" then picked[#picked + 1] = b end
+    end
+    table.sort(picked, Core.comparator("recent"))
+    local out = {}
+    for i = 1, math.min(n or 5, #picked) do out[i] = picked[i] end
+    return out
+end
+
+--- Whether the Continue reading strip belongs on screen now.
+-- @tparam table state `{ enabled, tab, group, query, filter, keyboard }`
+function Core.showContinue(state)
+    if not state.enabled then return false end
+    if state.tab ~= "books" or state.group then return false end
+    if state.query and state.query:match("%S") then return false end
+    if state.filter and state.filter ~= "all" then return false end
+    if state.keyboard then return false end
+    return true
+end
+
+--- Size the Continue reading strip.
+-- `body_h` is the height of the grid area before the strip takes its share;
+-- `label_h` is the text under each cover and `header_h` the strip's heading.
+-- Up to `slots` equal slots across the width; covers are 2:3.
+-- Returns nil when there is nothing to show or when the books below would
+-- be left less than `min_rest` pixels.
+-- @treturn table `{ count, slots, slot_w, cover_h, tile_h, height }`
+function Core.continueLayout(width, body_h, n_books, label_h, header_h, gap, opts)
+    opts = opts or {}
+    local slots = opts.slots or 5
+    local frac = opts.frac or 0.22
+    local min_rest = opts.min_rest or 0
+    gap = gap or 0
+    if n_books <= 0 then return nil end
+    local slot_w = math.floor((width - gap * (slots + 1)) / slots)
+    -- cover height: a share of the body, but never wider than the slot allows
+    local cover_h = math.min(math.floor(body_h * frac), math.floor(slot_w * 1.5))
+    if cover_h < 2 * label_h then return nil end
+    local tile_h = cover_h + label_h
+    local height = header_h + tile_h + gap
+    if body_h - height < min_rest then return nil end
+    return {
+        count = math.min(n_books, slots),
+        slots = slots,
+        slot_w = slot_w,
+        cover_h = cover_h,
+        tile_h = tile_h,
+        height = height,
+    }
 end
 
 ----------------------------------------------------------------------------

@@ -10,8 +10,12 @@ local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local LeftContainer = require("ui/widget/container/leftcontainer")
+local LineWidget = require("ui/widget/linewidget")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local ProgressWidget = require("ui/widget/progresswidget")
 local Size = require("ui/size")
@@ -125,11 +129,13 @@ local function getFaces()
 end
 M.getFaces = getFaces
 
-function M.labelHeight()
+--- Height of the text under a cover: title and a second line, or the
+-- title only when `one_line` (Continue reading, where the bar shows progress).
+function M.labelHeight(one_line)
     local f = getFaces()
     local t = TextWidget:new{ text = "Ag", face = f.title, bold = true }
     local s = TextWidget:new{ text = "Ag", face = f.sub }
-    local h = t:getSize().h + s:getSize().h + Size.padding.small
+    local h = t:getSize().h + (one_line and 0 or s:getSize().h) + Size.padding.small
     t:free(); s:free()
     return h
 end
@@ -261,6 +267,7 @@ local Tile = InputContainer:extend{
     cover_cache = nil,
     on_tap = nil,
     on_hold = nil,
+    one_line = false, -- title only under the cover
 }
 M.Tile = Tile
 
@@ -320,8 +327,11 @@ function Tile:init()
     local label = VerticalGroup:new{
         align = "center",
         TextWidget:new{ text = line1 or "", face = f.title, bold = true, max_width = self.width - 2 * pad },
-        TextWidget:new{ text = line2, face = f.sub, max_width = self.width - 2 * pad, fgcolor = Blitbuffer.COLOR_GRAY_3 },
     }
+    if not self.one_line then
+        table.insert(label, TextWidget:new{ text = line2, face = f.sub, max_width = self.width - 2 * pad,
+            fgcolor = Blitbuffer.COLOR_GRAY_3 })
+    end
     self[1] = VerticalGroup:new{
         align = "center",
         VerticalSpan:new{ width = pad },
@@ -351,6 +361,163 @@ function Tile:onHoldTile()
     if self.on_hold then self.on_hold(self) end
     return true
 end
+
+----------------------------------------------------------------------------
+-- List row (list view): thumbnail, title, author, status on the right
+----------------------------------------------------------------------------
+
+--- Smallest row that fits the two text lines with padding.
+function M.listRowHeight()
+    local f = getFaces()
+    local t = TextWidget:new{ text = "Ag", face = f.title, bold = true }
+    local s = TextWidget:new{ text = "Ag", face = f.sub }
+    local h = t:getSize().h + s:getSize().h + Size.padding.small + 2 * Size.padding.default + Size.line.thin
+    t:free(); s:free()
+    return h
+end
+
+--- Right-hand status: a pill for finished / new / on hold, else "42 %" over a bar.
+local function rowStatus(book, w)
+    if book.status == "complete" then return pill("\u{2713}", true) end
+    if book.status == "new" then return pill(_("NEW"), false) end
+    if book.status == "abandoned" then return pill(_("on hold"), false) end
+    if book.percent then
+        local f = getFaces()
+        return VerticalGroup:new{
+            align = "right",
+            TextWidget:new{ text = T(_("%1 %"), math.floor(book.percent * 100 + 0.5)), face = f.title, bold = true },
+            VerticalSpan:new{ width = Size.padding.small },
+            ProgressWidget:new{
+                width = w,
+                height = Screen:scaleBySize(6),
+                percentage = book.percent,
+                margin_h = 0, margin_v = 0,
+                bordersize = Size.border.thin,
+                radius = 0,
+                fillcolor = Blitbuffer.COLOR_BLACK,
+                bgcolor = Blitbuffer.COLOR_WHITE,
+            },
+        }
+    end
+    return nil
+end
+
+local ListRow = InputContainer:extend{
+    width = nil,
+    height = nil,
+    thumb_w = nil,
+    thumb_h = nil,
+    book = nil,
+    group = nil,
+    bim = nil,
+    cover_cache = nil,
+    on_tap = nil,
+    on_hold = nil,
+}
+M.ListRow = ListRow
+
+function ListRow:init()
+    self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
+    self.ges_events = {
+        TapTile = { GestureRange:new{ ges = "tap", range = self.dimen } },
+        HoldTile = { GestureRange:new{ ges = "hold", range = self.dimen } },
+    }
+    local f = getFaces()
+    local margin = Size.margin.default
+    local pad = Size.padding.default
+    local book = self.book or (self.group and self.group.cover_book)
+    local line = Size.line.thin
+    local inner_h = self.height - line
+
+    -- thumbnail (cover or placeholder), centred in a fixed box
+    local tw, th = self.thumb_w, math.min(self.thumb_h, inner_h - 2 * Size.padding.small)
+    tw = math.min(tw, math.floor(th * 2 / 3 + 0.5))
+    local bb, known
+    if book then
+        bb, known = M.getCover(self.cover_cache, self.bim, book.path, tw - 2 * Size.border.thin, th - 2 * Size.border.thin)
+    end
+    self.needs_cover = book and not known and self.bim ~= nil
+    local thumb
+    if bb then
+        thumb = FrameContainer:new{ padding = 0, bordersize = Size.border.thin,
+            ImageWidget:new{ image = bb, image_disposable = false, width = bb:getWidth(), height = bb:getHeight() } }
+    else
+        thumb = FrameContainer:new{
+            width = tw, height = th, padding = 0,
+            bordersize = Size.border.thin,
+            background = Blitbuffer.COLOR_GRAY_E,
+            CenterContainer:new{
+                dimen = Geom:new{ w = tw - 2 * Size.border.thin, h = th - 2 * Size.border.thin },
+                TextWidget:new{
+                    text = ((self.group and self.group.name or book and book.title or "?")
+                        :match("^[%z\1-\127\194-\244][\128-\191]*") or "?"):upper(),
+                    face = f.placeholder_title, bold = true, bgcolor = Blitbuffer.COLOR_GRAY_E,
+                },
+            },
+        }
+    end
+    local thumb_box = CenterContainer:new{ dimen = Geom:new{ w = self.thumb_w, h = inner_h }, thumb }
+
+    -- right column
+    local right
+    local right_w = Screen:scaleBySize(70)
+    if self.group then
+        right = pill(tostring(#self.group.books), true)
+    else
+        right = rowStatus(book, right_w)
+    end
+    local right_box = LeftContainer:new{ dimen = Geom:new{ w = right_w, h = inner_h },
+        right and FrameContainer:new{ padding = 0, bordersize = 0,
+            -- right-align inside the column
+            padding_left = math.max(0, right_w - right:getSize().w), right } or VerticalSpan:new{ width = 0 } }
+
+    -- text column
+    local text_w = self.width - 2 * margin - self.thumb_w - 2 * pad - right_w
+    -- Two lines: the status is in the right-hand column.
+    local line1, line2
+    if self.group then
+        line1 = self.group.name
+        line2 = #self.group.books == 1 and _("1 book") or T(_("%1 books"), #self.group.books)
+    else
+        line1 = book.title
+        line2 = book.authors and table.concat(book.authors, ", ") or ""
+        if book.series then
+            local s = book.series
+            if book.series_index then s = s .. " #" .. (tostring(book.series_index):gsub("%.0$", "")) end
+            line2 = line2 ~= "" and (line2 .. " · " .. s) or s
+        end
+    end
+    local texts = VerticalGroup:new{
+        align = "left",
+        TextWidget:new{ text = line1 or "", face = f.title, bold = true, max_width = text_w },
+        VerticalSpan:new{ width = Size.padding.small },
+        TextWidget:new{ text = line2 or "", face = f.sub, max_width = text_w, fgcolor = Blitbuffer.COLOR_GRAY_3 },
+    }
+    local text_box = LeftContainer:new{ dimen = Geom:new{ w = text_w, h = inner_h }, texts }
+
+    self[1] = VerticalGroup:new{
+        align = "left",
+        HorizontalGroup:new{
+            align = "center",
+            HorizontalSpan:new{ width = margin },
+            thumb_box,
+            HorizontalSpan:new{ width = pad },
+            text_box,
+            HorizontalSpan:new{ width = pad },
+            right_box,
+            HorizontalSpan:new{ width = margin },
+        },
+        LineWidget:new{
+            background = Blitbuffer.COLOR_GRAY_9,
+            dimen = Geom:new{ w = self.width, h = line },
+        },
+    }
+end
+
+ListRow.getSize = Tile.getSize
+ListRow.paintTo = Tile.paintTo
+ListRow.onTapTile = Tile.onTapTile
+ListRow.onHoldTile = Tile.onHoldTile
 
 ----------------------------------------------------------------------------
 -- Chip (tabs and status filters)

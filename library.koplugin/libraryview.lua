@@ -7,7 +7,8 @@ Layout, top to bottom:
     search bar       (always visible InputText; filters as you type)
     tabs             Books | Collections | Authors | Series
     status chips     All | Unread | Reading | Finished
-    cover grid
+    continue reading (Books tab, no search or filter: books in progress)
+    cover grid or list
     footer           page x of y, sort
 
 The search bar is a real InputText embedded in this widget, not a popup:
@@ -68,6 +69,9 @@ local LibraryView = InputContainer:extend{
     sort = "recent",
     tab = "books",
     filter = "all",
+    view_mode = "grid",     -- "grid" | "list"
+    show_continue = true,   -- the Continue reading strip on the Books tab
+    continue_slots = 5,
 }
 
 local function lower(s) return util.stringLower and util.stringLower(s) or s:lower() end
@@ -87,12 +91,16 @@ function LibraryView:init()
             PrevPage = { { Device.input.group.PgBack } },
         }
     end
-    self.cover_cache = Tiles.newCoverCache(self.cols * 6 * 3)
+    self.view_mode = Core.viewMode(self.view_mode)
+    -- grid pages, list thumbnails and the Continue reading covers
+    self.cover_cache = Tiles.newCoverCache(self.cols * 6 * 3 + 40)
     self.query = ""
     self.page = 1
     self.group = nil         -- { kind=, name=, books= } when inside a collection/author/series
     self.timings = {}
     self.label_h = Tiles.labelHeight()
+    self.list_row_h = Tiles.listRowHeight()
+    self.continue_label_h = Tiles.labelHeight(true)
     self.gap = Size.padding.default
 
     self:buildChrome()
@@ -355,6 +363,89 @@ function LibraryView:buildGrid(items, kind, layout, height)
     }
 end
 
+function LibraryView:buildList(items, kind, layout, height)
+    local list = VerticalGroup:new{ align = "left" }
+    self.tiles = {}
+    self.missing_covers = {}
+    for idx = 1, math.min(#items, layout.rows) do
+        local item = items[idx]
+        local row = Tiles.ListRow:new{
+            width = self.width,
+            height = layout.row_h,
+            thumb_w = layout.thumb_w,
+            thumb_h = layout.thumb_h,
+            book = kind == "books" and item or nil,
+            group = kind == "groups" and item or nil,
+            bim = self.plugin:getBIM(),
+            cover_cache = self.cover_cache,
+            on_tap = function(t) self:onTileTap(t) end,
+            on_hold = function(t) self:onTileHold(t) end,
+        }
+        if row.needs_cover then
+            local b = row.book or (row.group and row.group.cover_book)
+            if b then table.insert(self.missing_covers, b.path) end
+        end
+        table.insert(self.tiles, row)
+        table.insert(list, row)
+    end
+    if #items == 0 then
+        local msg = self.query ~= "" and T(_("No books match “%1”."), self.query) or _("Nothing here yet.")
+        list = CenterContainer:new{
+            dimen = Geom:new{ w = self.width, h = math.floor(height / 2) },
+            TextWidget:new{ text = msg, face = Font:getFace("infofont") },
+        }
+    end
+    return TopContainer:new{
+        dimen = Geom:new{ w = self.width, h = height },
+        list,
+    }
+end
+
+--- The Continue reading strip: a heading and up to `slots` large covers.
+function LibraryView:buildContinue(books, cl)
+    local f = Font:getFace("cfont", 15)
+    local header = FrameContainer:new{
+        padding = 0,
+        padding_left = Size.margin.default + self.gap,
+        padding_top = Size.padding.small,
+        bordersize = 0,
+        TextWidget:new{ text = _("Continue reading"), face = f, bold = true },
+    }
+    local row = HorizontalGroup:new{ align = "top", HorizontalSpan:new{ width = self.gap } }
+    self.continue_tiles = {}
+    for i = 1, cl.count do
+        local tile = Tiles.Tile:new{
+            width = cl.slot_w,
+            height = cl.tile_h,
+            cover_h = cl.cover_h,
+            one_line = true,
+            book = books[i],
+            bim = self.plugin:getBIM(),
+            cover_cache = self.cover_cache,
+            on_tap = function(t) self:onTileTap(t) end,
+            on_hold = function(t) self:onTileHold(t) end,
+        }
+        if tile.needs_cover then table.insert(self.missing_covers, books[i].path) end
+        table.insert(self.continue_tiles, tile)
+        table.insert(row, tile)
+        table.insert(row, HorizontalSpan:new{ width = self.gap })
+    end
+    local strip = VerticalGroup:new{ align = "left", header, row }
+    return TopContainer:new{
+        dimen = Geom:new{ w = self.width, h = cl.height },
+        strip,
+    }
+end
+
+function LibraryView:continueHeaderHeight()
+    if not self._continue_header_h then
+        local t = TextWidget:new{ text = "Ag", face = Font:getFace("cfont", 15), bold = true }
+        self._continue_header_h = t:getSize().h + Size.padding.small
+        t:free()
+    end
+    return self._continue_header_h
+end
+
 --- Rebuild everything below the search bar.
 function LibraryView:buildBody()
     local t0 = time.now()
@@ -371,19 +462,59 @@ function LibraryView:buildBody()
     local fixed = self.title_bar:getHeight() + self.search_row:getSize().h + Size.padding.small
         + tabs:getSize().h + (chips and chips:getSize().h or 0) + sep:getSize().h
         + footer_probe:getSize().h
-    local grid_h = math.max(self.label_h + 20, self.dimen.h - fixed - self:keyboardHeight())
-    local layout = Core.gridLayout(self.width, grid_h, self.cols, self.label_h, self.gap)
+    local keyboard_h = self:keyboardHeight()
+    local grid_h = math.max(self.label_h + 20, self.dimen.h - fixed - keyboard_h)
+
+    -- Continue reading: pinned above the books, on every page, so a page
+    -- always holds the same number of books.
+    local strip
+    self.continue_tiles = nil
+    self.continue_books = nil
+    if data.kind == "books" and Core.showContinue{
+            enabled = self.show_continue, tab = self.tab, group = self.group,
+            query = self.query, filter = self.filter, keyboard = keyboard_h > 0 } then
+        local cbooks = Core.continueReading(self.all_books, self.continue_slots)
+        local min_rest = self.view_mode == "list" and 3 * self.list_row_h or (self.label_h + 100)
+        local cl = Core.continueLayout(self.width, grid_h, #cbooks, self.continue_label_h,
+            self:continueHeaderHeight(), self.gap, { slots = self.continue_slots, min_rest = min_rest })
+        if cl then
+            self.continue_books = cbooks
+            self.continue_layout = cl
+            grid_h = grid_h - cl.height
+            strip = cl
+        end
+    end
+
+    local layout
+    if self.view_mode == "list" then
+        layout = Core.listLayout(grid_h, self.list_row_h, Size.padding.small, { max_rows = 10 })
+    else
+        -- Under the Continue reading strip, accept smaller covers for a second row.
+        layout = Core.gridLayout(self.width, grid_h, self.cols, self.label_h, self.gap, strip and 0.6 or nil)
+    end
     self.layout = layout
 
     local page_items, page, pages = Core.page(data.items, layout.per_page, self.page)
     self.page, self.pages = page, pages
     self.current = data
-    local grid = self:buildGrid(page_items, data.kind, layout, grid_h)
+    self.missing_covers = {}
+    local strip_widget = strip and self:buildContinue(self.continue_books, strip)
+    local continue_missing = self.missing_covers
+    local grid
+    if self.view_mode == "list" then
+        grid = self:buildList(page_items, data.kind, layout, grid_h)
+    else
+        grid = self:buildGrid(page_items, data.kind, layout, grid_h)
+    end
+    for _, p in ipairs(continue_missing) do table.insert(self.missing_covers, p) end
     local footer = self:buildFooter(page, pages, #data.items, data.kind)
 
     self.body = VerticalGroup:new{ align = "left", tabs }
     if chips then table.insert(self.body, chips) end
     table.insert(self.body, sep)
+    if strip_widget then
+        table.insert(self.body, strip_widget)
+    end
     table.insert(self.body, grid)
     table.insert(self.body, footer)
 
@@ -618,6 +749,18 @@ end
 function LibraryView:resort(mode)
     self.sort = mode
     self:reloadData()
+    self.page = 1
+    self:refreshBody(true)
+end
+
+function LibraryView:setViewMode(mode)
+    self.view_mode = Core.viewMode(mode)
+    self.page = 1
+    self:refreshBody(true)
+end
+
+function LibraryView:setShowContinue(on)
+    self.show_continue = on and true or false
     self.page = 1
     self:refreshBody(true)
 end
