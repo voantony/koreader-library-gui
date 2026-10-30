@@ -3,13 +3,19 @@ Full-screen Library view.
 
 Layout, top to bottom:
 
-    title bar        (menu, title, close -> file browser)
+    title bar        (menu, title, Resume icon; "Close Library" lives in the menu)
     search bar       (always visible InputText; filters as you type)
     tabs             Books | Collections | Authors | Series
-    status chips     All | Unread | Reading | Finished
-    continue reading (Books tab, no search or filter: books in progress)
+    status chips     All | Unread | Reading | Barely started | Finished
+    continue reading (Books tab, no search or filter:
+                     the books in progress, with percent and last-read time)
     cover grid or list
-    footer           page x of y, sort
+    footer           page x of y, sort (in a series: "2 of 5 read")
+
+Inside a series the books are in series order and numbered ("3 · Title").
+Paging past the last page (swipe or page key) opens the next series, and
+before the first page the previous one, so a whole shelf of series can be
+flipped through without going back to the list.
 
 The search bar is a real InputText embedded in this widget, not a popup:
 tapping it shows the on-screen keyboard and every keystroke re-filters the
@@ -26,6 +32,7 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconButton = require("ui/widget/iconbutton")
+local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputText = require("ui/widget/inputtext")
 local LeftContainer = require("ui/widget/container/leftcontainer")
@@ -42,6 +49,8 @@ local time = require("ui/time")
 local util = require("util")
 local Core = require("librarycore")
 local Tiles = require("librarytile")
+local Covers = require("librarycovers")
+local Keyboard = require("librarykeyboard")
 local Screen = Device.screen
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -57,6 +66,7 @@ local FILTER_NAMES = {
     all = _("All"),
     unread = _("Unread"),
     reading = _("Reading"),
+    barely = _("Barely started"),
     finished = _("Finished"),
 }
 
@@ -69,10 +79,39 @@ local LibraryView = InputContainer:extend{
     sort = "recent",
     tab = "books",
     filter = "all",
-    view_mode = "grid",     -- "grid" | "list"
+    view_mode = "grid",     -- "grid" | "list" | "compact" | "compact2"
     show_continue = true,   -- the Continue reading strip on the Books tab
+    top_row = "continue",   -- what that strip shows: "continue" | "recent" (Recently opened)
     continue_slots = 5,
+    barely_threshold = 0.10, -- "Barely started": opened, below this fraction
+    rounded_keyboard = true, -- "Rounded keyboard in search"
+    fuzzy_search = true,     -- "Typo-tolerant search"
 }
+
+--- The search bar's text box: KOReader's InputText, with our own keyboard
+-- (see librarykeyboard.lua) when "Rounded keyboard in search" is on. Only
+-- this text box gets it; every other one in KOReader keeps the stock keyboard.
+local SearchInput = InputText:extend{ rounded_keyboard = true, hide_number_row = false }
+LibraryView.SearchInput = SearchInput
+
+function SearchInput:initKeyboard()
+    if self.rounded_keyboard and (Device:isTouchDevice() or Device:hasDPad()) then
+        local RoundedKeyboard = Keyboard.class()
+        if RoundedKeyboard then
+            self.key_events = {}
+            self.keyboard = RoundedKeyboard:new{
+                keyboard_layer = self.input_type == "number" and 4 or 2,
+                hide_number_row = self.hide_number_row,
+                inputbox = self,
+            }
+            return
+        end
+    end
+    return InputText.initKeyboard(self)
+end
+
+local lfs = require("libs/libkoreader-lfs")
+local function fileExists(p) return lfs.attributes(p, "mode") == "file" end
 
 local function lower(s) return util.stringLower and util.stringLower(s) or s:lower() end
 LibraryView.lower = lower
@@ -94,13 +133,17 @@ function LibraryView:init()
     self.view_mode = Core.viewMode(self.view_mode)
     -- grid pages, list thumbnails and the Continue reading covers
     self.cover_cache = Tiles.newCoverCache(self.cols * 6 * 3 + 40)
+    -- Where covers come from: our own thumbnails, and the cover browser's
+    -- database when Project: Title or Cover browser is loaded.
+    self.covers = { store = Covers.getStore(), bim = self.plugin:getBIM() }
+    self.covers.store:scan()
     self.query = ""
     self.page = 1
     self.group = nil         -- { kind=, name=, books= } when inside a collection/author/series
     self.timings = {}
     self.label_h = Tiles.labelHeight()
     self.list_row_h = Tiles.listRowHeight()
-    self.continue_label_h = Tiles.labelHeight(true)
+    self.continue_label_h = Tiles.labelHeight()
     self.gap = Size.padding.default
 
     self:buildChrome()
@@ -113,20 +156,59 @@ end
 ----------------------------------------------------------------------------
 
 function LibraryView:buildChrome()
+    self:buildTitleBar()
+    self:buildSearchRow()
+end
+
+--- ☰ on the left, the title, and on the right a Resume icon that opens the
+-- last book being read (hidden when there is none). No X: "Close Library"
+-- is the last item of the ☰ menu. Swipes pass through the icon, so the
+-- corner swipe-down for Controls still starts here.
+function LibraryView:buildTitleBar()
+    local book = self.last_book
     self.title_bar = TitleBar:new{
         width = self.width,
         fullscreen = true,
         align = "center",
-        title = _("Library"),
+        title = self._title or _("Library"),
         left_icon = "appbar.menu",
         left_icon_tap_callback = function() self:onLeftIcon() end,
         left_icon_hold_callback = function() self.plugin:showLibraryMenu(self) end,
-        close_callback = function() self:onClose() end,
+        right_icon = book and "book.opened" or nil,
+        right_icon_tap_callback = book and function() self:onResume() end or nil,
+        right_icon_hold_callback = book and function() self:showResumeHint() end or nil,
         show_parent = self,
     }
+    self._title_bar_resume = book and true or false
+end
 
-    local margin = Size.margin.default
-    local icon_size = Screen:scaleBySize(32)
+--- Long-press on the Resume icon: which book it opens.
+function LibraryView:showResumeHint()
+    local book = self.last_book
+    if not book then return end
+    local pct = Core.percentText(book.percent)
+    UIManager:show(InfoMessage:new{
+        text = T(_("Resume: %1"), book.title or book.name) .. (pct and ("  ·  " .. pct) or ""),
+        timeout = 2,
+    })
+end
+
+--- The search bar: a rounded field with a magnifier, the text box and a
+-- clear button inside it, the full width of the screen.
+function LibraryView:buildSearchRow(text)
+    local margin = Size.margin.default + Size.padding.default
+    local icon_size = Screen:scaleBySize(22)
+    local hpad = Size.padding.large
+    local border = Size.border.button
+    local face = Font:getFace("smallinfofont")
+    local magnifier = IconButton:new{
+        icon = "appbar.search",
+        width = icon_size,
+        height = icon_size,
+        padding = 0,
+        callback = function() self:openKeyboard() end,
+        show_parent = self,
+    }
     local clear = IconButton:new{
         icon = "close",
         width = icon_size,
@@ -135,36 +217,86 @@ function LibraryView:buildChrome()
         callback = function() self:clearSearch() end,
         show_parent = self,
     }
-    local avail_w = self.width - 2 * margin - clear:getSize().w - Size.padding.default
-    -- InputText adds its own border/padding around `width`: measure and fit.
-    local probe = InputText:new{ text = "", width = avail_w, face = Font:getFace("smallinfofont"), scroll = false }
-    local input_w = avail_w - (probe:getSize().w - avail_w)
-    probe:free()
-    self.search_input = InputText:new{
-        text = "",
-        hint = _("Search title, author, series"),
+    local field_w = self.width - 2 * margin
+    local input_w = field_w - 2 * border - 2 * hpad - magnifier:getSize().w - clear:getSize().w - 2 * Size.padding.default
+    if self.search_input then
+        text = text or self.search_input:getText()
+        self.search_input:onCloseWidget() -- frees its keyboard
+    end
+    self._search_hint = self:searchHint()
+    self.search_input = SearchInput:new{
+        text = text or "",
+        hint = self._search_hint,
         width = input_w,
-        face = Font:getFace("smallinfofont"),
+        face = face,
         focused = false,
         scroll = false,
         parent = self,
+        bordersize = 0,
+        margin = 0,
+        padding = Size.padding.small,
+        rounded_keyboard = self.rounded_keyboard,
         edit_callback = function(edited)
             if edited then self:onSearchEdited() end
         end,
         enter_callback = function() self:closeKeyboard() end,
     }
+    local inner_h = math.max(self.search_input:getSize().h, Tiles.minTouch() - 2 * border)
+    self.search_field = FrameContainer:new{
+        padding = 0,
+        padding_left = hpad,
+        padding_right = Size.padding.small,
+        bordersize = border,
+        color = Blitbuffer.COLOR_GRAY_7,
+        radius = math.floor((inner_h + 2 * border) / 2),
+        background = Blitbuffer.COLOR_WHITE,
+        CenterContainer:new{
+            dimen = Geom:new{ w = field_w - 2 * border - hpad - Size.padding.small, h = inner_h },
+            HorizontalGroup:new{
+                align = "center",
+                magnifier,
+                HorizontalSpan:new{ width = Size.padding.default },
+                self.search_input,
+                HorizontalSpan:new{ width = Size.padding.default },
+                clear,
+            },
+        },
+    }
     self.search_row = FrameContainer:new{
         padding = 0,
         padding_left = margin,
         padding_right = margin,
+        padding_bottom = Size.padding.small,
         bordersize = 0,
-        HorizontalGroup:new{
-            align = "center",
-            self.search_input,
-            HorizontalSpan:new{ width = Size.padding.default },
-            clear,
-        },
+        self.search_field,
     }
+end
+
+--- The field's border follows the keyboard: dark while typing.
+function LibraryView:markSearchFocus(on)
+    if self.search_field then
+        self.search_field.color = on and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_7
+    end
+end
+
+--- Turn "Rounded keyboard in search" on or off: the search bar gets a new
+-- text box (and keyboard); what was typed is kept.
+function LibraryView:setRoundedKeyboard(on)
+    on = on and true or false
+    if on == self.rounded_keyboard then return end
+    if self.search_input:isKeyboardVisible() then self:keyboardGuard() end
+    self.rounded_keyboard = on
+    self:buildSearchRow()
+    self:refreshBody(true)
+end
+
+--- Turn "Typo-tolerant search" on or off and redo the current search.
+function LibraryView:setFuzzySearch(on)
+    on = on and true or false
+    if on == self.fuzzy_search then return end
+    self.fuzzy_search = on
+    self.last_query, self.last_results = nil, nil
+    if self.query ~= "" then self:refreshBody(true) end
 end
 
 ----------------------------------------------------------------------------
@@ -177,6 +309,12 @@ function LibraryView:reloadData()
     self.sorted = Core.sortBooks(self.all_books, self.sort, self.plugin.collate)
     self.last_query, self.last_results = nil, nil
     self.groups_cache = {}
+    -- The book the Resume icon opens; show or hide the icon to match.
+    self.last_book = Core.resumeBook(self.all_books)
+    if self.title_bar and self._title_bar_resume ~= (self.last_book ~= nil) then
+        self:buildTitleBar()
+        self._title_changed = true -- repaint the whole view, title bar included
+    end
 end
 
 function LibraryView:groupsFor(tab)
@@ -197,15 +335,39 @@ function LibraryView:groupsFor(tab)
         end
         if tab == "series" then
             for _, g in ipairs(groups) do
-                table.sort(g.books, function(a, b)
-                    return (a.series_index or math.huge) < (b.series_index or math.huge)
-                end)
+                g.books = Core.seriesOrder(g.books, self.plugin.collate)
             end
         end
     end
     for _, g in ipairs(groups) do g.cover_book = g.cover_book or g.books[1] end
     self.groups_cache[tab] = groups
     return groups
+end
+
+--- The search bar's placeholder: what it searches here.
+function LibraryView:searchHint()
+    if self.group then return T(_("Search in %1\u{2026}"), self.group.name) end
+    local scope = Core.searchScope(self.tab, self.group)
+    if scope == "authors" then return _("Search authors\u{2026}") end
+    if scope == "series" then return _("Search series or authors\u{2026}") end
+    if scope == "collections" then return _("Search collections\u{2026}") end
+    return _("Search title, author, series")
+end
+
+--- Rebuild the search bar when its placeholder should change (new tab or shelf).
+function LibraryView:updateSearchHint()
+    if self._search_hint and self._search_hint ~= self:searchHint() then
+        self:buildSearchRow(self.query)
+    end
+end
+
+--- Empty the search without searching again (the caller rebuilds the body).
+function LibraryView:resetQuery()
+    if self._search_action then UIManager:unschedule(self._search_action); self._search_action = nil end
+    if self.query ~= "" then
+        self.search_input:setText("")
+        self.query = ""
+    end
 end
 
 --- Books matching the query (narrowing previous results while typing).
@@ -215,22 +377,26 @@ function LibraryView:searchBooks(base)
     if self.last_base == base and Core.isRefinement(self.last_query, self.query) then
         previous = self.last_results
     end
-    local results = Core.searchIndexed(base, self.query, lower, previous)
+    local results = Core.searchIndexed(base, self.query, lower, previous, self.fuzzy_search)
     self.last_base, self.last_query, self.last_results = base, self.query, results
     return results
 end
 
 --- What the grid should show now: { kind = "books"|"groups", items = {...}, counts = }.
 function LibraryView:currentItems()
+    local th = self.barely_threshold
     if self.group then
         local books = self:searchBooks(self.group.books)
-        return { kind = "books", items = Core.filterStatus(books, self.filter), counts = Core.countFilters(books) }
+        return { kind = "books", items = Core.filterStatus(books, self.filter, th), counts = Core.countFilters(books, th) }
     end
-    if self.tab == "books" or self.query ~= "" then
+    if Core.searchScope(self.tab) == "books" then
         local books = self:searchBooks(self.sorted)
-        return { kind = "books", items = Core.filterStatus(books, self.filter), counts = Core.countFilters(books) }
+        return { kind = "books", items = Core.filterStatus(books, self.filter, th), counts = Core.countFilters(books, th) }
     end
-    return { kind = "groups", items = self:groupsFor(self.tab) }
+    -- Authors, Series, Collections: the search narrows the tab's shelves.
+    local groups = self:groupsFor(self.tab)
+    if self.query ~= "" then groups = Core.searchGroups(groups, self.query, lower, self.fuzzy_search) end
+    return { kind = "groups", items = groups }
 end
 
 ----------------------------------------------------------------------------
@@ -246,65 +412,151 @@ function LibraryView:keyboardHeight()
 end
 
 function LibraryView:buildTabs()
-    local row = HorizontalGroup:new{ align = "center" }
-    local w = math.floor((self.width - 2 * Size.margin.default - (#TABS - 1) * Size.padding.small) / #TABS)
-    for i, tab in ipairs(TABS) do
-        if i > 1 then table.insert(row, HorizontalSpan:new{ width = Size.padding.small }) end
-        table.insert(row, Tiles.Chip:new{
+    local margin = Size.margin.default + Size.padding.default
+    local row = HorizontalGroup:new{ align = "bottom" }
+    local w = math.floor((self.width - 2 * margin) / #TABS)
+    for _, tab in ipairs(TABS) do
+        table.insert(row, Tiles.Tab:new{
             text = tab.text,
             width = w,
-            selected = (self.group == nil and self.query == "" and self.tab == tab.id)
-                or (self.query ~= "" and tab.id == "books" and self.group == nil),
+            selected = self.group == nil and self.tab == tab.id,
             callback = function() self:setTab(tab.id) end,
         })
     end
-    return CenterContainer:new{
-        dimen = Geom:new{ w = self.width, h = row:getSize().h + Size.padding.small },
-        row,
+    -- the tabs sit on a hairline, the selected one marked by a thick underline
+    return VerticalGroup:new{
+        align = "center",
+        CenterContainer:new{ dimen = Geom:new{ w = self.width, h = row:getSize().h }, row },
+        LineWidget:new{
+            background = Blitbuffer.COLOR_GRAY_B,
+            dimen = Geom:new{ w = self.width - 2 * margin, h = Size.line.thin },
+        },
     }
 end
 
+local FILTER_SHORT = { barely = _("Barely") }
+--- A tappable area (at least a thumb's height) around a widget.
+local TapArea = InputContainer:extend{ callback = nil, min_h = 0 }
+
+function TapArea:init()
+    local size = self[1]:getSize()
+    self.dimen = Geom:new{ x = 0, y = 0, w = size.w, h = math.max(size.h, self.min_h) }
+    self.ges_events = { TapArea = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } } }
+    self[1] = LeftContainer:new{ dimen = Geom:new{ w = self.dimen.w, h = self.dimen.h }, self[1] }
+end
+
+function TapArea:getSize() return self.dimen end
+
+function TapArea:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    InputContainer.paintTo(self, bb, x, y)
+end
+
+function TapArea:onTapArea()
+    if self.callback then self.callback() end
+    return true
+end
+
+local GROUP_COUNT = { authors = _("%1 authors"), series = _("%1 series"), collections = _("%1 collections") }
+
 function LibraryView:buildChips(counts)
-    local row = HorizontalGroup:new{ align = "center" }
-    if self.group then
-        table.insert(row, Tiles.Chip:new{
-            text = "\u{2190} " .. self.group.name,
-            callback = function() self:closeGroup() end,
-        })
-        table.insert(row, HorizontalSpan:new{ width = Size.padding.large })
+    local margin = Size.margin.default + Size.padding.default
+    local gap = Size.padding.default
+    local avail = self.width - 2 * margin
+    -- Narrow screens: drop the counts of unselected filters, then shorten names.
+    local row
+    for compact = 0, 2 do
+        row = HorizontalGroup:new{ align = "center" }
+        if self.group then
+            table.insert(row, Tiles.Chip:new{
+                text = "\u{2190} " .. self.group.name,
+                max_text_w = math.floor(self.width * 0.22),
+                callback = function() self:closeGroup() end,
+            })
+            table.insert(row, HorizontalSpan:new{ width = Size.padding.large })
+        end
+        for i, f in ipairs(Core.FILTERS) do
+            if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
+            local selected = self.filter == f
+            local text = (compact >= 2 and FILTER_SHORT[f]) or FILTER_NAMES[f]
+            if counts and (compact == 0 or selected) then text = text .. " " .. (counts[f] or 0) end
+            table.insert(row, Tiles.Chip:new{
+                text = text,
+                selected = selected,
+                callback = function() self:setFilter(f) end,
+            })
+        end
+        if row:getSize().w <= avail then break end
     end
-    for i, f in ipairs(Core.FILTERS) do
-        if i > 1 then table.insert(row, HorizontalSpan:new{ width = Size.padding.small }) end
-        local text = FILTER_NAMES[f]
-        if counts then text = text .. " " .. (counts[f] or 0) end
-        table.insert(row, Tiles.Chip:new{
-            text = text,
-            selected = self.filter == f,
-            callback = function() self:setFilter(f) end,
-        })
-    end
-    -- keep the row within the screen if a long group name is shown
+    local pad = Size.padding.default
     return FrameContainer:new{
         padding = 0,
-        padding_left = Size.margin.default,
+        padding_left = margin,
+        padding_top = pad,
         bordersize = 0,
         width = self.width,
-        height = row:getSize().h + Size.padding.small,
+        height = row:getSize().h + 2 * pad,
         row,
     }
 end
 
 function LibraryView:buildFooter(page, pages, total, kind)
+    local margin = Size.margin.default + Size.padding.default
     local f = Font:getFace("cfont", 15)
     local left = kind == "books" and T(_("%1 books · %2"), total, self.plugin:sortName(self.sort))
-        or T(_("%1 groups"), total)
-    local text = TextWidget:new{ text = left, face = f, fgcolor = Blitbuffer.COLOR_GRAY_3 }
-    local pager = TextWidget:new{ text = T(_("‹  %1 / %2  ›"), page, pages), face = f, bold = true }
-    local h = math.max(text:getSize().h, pager:getSize().h) + Size.padding.small
-    local spacer = self.width - 2 * Size.margin.default - text:getSize().w - pager:getSize().w
+        or T(GROUP_COUNT[self.tab] or _("%1 groups"), total)
+    if self:inSeries() then
+        local pr = Core.seriesProgress(self.group.books)
+        left = T(_("%1 of %2 read"), pr.read, pr.total)
+        local pos, count = self:seriesPosition()
+        if pos then left = left .. " · " .. T(_("series %1 of %2 · swipe on for the next"), pos, count) end
+    end
+    -- Page arrows are real buttons (a thumb-sized target each), as well as swipes.
+    local touch = Tiles.minTouch()
+    local icon = Screen:scaleBySize(20)
+    local function arrow(name, dir, enabled)
+        local btn = IconButton:new{
+            icon = name,
+            width = icon, height = icon,
+            padding = math.floor((touch - icon) / 2),
+            enabled = enabled,
+            allow_flash = false, -- the page redraw is the feedback: one refresh, not two
+            callback = function() self:turnPage(dir, false) end,
+            show_parent = self,
+        }
+        if not enabled and btn.image then btn.image.dim = true end
+        return btn
+    end
+    local more = self:inSeries() -- past the last page: the next series
+    -- "63 / 72": tap it to type a page number (only when there is more than one page).
+    local page_label = TextWidget:new{ text = T(_("%1 / %2"), page, pages), face = f, bold = true }
+    self.page_label = nil
+    if pages > 1 then
+        page_label = TapArea:new{ min_h = touch, callback = function() self:showPageJump() end, page_label }
+        self.page_label = page_label
+    end
+    local pager = HorizontalGroup:new{
+        align = "center",
+        arrow("chevron.left", -1, page > 1 or more),
+        page_label,
+        arrow("chevron.right", 1, page < pages or more),
+    }
+    -- "202 books · Last read ▾": tap it to pick the sort (books only; a
+    -- series keeps its reading order).
+    local sortable = kind == "books" and not self:inSeries()
+    if sortable then left = left .. " \u{25BE}" end
+    local text = TextWidget:new{ text = left, face = f, fgcolor = Blitbuffer.COLOR_GRAY_4,
+        max_width = self.width - 2 * margin - pager:getSize().w - Size.padding.default }
+    self.sort_label = nil
+    if sortable then
+        text = TapArea:new{ min_h = touch, callback = function() self:showSortPicker() end, text }
+        self.sort_label = text
+    end
+    local h = math.max(text:getSize().h, pager:getSize().h)
+    local spacer = self.width - 2 * margin - text:getSize().w - pager:getSize().w + math.floor((touch - icon) / 2)
     return FrameContainer:new{
         padding = 0,
-        padding_left = Size.margin.default,
+        padding_left = margin,
         bordersize = 0,
         width = self.width,
         height = h,
@@ -317,8 +569,10 @@ function LibraryView:buildGrid(items, kind, layout, height)
     self.tiles = {}
     self.missing_covers = {}
     -- Spread spare height between rows (same spacing on every page).
-    local vgap = math.max(self.gap,
-        math.floor((height - layout.rows * layout.tile_h) / (layout.rows + 1)))
+    -- (capped: a lone row under Continue reading should not float mid-page)
+    local now = os.time()
+    local vgap = math.max(self.gap, math.min(3 * Size.padding.large,
+        math.floor((height - layout.rows * layout.tile_h) / (layout.rows + 1))))
     local i = 1
     for _ = 1, layout.rows do
         if i > #items then break end
@@ -332,14 +586,16 @@ function LibraryView:buildGrid(items, kind, layout, height)
                 cover_h = layout.cover_h,
                 book = kind == "books" and item or nil,
                 group = kind == "groups" and item or nil,
-                bim = self.plugin:getBIM(),
+                series_number = kind == "books" and self:inSeries(),
+                date_text = kind == "books" and not self:inSeries() and Core.sortDate(item, self.sort, now) or nil,
+                covers = self.covers,
                 cover_cache = self.cover_cache,
                 on_tap = function(t) self:onTileTap(t) end,
                 on_hold = function(t) self:onTileHold(t) end,
             }
             if tile.needs_cover then
                 local b = tile.book or (tile.group and tile.group.cover_book)
-                if b then table.insert(self.missing_covers, b.path) end
+                if b then table.insert(self.missing_covers, b) end
             end
             table.insert(self.tiles, tile)
             table.insert(row, tile)
@@ -364,29 +620,56 @@ function LibraryView:buildGrid(items, kind, layout, height)
 end
 
 function LibraryView:buildList(items, kind, layout, height)
-    local list = VerticalGroup:new{ align = "left" }
     self.tiles = {}
     self.missing_covers = {}
-    for idx = 1, math.min(#items, layout.rows) do
-        local item = items[idx]
-        local row = Tiles.ListRow:new{
-            width = self.width,
-            height = layout.row_h,
-            thumb_w = layout.thumb_w,
-            thumb_h = layout.thumb_h,
-            book = kind == "books" and item or nil,
-            group = kind == "groups" and item or nil,
-            bim = self.plugin:getBIM(),
-            cover_cache = self.cover_cache,
-            on_tap = function(t) self:onTileTap(t) end,
-            on_hold = function(t) self:onTileHold(t) end,
-        }
-        if row.needs_cover then
-            local b = row.book or (row.group and row.group.cover_book)
-            if b then table.insert(self.missing_covers, b.path) end
+    local compact = Core.isCompact(self.view_mode)
+    local Row = compact and Tiles.CompactRow or Tiles.ListRow
+    local text_only = Core.textRows(self.view_mode, kind, self.tab) and not self.group
+    -- Compact · 2 columns: down the left column, then the right, with a rule between.
+    local ncols = Core.listColumns(self.view_mode)
+    local rule = Size.line.thin
+    local col_w = ncols == 1 and self.width or math.floor((self.width - rule) / ncols)
+    local columns = Core.columnMajor(items, layout.rows, ncols)
+    local now = os.time()
+    local groups = {}
+    for c = 1, ncols do groups[c] = VerticalGroup:new{ align = "left" } end
+    for c = 1, ncols do
+        local list = groups[c]
+        for _i, item in ipairs(columns[c]) do
+            local row = Row:new{
+                width = col_w,
+                height = layout.row_h,
+                thumb_w = layout.thumb_w,
+                thumb_h = layout.thumb_h,
+                book = kind == "books" and item or nil,
+                group = kind == "groups" and item or nil,
+                series_number = kind == "books" and self:inSeries(),
+                author_first = kind == "books" and self.sort == "author",
+                text_only = text_only,
+                date_text = kind == "books" and not self:inSeries() and Core.sortDate(item, self.sort, now) or nil,
+                covers = self.covers,
+                cover_cache = self.cover_cache,
+                on_tap = function(t) self:onTileTap(t) end,
+                on_hold = function(t) self:onTileHold(t) end,
+            }
+            if row.needs_cover then
+                local b = row.book or (row.group and row.group.cover_book)
+                if b then table.insert(self.missing_covers, b) end
+            end
+            table.insert(self.tiles, row)
+            table.insert(list, row)
         end
-        table.insert(self.tiles, row)
-        table.insert(list, row)
+    end
+    local list = groups[1]
+    if ncols > 1 then
+        list = HorizontalGroup:new{ align = "top" }
+        for c = 1, ncols do
+            if c > 1 then
+                table.insert(list, LineWidget:new{ background = Blitbuffer.COLOR_GRAY_D,
+                    dimen = Geom:new{ w = rule, h = layout.rows * layout.row_h } })
+            end
+            table.insert(list, groups[c])
+        end
     end
     if #items == 0 then
         local msg = self.query ~= "" and T(_("No books match “%1”."), self.query) or _("Nothing here yet.")
@@ -401,31 +684,57 @@ function LibraryView:buildList(items, kind, layout, height)
     }
 end
 
---- The Continue reading strip: a heading and up to `slots` large covers.
-function LibraryView:buildContinue(books, cl)
-    local f = Font:getFace("cfont", 15)
-    local header = FrameContainer:new{
+--- "43 % · 3 h ago" under a top-row cover; "Finished · 2 d ago" or
+-- "On hold · …" for those books in Recently opened.
+function LibraryView:resumeCaption(book, now)
+    local parts = {}
+    local pct = Core.percentText(book.percent)
+    if book.status == "complete" or book.status == "abandoned" then
+        parts[#parts + 1] = Tiles.statusLine(book)
+    elseif book.status ~= "new" and pct and book.status ~= "reading" then
+        parts[#parts + 1] = pct -- (books being read show it on the bar)
+    end
+    local ago = Core.relativeTime(book.last_opened, now or os.time())
+    if not ago and book.last_opened then ago = os.date("%d %b", book.last_opened) end
+    if ago then parts[#parts + 1] = ago end
+    return table.concat(parts, " · ")
+end
+
+--- The strip's heading: "Continue reading" or "Recently opened". (Resume
+-- is the icon in the title bar.)
+function LibraryView:buildContinueHeader()
+    local f = Font:getFace("cfont", 17)
+    local heading = Core.topRow(self.top_row) == "recent" and _("Recently opened") or _("Continue reading")
+    local label = TextWidget:new{ text = heading, face = f, bold = true }
+    local row = HorizontalGroup:new{ align = "center", label }
+    return FrameContainer:new{
         padding = 0,
         padding_left = Size.margin.default + self.gap,
-        padding_top = Size.padding.small,
+        padding_top = Size.padding.default,
         bordersize = 0,
-        TextWidget:new{ text = _("Continue reading"), face = f, bold = true },
+        row,
     }
+end
+
+--- The Continue reading strip: a heading and up to `slots` large covers.
+function LibraryView:buildContinue(books, cl)
+    local header = self:buildContinueHeader()
     local row = HorizontalGroup:new{ align = "top", HorizontalSpan:new{ width = self.gap } }
     self.continue_tiles = {}
+    local now = os.time()
     for i = 1, cl.count do
         local tile = Tiles.Tile:new{
             width = cl.slot_w,
             height = cl.tile_h,
             cover_h = cl.cover_h,
-            one_line = true,
+            caption = self:resumeCaption(books[i], now),
             book = books[i],
-            bim = self.plugin:getBIM(),
+            covers = self.covers,
             cover_cache = self.cover_cache,
             on_tap = function(t) self:onTileTap(t) end,
             on_hold = function(t) self:onTileHold(t) end,
         }
-        if tile.needs_cover then table.insert(self.missing_covers, books[i].path) end
+        if tile.needs_cover then table.insert(self.missing_covers, books[i]) end
         table.insert(self.continue_tiles, tile)
         table.insert(row, tile)
         table.insert(row, HorizontalSpan:new{ width = self.gap })
@@ -439,8 +748,8 @@ end
 
 function LibraryView:continueHeaderHeight()
     if not self._continue_header_h then
-        local t = TextWidget:new{ text = "Ag", face = Font:getFace("cfont", 15), bold = true }
-        self._continue_header_h = t:getSize().h + Size.padding.small
+        local t = TextWidget:new{ text = "Ag", face = Font:getFace("cfont", 17), bold = true }
+        self._continue_header_h = t:getSize().h + Size.padding.default
         t:free()
     end
     return self._continue_header_h
@@ -454,10 +763,7 @@ function LibraryView:buildBody()
 
     local tabs = self:buildTabs()
     local chips = data.kind == "books" and self:buildChips(data.counts) or nil
-    local sep = LineWidget:new{
-        background = Blitbuffer.COLOR_GRAY_9,
-        dimen = Geom:new{ w = self.width, h = Size.line.thin },
-    }
+    local sep = VerticalSpan:new{ width = Size.padding.small }
     local footer_probe = self:buildFooter(1, 1, 0, data.kind)
     local fixed = self.title_bar:getHeight() + self.search_row:getSize().h + Size.padding.small
         + tabs:getSize().h + (chips and chips:getSize().h or 0) + sep:getSize().h
@@ -470,13 +776,13 @@ function LibraryView:buildBody()
     local strip
     self.continue_tiles = nil
     self.continue_books = nil
-    if data.kind == "books" and Core.showContinue{
+    if data.kind == "books" and not Core.isCompact(self.view_mode) and Core.showContinue{
             enabled = self.show_continue, tab = self.tab, group = self.group,
             query = self.query, filter = self.filter, keyboard = keyboard_h > 0 } then
-        local cbooks = Core.continueReading(self.all_books, self.continue_slots)
+        local cbooks = Core.topRowBooks(self.top_row, self.all_books, self.continue_slots, fileExists)
         local min_rest = self.view_mode == "list" and 3 * self.list_row_h or (self.label_h + 100)
         local cl = Core.continueLayout(self.width, grid_h, #cbooks, self.continue_label_h,
-            self:continueHeaderHeight(), self.gap, { slots = self.continue_slots, min_rest = min_rest })
+            self:continueHeaderHeight(), self.gap, { slots = self.continue_slots, min_rest = min_rest, frac = 0.3 })
         if cl then
             self.continue_books = cbooks
             self.continue_layout = cl
@@ -486,7 +792,14 @@ function LibraryView:buildBody()
     end
 
     local layout
-    if self.view_mode == "list" then
+    if Core.isCompact(self.view_mode) then
+        layout = Core.listLayout(grid_h, Tiles.compactRowHeight(), 0, { max_rows = 40 })
+        local ncols = Core.listColumns(self.view_mode)
+        layout.cols, layout.per_page = ncols, layout.rows * ncols
+    elseif Core.textRows(self.view_mode, data.kind, self.tab) then
+        -- Authors: one line per row; Series: the name over its authors.
+        layout = Core.listLayout(grid_h, Tiles.textRowHeight(self.tab == "series" and 2 or 1), 0, { max_rows = 24 })
+    elseif self.view_mode == "list" then
         layout = Core.listLayout(grid_h, self.list_row_h, Size.padding.small, { max_rows = 10 })
     else
         -- Under the Continue reading strip, accept smaller covers for a second row.
@@ -501,7 +814,7 @@ function LibraryView:buildBody()
     local strip_widget = strip and self:buildContinue(self.continue_books, strip)
     local continue_missing = self.missing_covers
     local grid
-    if self.view_mode == "list" then
+    if self.view_mode == "list" or Core.isCompact(self.view_mode) then
         grid = self:buildList(page_items, data.kind, layout, grid_h)
     else
         grid = self:buildGrid(page_items, data.kind, layout, grid_h)
@@ -591,6 +904,15 @@ function LibraryView:clearSearch()
     self:applySearch("")
 end
 
+-- On devices KOReader treats as having a D-pad (the Kindle Colorsoft on
+-- v2026.07, the desktop emulator), InputText's tap handler also asks its
+-- parent for FocusManager:getFocusableWidgetXY() and moveFocusTo(). This view
+-- is not a FocusManager, so tapping the search bar crashed with "attempt to
+-- call method 'getFocusableWidgetXY' (a nil value)". The search bar is the only
+-- focusable widget here, so there is never a D-pad focus to move.
+function LibraryView:getFocusableWidgetXY() return nil end
+function LibraryView:moveFocusTo() return false end
+
 -- Called by InputText when its box is tapped.
 function LibraryView:onSwitchFocus(inputbox)
     if not inputbox.focused then inputbox:focus() end
@@ -599,9 +921,27 @@ function LibraryView:onSwitchFocus(inputbox)
     end
 end
 
+--- Authors (the list of names, not one author's books): a letters-only
+-- keyboard, with no number row; numbers stay behind the symbols key.
+function LibraryView:wantsLettersKeyboard()
+    return self.tab == "authors" and not self.group
+end
+
+--- Rebuild the search keyboard when the place wants the other kind.
+function LibraryView:matchKeyboard()
+    local input = self.search_input
+    local want = self:wantsLettersKeyboard()
+    if input.hide_number_row == want then return false end
+    input.hide_number_row = want
+    if input.keyboard and not input:isKeyboardVisible() then input:initKeyboard() end
+    return true
+end
+
 function LibraryView:openKeyboard()
+    self:matchKeyboard()
     self.search_input:focus()
     self.search_input:onShowKeyboard()
+    self:markSearchFocus(true)
     -- While the (modal) keyboard is up, taps outside it must still reach the grid.
     self.is_always_active = true
     self:refreshBody()
@@ -612,6 +952,7 @@ function LibraryView:closeKeyboard()
         self.search_input:onCloseKeyboard()
     end
     self.search_input:unfocus()
+    self:markSearchFocus(false)
     self.is_always_active = false
     self:refreshBody(true)
 end
@@ -647,40 +988,157 @@ function LibraryView:keyboardGuard()
     if self.search_input:isKeyboardVisible() then
         self.search_input:onCloseKeyboard()
         self.search_input:unfocus()
+        self:markSearchFocus(false)
         self.is_always_active = false
     end
 end
 
 function LibraryView:setTab(id)
     self:keyboardGuard()
-    if self.query ~= "" then
-        self.search_input:setText("")
-        self.query = ""
-    end
+    self:resetQuery() -- each tab searches its own things: start afresh
     self.tab, self.group, self.page = id, nil, 1
+    self:updateSearchHint()
+    self:applyRemembered()
     self:refreshBody(true)
 end
 
 function LibraryView:setFilter(f)
     self:keyboardGuard()
     self.filter, self.page = f, 1
+    self:rememberPref("filter", f)
     self:refreshBody(true)
 end
 
 function LibraryView:openGroup(group)
     self.saved_page = self.page
+    self.saved_query = self.query -- e.g. "tolk" on Authors, back on close
+    self:resetQuery()
     self.group, self.page = group, 1
+    self:updateSearchHint()
+    self:applyRemembered()
     self:refreshBody(true)
 end
 
 function LibraryView:closeGroup()
     self.group = nil
     self.page = self.saved_page or 1
+    self:resetQuery()
+    if self.saved_query and self.saved_query ~= "" then
+        self.query = self.saved_query
+        self.search_input:setText(self.query)
+    end
+    self.saved_query = nil
+    self:updateSearchHint()
+    self:applyRemembered()
+    self:refreshBody(true)
+end
+
+----------------------------------------------------------------------------
+-- Per-shelf memory (layout, sort, filter)
+----------------------------------------------------------------------------
+
+--- The key this place's layout, sort and filter are remembered under.
+function LibraryView:viewKey()
+    return Core.viewKey(self.tab, self.group)
+end
+
+--- A name for this place in menus: "Oz", "Authors", "Books".
+function LibraryView:placeName()
+    if self.group then return self.group.name end
+    for _, t in ipairs(TABS) do if t.id == self.tab then return t.text end end
+    return _("Books")
+end
+
+--- After the sort changed, the open group's book list is stale: pick the
+-- same group again from the re-sorted data.
+function LibraryView:reresolveGroup()
+    local g = self.group
+    if not g then return end
+    local kind = g.kind
+    if kind ~= "collections" and kind ~= "authors" and kind ~= "series" then return end
+    for _, ng in ipairs(self:groupsFor(kind)) do
+        if ng.name == g.name then self.group = ng; return end
+    end
+end
+
+--- Put back what this place remembers (nothing when the memory is off).
+-- Does not redraw; the caller does.
+function LibraryView:applyRemembered()
+    local prefs = self.plugin.viewPrefs and self.plugin:viewPrefs(self:viewKey())
+    if not prefs then return false end
+    self.view_mode = Core.viewMode(prefs.view)
+    self.filter = prefs.filter
+    if prefs.sort ~= self.sort then
+        self.sort = prefs.sort
+        self:reloadData()
+        self:reresolveGroup()
+    end
+    return true
+end
+
+--- Remember a change for this place (see Core.rememberViewPref).
+function LibraryView:rememberPref(field, value)
+    if self.plugin.rememberViewPref then self.plugin:rememberViewPref(self:viewKey(), field, value) end
+end
+
+--- Whether this place has its own remembered layout/sort/filter.
+function LibraryView:hasRemembered()
+    if not self.plugin.viewPrefs then return false end
+    local _prefs, remembered = self.plugin:viewPrefs(self:viewKey())
+    return remembered
+end
+
+--- "Reset to default": forget this place's settings and show the defaults.
+function LibraryView:resetRemembered()
+    if self.plugin.resetViewPrefs then self.plugin:resetViewPrefs(self:viewKey()) end
+    self.page = 1
+    self:applyRemembered()
     self:refreshBody(true)
 end
 
 function LibraryView:onLeftIcon()
     self.plugin:showLibraryMenu(self)
+end
+
+--- True inside a series opened from the Series tab.
+function LibraryView:inSeries()
+    return self.group ~= nil and self.group.kind == "series"
+end
+
+--- Position of the open series among the Series tab's groups: pos, count.
+function LibraryView:seriesPosition()
+    if not self:inSeries() then return nil end
+    local groups = self:groupsFor("series")
+    for i, g in ipairs(groups) do
+        if g.name == self.group.name then return i, #groups end
+    end
+    return nil, #groups
+end
+
+--- Open the next (dir = 1) or previous (-1) series in place. Returns true
+-- when there was one. Lands on the first page going forward and on the
+-- last page going back, so paging feels continuous.
+function LibraryView:stepSeries(dir)
+    local pos = self:seriesPosition()
+    if not pos then return false end
+    local groups = self:groupsFor("series")
+    local g = groups[pos + dir]
+    if not g then return false end
+    self.group = g
+    self.page = dir > 0 and 1 or math.huge
+    self:applyRemembered()
+    self:refreshBody(true)
+    return true
+end
+
+--- One page forward or back; in a series, past either end steps to the
+-- neighbouring series instead of wrapping.
+function LibraryView:turnPage(dir, wrap)
+    if not self.pages then return end
+    local target = self.page + dir
+    if target >= 1 and target <= self.pages then return self:goToPage(target) end
+    if self:inSeries() and self:stepSeries(dir) then return end
+    if wrap then self:goToPage(dir > 0 and 1 or self.pages) end
 end
 
 function LibraryView:goToPage(page)
@@ -691,15 +1149,21 @@ function LibraryView:goToPage(page)
     self:refreshBody()
 end
 
-function LibraryView:onNextPage() self:goToPage(self.page + 1); return true end
-function LibraryView:onPrevPage() self:goToPage(self.page - 1); return true end
+function LibraryView:onNextPage() self:turnPage(1); return true end
+function LibraryView:onPrevPage() self:turnPage(-1); return true end
 
 function LibraryView:onSwipe(_, ges)
     local dir = ges.direction
+    if dir == "south" and self.plugin.openControls
+            and Core.inControlsCorner(ges.pos.x, ges.pos.y, self.dimen.w, self.dimen.h)
+            and self.plugin:openControls() then
+        self:keyboardGuard()
+        return true
+    end
     if dir == "west" or dir == "north" then
-        self:goToPage(self.page < self.pages and self.page + 1 or 1)
+        self:turnPage(1, true)
     elseif dir == "east" or dir == "south" then
-        self:goToPage(self.page > 1 and self.page - 1 or self.pages)
+        self:turnPage(-1, true)
     else
         return false
     end
@@ -713,6 +1177,18 @@ function LibraryView:onTileTap(tile)
     else
         self.plugin:openBook(tile.book.path, self)
     end
+end
+
+function LibraryView:onResume()
+    self:keyboardGuard()
+    local book = self.last_book or Core.resumeBook(self.all_books)
+    if book then self.plugin:openBook(book.path, self) end
+end
+
+function LibraryView:setBarelyThreshold(t)
+    self.barely_threshold = Core.barelyThreshold(t)
+    self.page = 1
+    self:refreshBody(true)
 end
 
 function LibraryView:onTileHold(tile)
@@ -734,33 +1210,83 @@ end
 function LibraryView:onCloseWidget()
     if self._search_action then UIManager:unschedule(self._search_action) end
     if self._cover_poll then UIManager:unschedule(self._cover_poll) end
+    if self._cover_submit then UIManager:unschedule(self._cover_submit) end
+    if not self.covers.bim then Covers.cancel() end
     self.cover_cache:clear()
     -- Cover buffers live in C memory the Lua GC does not see: collect now.
     collectgarbage("collect")
     if self.plugin then self.plugin:onViewClosed(self) end
 end
 
+--- Where the Library is (tab, open group, page, search), to rebuild it
+-- after the screen rotates.
+function LibraryView:placeState()
+    return {
+        tab = self.tab,
+        group = self.group and { kind = self.group.kind, name = self.group.name },
+        page = self.page,
+        query = self.query ~= "" and self.query or nil,
+    }
+end
+
+function LibraryView:restorePlace(st)
+    if st.tab and st.tab ~= self.tab then self:setTab(st.tab) end
+    if st.group then
+        for _, g in ipairs(self:groupsFor(st.group.kind)) do
+            if g.name == st.group.name then self:openGroup(g); break end
+        end
+    end
+    if st.query then
+        self.search_input:setText(st.query)
+        self:applySearch(st.query)
+    end
+    if st.page and st.page > 1 then self:goToPage(st.page) end
+end
+
 --- After a book's status or metadata changed.
 function LibraryView:refreshData()
     self:reloadData()
+    self:reresolveGroup()
     self:refreshBody(true)
+end
+
+--- The footer's sort label was tapped: Author, Title, Date added, Last read, Series.
+function LibraryView:showSortPicker()
+    self:keyboardGuard()
+    self.plugin:showSortPicker(self)
+end
+
+--- The footer's "63 / 72" was tapped: ask for a page number.
+function LibraryView:showPageJump()
+    if not self.pages or self.pages < 2 then return end
+    self:keyboardGuard()
+    self.plugin:showPageJump(self)
 end
 
 function LibraryView:resort(mode)
     self.sort = mode
+    self:rememberPref("sort", mode)
     self:reloadData()
+    self:reresolveGroup()
     self.page = 1
     self:refreshBody(true)
 end
 
 function LibraryView:setViewMode(mode)
     self.view_mode = Core.viewMode(mode)
+    self:rememberPref("view", self.view_mode)
     self.page = 1
     self:refreshBody(true)
 end
 
 function LibraryView:setShowContinue(on)
     self.show_continue = on and true or false
+    self.page = 1
+    self:refreshBody(true)
+end
+
+function LibraryView:setTopRow(mode)
+    self.top_row = Core.topRow(mode)
     self.page = 1
     self:refreshBody(true)
 end
@@ -773,16 +1299,65 @@ function LibraryView:setColumns(cols)
 end
 
 ----------------------------------------------------------------------------
--- Covers not yet in the BookInfoManager database
+-- Covers not extracted yet
 ----------------------------------------------------------------------------
 
 function LibraryView:scheduleCoverExtraction()
-    local bim = self.plugin:getBIM()
-    if not bim or not self.missing_covers or #self.missing_covers == 0 then return end
+    if not self.missing_covers then return end
+    if self.covers.bim then return self:scheduleBIMExtraction() end
+    return self:scheduleBuiltinExtraction()
+end
+
+--- Built-in covers: queue the visible books first, then the rest of the
+-- current list, and redraw when a visible cover lands.
+function LibraryView:scheduleBuiltinExtraction()
+    local store = self.covers.store
+    self.pending_covers = self.missing_covers
+    if #self.pending_covers == 0 and Covers.isRunning() then return end
+    local rest = {}
+    for _, b in ipairs(self.continue_books or {}) do rest[#rest + 1] = b end
+    for _, it in ipairs(self.current and self.current.items or {}) do
+        local b = it.path and it or it.cover_book
+        if b then rest[#rest + 1] = b end
+    end
+    local items = Covers.order(self.pending_covers, rest, function(b) return store:state(b) ~= nil end)
+    if #items == 0 then return end
+    -- Same work at the head of the queue as last time: nothing to rewrite.
+    local sig = items[1].key .. "|" .. #items
+    if sig == self._cover_sig and Covers.isRunning() then return end
+    self._cover_sig = sig
+    -- After the first paint, so opening the Library is not slowed by the fork.
+    if self._cover_submit then UIManager:unschedule(self._cover_submit) end
+    self._cover_submit = function()
+        self._cover_submit = nil
+        Covers.submit(items, function(done) self:onCoversProgress(done) end)
+    end
+    UIManager:nextTick(self._cover_submit)
+end
+
+--- Called by the background job while it runs: redraw if a visible cover is ready.
+function LibraryView:onCoversProgress(done)
+    local landed = false
+    for _, b in ipairs(self.pending_covers or {}) do
+        if self.covers.store:refresh(b) then landed = true end
+    end
+    if landed then
+        self.timings.covers_landed = (self.timings.covers_landed or 0) + 1
+        self:refreshBody()
+    elseif done then
+        self._cover_sig = nil
+    end
+end
+
+--- Project: Title or Cover browser loaded: let its BookInfoManager extract
+-- into its database, as before.
+function LibraryView:scheduleBIMExtraction()
+    local bim = self.covers.bim
+    if #self.missing_covers == 0 then return end
     if self._cover_poll then return end -- a job is already running for an earlier page
     local files = {}
-    for _, path in ipairs(self.missing_covers) do
-        table.insert(files, { filepath = path, cover_specs = { max_cover_w = 600, max_cover_h = 600 } })
+    for _, b in ipairs(self.missing_covers) do
+        table.insert(files, { filepath = b.path, cover_specs = { max_cover_w = 600, max_cover_h = 600 } })
     end
     UIManager:nextTick(function()
         local ok, launched = pcall(bim.extractInBackground, bim, files)

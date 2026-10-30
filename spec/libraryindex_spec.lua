@@ -160,12 +160,52 @@ describe("Index", function()
         eq(idx.stats.refreshed, 7)
     end)
 
+    it("keeps percent read from the disk cache without re-reading sidecars", function()
+        reset()
+        local warm = newIndex()
+        warm:build() -- make sure a cache with the current sidecars is on disk
+        reset()
+        local idx = newIndex()
+        local books = byName(idx:build())
+        eq(idx.stats.from_cache, true)
+        eq(counters.sidecar, 0)
+        eq(books["The Time Machine.epub"].percent, 0.5)
+        eq(books["Emma.EPUB"].percent, 1)
+        eq(books["Persuasion.mobi"].percent, nil)
+        -- so the "Barely started" filter works on a cached index too
+        eq(#Core.filterStatus(idx.books, "barely", 0.25), 0)
+        eq(#Core.filterStatus(idx.books, "barely", 0.10), 0)
+        sidecar_mtime["/sdr/tm.lua"] = 22
+        sidecar_data["/sdr/tm.lua"].percent_finished = 0.04
+        local idx2 = newIndex()
+        idx2:build()
+        reset()
+        local idx3 = newIndex()
+        idx3:build()
+        eq(counters.sidecar, 0)
+        eq(#Core.filterStatus(idx3.books, "barely", 0.05), 1)
+        sidecar_data["/sdr/tm.lua"].percent_finished = 0.5
+        sidecar_mtime["/sdr/tm.lua"] = 23
+    end)
+
     it("builds search keys over title, authors and series", function()
         local idx = newIndex()
         local books = idx:build()
         eq(#Core.searchIndexed(books, "wells classics"), 2)
         eq(#Core.searchIndexed(books, "prometheus"), 1)
         eq(#Core.searchIndexed(books, "austen"), 3)
+        os.remove(CACHE)
+    end)
+
+    it("precomputes the words typo-tolerant search uses", function()
+        local idx = newIndex()
+        local books = idx:build()
+        for _, b in ipairs(books) do
+            eq(type(b.search_tokens), "table")
+            eq(type(b.search_norm), "string")
+        end
+        eq(#Core.searchIndexed(books, "austne", nil, nil, true), 3)
+        eq(#Core.searchIndexed(books, "prometeus", nil, nil, true), 1)
         os.remove(CACHE)
     end)
 end)

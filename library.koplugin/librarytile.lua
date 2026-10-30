@@ -17,13 +17,14 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local OverlapGroup = require("ui/widget/overlapgroup")
-local ProgressWidget = require("ui/widget/progresswidget")
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local Widget = require("ui/widget/widget")
 local Screen = Device.screen
+local Core = require("librarycore")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -87,26 +88,65 @@ local function fit(w, h, max_w, max_h)
 end
 M.fit = fit
 
---- Return a scaled cover blitbuffer for `path`, or nil.
--- `bim` is the BookInfoManager (or nil). Results, including "no cover yet",
--- are cached; call cache:drop(path) after a background extraction fills it in.
-function M.getCover(cache, bim, path, max_w, max_h)
-    local key = path .. "@" .. max_w .. "x" .. max_h
+-- Scale `bb` for a `box_w` x `box_h` slot (see Core.coverPlacement): covers
+-- of about the slot's shape fill it exactly (a few pixels cropped evenly),
+-- others are fitted inside it. Frees `bb`.
+local function scaleInto(cache, key, bb, box_w, box_h)
+    local RenderImage = require("ui/renderimage")
+    local place = Core.coverPlacement(bb:getWidth(), bb:getHeight(), box_w, box_h)
+    local scaled = RenderImage:scaleBlitBuffer(bb, place.w, place.h, true) -- frees the original
+    if place.mode == "fill" and (place.w > box_w or place.h > box_h) then
+        local cropped = Blitbuffer.new(box_w, box_h, scaled:getType())
+        cropped:blitFrom(scaled, 0, 0, place.crop_x, place.crop_y, box_w, box_h)
+        scaled:free() -- ours alone: never cached, never on screen
+        scaled = cropped
+    end
+    cache:put(key, scaled)
+    return scaled
+end
+
+--- Return a scaled cover blitbuffer for `book`, or nil, and whether the
+-- answer is final (false: not extracted yet, the caller should queue it).
+-- `covers` = { store = librarycovers Store or nil, bim = BookInfoManager or nil }.
+-- Sources, first hit wins:
+--   1. the in-memory cache of scaled covers;
+--   2. the built-in thumbnail file (small JPEG, cheapest to decode);
+--   3. the cover browser database (Project: Title or Cover browser) if loaded.
+-- Results, including "no cover", are cached; call cache:drop() or clear()
+-- after a background extraction fills one in.
+function M.getCover(cache, covers, book, max_w, max_h)
+    local path = book.path
+    local key = path .. "@" .. max_w .. "x" .. max_h .. "#slot"
     local cached = cache:get(key)
     if cached ~= nil then return cached or nil, cached ~= false end
-    if not bim then return nil, false end
-    local ok, info = pcall(bim.getBookInfo, bim, path, true)
-    if not ok or not info then return nil, false end -- not in DB yet: do not cache
-    if not info.cover_bb then
-        if info.cover_fetched then cache:put(key, false) end
-        return nil, info.cover_fetched and true or false
+    covers = covers or {}
+    local state, file
+    if covers.store then
+        state, file = covers.store:state(book)
+        if state == "cover" then
+            local bb = require("librarycovers").loadThumb(file)
+            if bb then return scaleInto(cache, key, bb, max_w, max_h), true end
+            covers.store:forget(path) -- unreadable thumbnail: extract again
+            state = nil
+        end
     end
-    local bb = info.cover_bb
-    local w, h = fit(bb:getWidth(), bb:getHeight(), max_w, max_h)
-    local RenderImage = require("ui/renderimage")
-    local scaled = RenderImage:scaleBlitBuffer(bb, w, h, true) -- frees the original
-    cache:put(key, scaled)
-    return scaled, true
+    if covers.bim then
+        local ok, info = pcall(covers.bim.getBookInfo, covers.bim, path, true)
+        if ok and info then
+            if info.cover_bb then return scaleInto(cache, key, info.cover_bb, max_w, max_h), true end
+            if info.cover_fetched then
+                cache:put(key, false)
+                return nil, true
+            end
+        end
+        if state == "none" then cache:put(key, false); return nil, true end
+        return nil, false
+    end
+    if state == "none" then
+        cache:put(key, false)
+        return nil, true
+    end
+    return nil, false
 end
 
 ----------------------------------------------------------------------------
@@ -121,23 +161,111 @@ local function getFaces()
             sub = Font:getFace("cfont", 13),
             placeholder_title = Font:getFace("cfont", 17),
             placeholder_sub = Font:getFace("cfont", 14),
-            badge = Font:getFace("cfont", 13),
-            chip = Font:getFace("cfont", 16),
+            badge = Font:getFace("cfont", 12),
+            chip = Font:getFace("cfont", 15),
+            tab = Font:getFace("cfont", 17),
+            percent = Font:getFace("cfont", 12),
         }
     end
     return faces
 end
 M.getFaces = getFaces
 
---- Height of the text under a cover: title and a second line, or the
--- title only when `one_line` (Continue reading, where the bar shows progress).
+-- Spacing and sizes shared by tiles and rows (scaled for the screen's dpi).
+local function shadowSize() return math.max(2, Screen:scaleBySize(2)) end
+local function barHeight() return math.max(4, Screen:scaleBySize(3)) end
+M.shadowSize = shadowSize
+
+--- Height of the progress row under a cover: a thin bar and "43 %".
+function M.progressRowHeight()
+    local t = TextWidget:new{ text = "100 %", face = getFaces().percent }
+    local h = math.max(barHeight(), t:getSize().h)
+    t:free()
+    return h
+end
+
+--- Height of everything under a cover: the progress row, the title and a
+-- second line (or the title only when `one_line`). Every tile reserves the
+-- progress row, so titles line up across a row whatever the books' state.
 function M.labelHeight(one_line)
     local f = getFaces()
     local t = TextWidget:new{ text = "Ag", face = f.title, bold = true }
     local s = TextWidget:new{ text = "Ag", face = f.sub }
-    local h = t:getSize().h + (one_line and 0 or s:getSize().h) + Size.padding.small
+    local h = Size.padding.default + M.progressRowHeight() + Size.padding.small
+        + t:getSize().h + (one_line and 0 or s:getSize().h) + Size.padding.small
     t:free(); s:free()
     return h
+end
+
+----------------------------------------------------------------------------
+-- Small painted widgets: a soft drop shadow and a rounded progress bar
+----------------------------------------------------------------------------
+
+--- Paints a flat shadow down and to the right of its child, like a book
+-- lying on a page. One grey rectangle: crisp on e-ink, no dithering.
+local Shadow = Widget:extend{
+    offset = nil,
+    color = Blitbuffer.COLOR_LIGHT_GRAY,
+    stack = false, -- two layers, like a small pile of books (groups)
+}
+M.Shadow = Shadow
+
+function Shadow:init()
+    self.offset = self.offset or shadowSize()
+    self.depth = self.stack and 2 * self.offset or self.offset
+end
+
+function Shadow:getSize()
+    local s = self[1]:getSize()
+    return Geom:new{ w = s.w + self.depth, h = s.h + self.depth }
+end
+
+function Shadow:paintTo(bb, x, y)
+    local s = self[1]:getSize()
+    local o = self.offset
+    self.dimen = Geom:new{ x = x, y = y, w = s.w + self.depth, h = s.h + self.depth }
+    if self.stack then
+        -- a second "book" behind: a white sheet with a grey edge
+        bb:paintRect(x + 2 * o, y + 2 * o, s.w, s.h, Blitbuffer.COLOR_GRAY_9)
+        bb:paintRect(x + o, y + o, s.w, s.h, Blitbuffer.COLOR_WHITE)
+        bb:paintBorder(x + o, y + o, s.w, s.h, math.max(1, Size.border.thin), Blitbuffer.COLOR_GRAY_7)
+    else
+        bb:paintRect(x + o, y + o, s.w, s.h, self.color)
+    end
+    self[1]:paintTo(bb, x, y)
+end
+
+function Shadow:free()
+    if self[1] and self[1].free then self[1]:free() end
+end
+
+--- A rounded progress bar: light track, dark fill.
+local Bar = Widget:extend{
+    width = nil,
+    height = nil,
+    fraction = 0,
+    track = Blitbuffer.COLOR_GRAY_D,
+    fill = Blitbuffer.COLOR_GRAY_3,
+}
+M.Bar = Bar
+
+function Bar:init()
+    self.height = self.height or barHeight()
+    self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
+end
+
+function Bar:getSize() return Geom:new{ w = self.width, h = self.height } end
+
+function Bar:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    local r = math.floor(self.height / 2)
+    bb:paintRoundedRect(x, y, self.width, self.height, self.track, r)
+    local fw = Core.barFill(self.width, self.fraction, self.height)
+    if fw >= self.height then
+        bb:paintRoundedRect(x, y, fw, self.height, self.fill, r)
+    elseif fw > 0 then
+        bb:paintRect(x, y, fw, self.height, self.fill)
+    end
 end
 
 ----------------------------------------------------------------------------
@@ -169,6 +297,7 @@ local function placeholder(w, h, title, subtitle)
             height = math.floor(h * 0.25),
             height_adjust = true,
             height_overflow_show_ellipsis = true,
+            fgcolor = Blitbuffer.COLOR_GRAY_3,
             bgcolor = Blitbuffer.COLOR_GRAY_E,
         })
     end
@@ -177,6 +306,7 @@ local function placeholder(w, h, title, subtitle)
         height = h,
         padding = 0,
         bordersize = Size.border.thin,
+        color = Blitbuffer.COLOR_GRAY_9,
         background = Blitbuffer.COLOR_GRAY_E,
         CenterContainer:new{
             dimen = Geom:new{ w = w - 2 * Size.border.thin, h = h - 2 * Size.border.thin },
@@ -185,63 +315,119 @@ local function placeholder(w, h, title, subtitle)
     }
 end
 
+--- A cover image in a box of exactly (w, h), thin border included: covers
+-- that were fitted rather than filled sit centred on a light background.
+local function coverBox(bb, w, h)
+    local b = Size.border.thin
+    local img = ImageWidget:new{ image = bb, image_disposable = false, width = bb:getWidth(), height = bb:getHeight() }
+    return FrameContainer:new{
+        width = w, height = h, padding = 0,
+        bordersize = b,
+        color = Blitbuffer.COLOR_GRAY_7,
+        background = Blitbuffer.COLOR_GRAY_E,
+        CenterContainer:new{ dimen = Geom:new{ w = w - 2 * b, h = h - 2 * b }, img },
+    }
+end
+
+--- The cover (or placeholder) of `book` in a (w, h) box with a 2:3 shape.
+-- Returns the widget, its width and whether the cover is still to be made.
+local function bookCover(tile, book, box_w, box_h, title, sub)
+    local b = Size.border.thin
+    local w = math.min(box_w, math.floor(box_h * 2 / 3 + 0.5))
+    local h = math.min(box_h, math.floor(w * 3 / 2 + 0.5))
+    local bb, known
+    if book then
+        bb, known = M.getCover(tile.cover_cache, tile.covers, book, w - 2 * b, h - 2 * b)
+    end
+    local needs = book and not known and tile.covers ~= nil
+    if bb then return coverBox(bb, w, h), w, h, needs end
+    return placeholder(w, h, title, sub), w, h, needs
+end
+
 ----------------------------------------------------------------------------
 -- Badges
 ----------------------------------------------------------------------------
 
 local function pill(text, inverted)
     local f = getFaces()
+    local t = TextWidget:new{
+        text = text,
+        face = f.badge,
+        bold = true,
+        fgcolor = inverted and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK,
+        bgcolor = inverted and Blitbuffer.COLOR_GRAY_2 or Blitbuffer.COLOR_WHITE,
+    }
+    local h = t:getSize().h
     return FrameContainer:new{
         padding = 0,
-        padding_left = Size.padding.small,
-        padding_right = Size.padding.small,
+        padding_left = Size.padding.default,
+        padding_right = Size.padding.default,
         bordersize = Size.border.thin,
-        radius = Size.radius.default,
-        background = inverted and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
-        TextWidget:new{
-            text = text,
-            face = f.badge,
-            bold = true,
-            fgcolor = inverted and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK,
-            bgcolor = inverted and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
-        },
+        color = inverted and Blitbuffer.COLOR_GRAY_2 or Blitbuffer.COLOR_GRAY_5,
+        radius = math.floor(h / 2),
+        background = inverted and Blitbuffer.COLOR_GRAY_2 or Blitbuffer.COLOR_WHITE,
+        t,
     }
 end
 M.pill = pill
 
---- Overlay the progress decorations on a cover of size (w, h).
+--- Overlay the status badges on a cover of size (w, h).
 local function decorate(cover, w, h, book)
     local layers = OverlapGroup:new{ dimen = Geom:new{ w = w, h = h }, allow_mirroring = false, cover }
-    local m = Size.padding.small
+    local m = Size.padding.default
+    local p
     if book.status == "complete" then
-        local p = pill("\u{2713}", true)
-        p.overlap_offset = { w - p:getSize().w - m, m }
-        table.insert(layers, p)
+        p = pill("\u{2713}", true)
     elseif book.status == "new" then
-        local p = pill(_("NEW"), false)
-        p.overlap_offset = { w - p:getSize().w - m, m }
-        table.insert(layers, p)
-    elseif book.percent then
-        local bar_h = Screen:scaleBySize(7)
-        local bar = ProgressWidget:new{
-            width = w - 2 * m,
-            height = bar_h,
-            percentage = book.percent,
-            margin_h = 0, margin_v = 0,
-            bordersize = Size.border.thin,
-            radius = 0,
-            fillcolor = Blitbuffer.COLOR_BLACK,
-            bgcolor = Blitbuffer.COLOR_WHITE,
-        }
-        bar.overlap_offset = { m, h - bar_h - m }
-        table.insert(layers, bar)
+        p = pill(_("NEW"), false)
+    elseif book.status == "abandoned" then
+        p = pill(_("on hold"), false)
     end
-    if book.status == "abandoned" then
-        local p = pill(_("on hold"), false)
-        p.overlap_offset = { m, m }
+    if p then
+        p.overlap_offset = { w - p:getSize().w - m, m }
         table.insert(layers, p)
     end
     return layers
+end
+
+--- Under a cover: a thin bar and "43 %" for a book being read, nothing
+-- (but the same height) otherwise.
+-- For a group (collection, author, series), how many of its books are
+-- finished: "2/6" on the bar.
+local function progressRow(book, w, group)
+    local h = M.progressRowHeight()
+    local fraction, label
+    if group then
+        local pr = Core.seriesProgress(group.books)
+        if pr.total > 0 then
+            fraction, label = pr.read / pr.total, T(_("%1/%2"), pr.read, pr.total)
+        end
+    elseif book and book.percent and book.status ~= "new" and book.status ~= "complete" then
+        fraction, label = book.percent, T(_("%1 %"), math.floor(book.percent * 100 + 0.5))
+    end
+    if not fraction then
+        return VerticalSpan:new{ width = h }
+    end
+    local pct = TextWidget:new{
+        text = label,
+        face = getFaces().percent, bold = true, fgcolor = Blitbuffer.COLOR_GRAY_3,
+    }
+    local gap = Size.padding.default
+    local bar_w = math.max(barHeight() * 2, w - pct:getSize().w - gap)
+    return CenterContainer:new{
+        dimen = Geom:new{ w = w, h = h },
+        HorizontalGroup:new{ align = "center", Bar:new{ width = bar_w, fraction = fraction }, HorizontalSpan:new{ width = gap }, pct },
+    }
+end
+
+--- "3 · Title" inside a series (when the book has a number), else the title.
+function M.bookTitle(book, series_number)
+    local title = book.title or book.name or ""
+    if series_number then
+        local n = Core.seriesNumber(book.series_index)
+        if n then return n .. " · " .. title end
+    end
+    return title
 end
 
 function M.statusLine(book)
@@ -251,6 +437,81 @@ function M.statusLine(book)
         return T(_("%1 % read"), math.floor(book.percent * 100 + 0.5))
     end
     return nil
+end
+
+--- The second line under a shelf: a series' author(s), else "3 books"
+-- (the count is also on the shelf's pill).
+function M.groupSecondLine(group)
+    return M.seriesAuthors(group) or M.bookCount(group)
+end
+
+--- "Terry Pratchett, Neil Gaiman +1" for a series shelf; nil otherwise.
+function M.seriesAuthors(group)
+    if group.kind ~= "series" then return nil end
+    local authors = group.authors or Core.groupAuthors(group.books)
+    group.authors = authors
+    if #authors == 0 then return nil end
+    local s = table.concat(authors, ", ", 1, math.min(2, #authors))
+    if #authors > 2 then s = s .. " +" .. (#authors - 2) end
+    return s
+end
+
+function M.bookCount(group)
+    local n = #group.books
+    return n == 1 and _("1 book") or T(_("%1 books"), n)
+end
+
+--- A list row's two lines for a book: the title over "authors · series #n",
+-- or, sorted by author, the authors over the title.
+function M.bookLines(book, series_number, author_first)
+    local title = M.bookTitle(book, series_number)
+    local authors = book.authors and table.concat(book.authors, ", ") or ""
+    local series = book.series
+    if series and book.series_index then
+        series = series .. " #" .. (tostring(book.series_index):gsub("%.0$", ""))
+    end
+    if author_first and authors ~= "" then
+        return authors, series and (title .. " · " .. series) or title
+    end
+    local line2 = authors
+    if series then line2 = line2 ~= "" and (line2 .. " · " .. series) or series end
+    return title, line2
+end
+
+--- A compact row's text: "Title · Author" (or "Author · Title" when sorted
+-- by author) for a book, "Name · Author" for a series, the name for other
+-- shelves; and what goes on the right (status, or the book count).
+function M.compactText(item, kind, series_number, author_first, date_text)
+    if kind == "groups" then
+        local a = M.seriesAuthors(item)
+        return a and (item.name .. " · " .. a) or item.name, M.bookCount(item)
+    end
+    local title = M.bookTitle(item, series_number)
+    local author = item.authors and item.authors[1]
+    local left = title
+    if author and author ~= "" then
+        left = author_first and (author .. " · " .. title) or (title .. " · " .. author)
+    end
+    local right = ""
+    if item.status == "complete" then right = "\u{2713}"
+    elseif item.status == "abandoned" then right = _("on hold")
+    elseif item.percent and item.status ~= "new" then right = T(_("%1 %"), math.floor(item.percent * 100 + 0.5))
+    end
+    -- Last read / Date added: the date too (the title is cut, never the date)
+    if date_text and date_text ~= "" then
+        right = right ~= "" and (right .. " · " .. date_text) or date_text
+    end
+    return left, right
+end
+
+--- The second line under a grid cover: the caption when given (Continue
+-- reading), else the author (the bar and badges already show the status),
+-- else the status.
+function M.secondLine(book, caption)
+    if caption then return caption end
+    local author = book.authors and book.authors[1]
+    if author and author ~= "" then return author end
+    return M.statusLine(book) or ""
 end
 
 ----------------------------------------------------------------------------
@@ -263,11 +524,14 @@ local Tile = InputContainer:extend{
     cover_h = nil,
     book = nil,      -- for book tiles
     group = nil,     -- { name=, books=, cover_book= } for group tiles
-    bim = nil,
+    covers = nil,    -- { store=, bim= }, see M.getCover
     cover_cache = nil,
     on_tap = nil,
     on_hold = nil,
     one_line = false, -- title only under the cover
+    caption = nil,    -- second line instead of the author (Continue reading)
+    date_text = nil,  -- second line instead of the author (sorted by Last read / Date added)
+    series_number = false, -- "3 · Title" (inside a series)
 }
 M.Tile = Tile
 
@@ -279,65 +543,55 @@ function Tile:init()
     }
     local f = getFaces()
     local pad = Size.padding.small
-    local cover_w = self.width - 2 * pad
-    local cover_h = self.cover_h - pad
+    local shadow = shadowSize() * (self.group and 2 or 1)
+    local box_w = self.width - 2 * pad - shadow
+    local box_h = self.cover_h - pad - shadow
     local book = self.book or (self.group and self.group.cover_book)
 
-    local bb, known
-    if book then
-        bb, known = M.getCover(self.cover_cache, self.bim, book.path, cover_w, cover_h)
+    local title, sub
+    if self.group then
+        title = self.group.name
+    elseif book then
+        title = book.title
+        sub = book.authors and table.concat(book.authors, ", ")
     end
-    self.needs_cover = book and not known and self.bim ~= nil
-    local cover
-    if bb then
-        local cw, ch = bb:getWidth(), bb:getHeight()
-        local img = ImageWidget:new{ image = bb, image_disposable = false, width = cw, height = ch }
-        cover = FrameContainer:new{ padding = 0, bordersize = Size.border.thin, img }
-        cover_w, cover_h = cw + 2 * Size.border.thin, ch + 2 * Size.border.thin
-    else
-        local title, sub
-        if self.group then
-            title, sub = self.group.name, nil
-        else
-            title = book.title
-            sub = book.authors and table.concat(book.authors, ", ")
-        end
-        local ph_w = math.min(cover_w, math.floor(cover_h * 2 / 3 + 0.5))
-        cover = placeholder(ph_w, cover_h, title, sub)
-        cover_w = ph_w
-    end
+    local cover, cover_w, cover_h, needs = bookCover(self, book, box_w, box_h, title, sub)
+    self.needs_cover = needs
     if self.group then
         local p = pill(tostring(#self.group.books), true)
         cover = OverlapGroup:new{ dimen = Geom:new{ w = cover_w, h = cover_h }, allow_mirroring = false, cover }
-        p.overlap_offset = { cover_w - p:getSize().w - pad, cover_h - p:getSize().h - pad }
+        p.overlap_offset = { cover_w - p:getSize().w - Size.padding.default, cover_h - p:getSize().h - Size.padding.default }
         table.insert(cover, p)
-    else
+    elseif book then
         cover = decorate(cover, cover_w, cover_h, book)
     end
 
     local line1, line2
     if self.group then
         line1 = self.group.name
-        line2 = T(_("%1 books"), #self.group.books)
-        if #self.group.books == 1 then line2 = _("1 book") end
+        line2 = M.groupSecondLine(self.group)
     else
-        line1 = book.title
-        line2 = M.statusLine(book) or (book.authors and book.authors[1]) or ""
+        line1 = M.bookTitle(book, self.series_number)
+        line2 = M.secondLine(book, self.caption or self.date_text)
     end
+    local text_w = self.width - 2 * pad
     local label = VerticalGroup:new{
         align = "center",
-        TextWidget:new{ text = line1 or "", face = f.title, bold = true, max_width = self.width - 2 * pad },
+        VerticalSpan:new{ width = Size.padding.default },
+        progressRow(not self.group and book or nil, cover_w, self.group),
+        VerticalSpan:new{ width = Size.padding.small },
+        TextWidget:new{ text = line1 or "", face = f.title, bold = true, max_width = text_w },
     }
     if not self.one_line then
-        table.insert(label, TextWidget:new{ text = line2, face = f.sub, max_width = self.width - 2 * pad,
-            fgcolor = Blitbuffer.COLOR_GRAY_3 })
+        table.insert(label, TextWidget:new{ text = line2 or "", face = f.sub, max_width = text_w,
+            fgcolor = Blitbuffer.COLOR_GRAY_4 })
     end
     self[1] = VerticalGroup:new{
         align = "center",
         VerticalSpan:new{ width = pad },
         CenterContainer:new{
             dimen = Geom:new{ w = self.width, h = self.cover_h - pad },
-            cover,
+            Shadow:new{ cover, stack = self.group ~= nil },
         },
         label,
     }
@@ -367,6 +621,36 @@ end
 ----------------------------------------------------------------------------
 
 --- Smallest row that fits the two text lines with padding.
+--- A text-only shelf row: one line (authors) or two (series, with authors).
+function M.textRowHeight(lines)
+    local f = getFaces()
+    local t = TextWidget:new{ text = "Ag", face = f.title, bold = true }
+    local h = t:getSize().h + 2 * Size.padding.default + Size.line.thin
+    t:free()
+    if lines == 2 then
+        local s = TextWidget:new{ text = "Ag", face = f.sub }
+        h = h + s:getSize().h + Size.padding.small
+        s:free()
+    end
+    return math.max(h, M.minTouch())
+end
+
+--- A compact row: one line in a smaller font, still a ~5 mm tap target.
+function M.compactRowHeight()
+    local t = TextWidget:new{ text = "Ag", face = M.compactFace() }
+    local h = t:getSize().h + 2 * Size.border.thin + Size.line.thin
+    t:free()
+    return math.max(h, M.mmToPx(5))
+end
+
+--- `mm` millimetres in pixels on this screen.
+function M.mmToPx(mm)
+    local dpi = Screen.getDPI and Screen:getDPI() or 160
+    return math.floor(mm * dpi / 25.4 + 0.5)
+end
+
+function M.compactFace() return Font:getFace("cfont", 13) end
+
 function M.listRowHeight()
     local f = getFaces()
     local t = TextWidget:new{ text = "Ag", face = f.title, bold = true }
@@ -378,7 +662,7 @@ end
 
 --- Right-hand status: a pill for finished / new / on hold, else "42 %" over a bar.
 local function rowStatus(book, w)
-    if book.status == "complete" then return pill("\u{2713}", true) end
+    if book.status == "complete" then return pill("\u{2713} " .. _("Finished"), true) end
     if book.status == "new" then return pill(_("NEW"), false) end
     if book.status == "abandoned" then return pill(_("on hold"), false) end
     if book.percent then
@@ -386,17 +670,8 @@ local function rowStatus(book, w)
         return VerticalGroup:new{
             align = "right",
             TextWidget:new{ text = T(_("%1 %"), math.floor(book.percent * 100 + 0.5)), face = f.title, bold = true },
-            VerticalSpan:new{ width = Size.padding.small },
-            ProgressWidget:new{
-                width = w,
-                height = Screen:scaleBySize(6),
-                percentage = book.percent,
-                margin_h = 0, margin_v = 0,
-                bordersize = Size.border.thin,
-                radius = 0,
-                fillcolor = Blitbuffer.COLOR_BLACK,
-                bgcolor = Blitbuffer.COLOR_WHITE,
-            },
+            VerticalSpan:new{ width = Size.padding.default },
+            Bar:new{ width = w, fraction = book.percent },
         }
     end
     return nil
@@ -409,10 +684,13 @@ local ListRow = InputContainer:extend{
     thumb_h = nil,
     book = nil,
     group = nil,
-    bim = nil,
+    covers = nil,
     cover_cache = nil,
     on_tap = nil,
     on_hold = nil,
+    series_number = false, -- "3 · Title" (inside a series)
+    author_first = false,  -- sorted by author: the authors on the first line
+    text_only = false,     -- shelves on Authors and Series: no cover art
 }
 M.ListRow = ListRow
 
@@ -423,31 +701,34 @@ function ListRow:init()
         HoldTile = { GestureRange:new{ ges = "hold", range = self.dimen } },
     }
     local f = getFaces()
-    local margin = Size.margin.default
-    local pad = Size.padding.default
+    local margin = Size.margin.default + Size.padding.default
+    local pad = Size.padding.large
     local book = self.book or (self.group and self.group.cover_book)
     local line = Size.line.thin
     local inner_h = self.height - line
+    local shadow = shadowSize()
+    if self.text_only then return self:initText(f, margin, pad, line, inner_h) end
 
-    -- thumbnail (cover or placeholder), centred in a fixed box
-    local tw, th = self.thumb_w, math.min(self.thumb_h, inner_h - 2 * Size.padding.small)
-    tw = math.min(tw, math.floor(th * 2 / 3 + 0.5))
+    -- thumbnail (cover or placeholder) with a 2:3 shape, centred in a fixed box
+    local th = math.min(self.thumb_h, inner_h - 2 * Size.padding.small) - shadow
+    local tw = math.min(self.thumb_w - shadow, math.floor(th * 2 / 3 + 0.5))
+    local b = Size.border.thin
     local bb, known
     if book then
-        bb, known = M.getCover(self.cover_cache, self.bim, book.path, tw - 2 * Size.border.thin, th - 2 * Size.border.thin)
+        bb, known = M.getCover(self.cover_cache, self.covers, book, tw - 2 * b, th - 2 * b)
     end
-    self.needs_cover = book and not known and self.bim ~= nil
+    self.needs_cover = book and not known and self.covers ~= nil
     local thumb
     if bb then
-        thumb = FrameContainer:new{ padding = 0, bordersize = Size.border.thin,
-            ImageWidget:new{ image = bb, image_disposable = false, width = bb:getWidth(), height = bb:getHeight() } }
+        thumb = coverBox(bb, tw, th)
     else
         thumb = FrameContainer:new{
             width = tw, height = th, padding = 0,
-            bordersize = Size.border.thin,
+            bordersize = b,
+            color = Blitbuffer.COLOR_GRAY_9,
             background = Blitbuffer.COLOR_GRAY_E,
             CenterContainer:new{
-                dimen = Geom:new{ w = tw - 2 * Size.border.thin, h = th - 2 * Size.border.thin },
+                dimen = Geom:new{ w = tw - 2 * b, h = th - 2 * b },
                 TextWidget:new{
                     text = ((self.group and self.group.name or book and book.title or "?")
                         :match("^[%z\1-\127\194-\244][\128-\191]*") or "?"):upper(),
@@ -456,15 +737,22 @@ function ListRow:init()
             },
         }
     end
-    local thumb_box = CenterContainer:new{ dimen = Geom:new{ w = self.thumb_w, h = inner_h }, thumb }
+    local thumb_box = CenterContainer:new{ dimen = Geom:new{ w = self.thumb_w, h = inner_h }, Shadow:new{ thumb } }
 
     -- right column
     local right
-    local right_w = Screen:scaleBySize(70)
+    local right_w = Screen:scaleBySize(80)
     if self.group then
         right = pill(tostring(#self.group.books), true)
     else
         right = rowStatus(book, right_w)
+        if self.date_text then
+            -- Last read / Date added: a small date under the status
+            local date = TextWidget:new{ text = self.date_text, face = f.sub, fgcolor = Blitbuffer.COLOR_GRAY_4 }
+            right_w = math.max(right_w, date:getSize().w)
+            right = right and VerticalGroup:new{ align = "right", right,
+                VerticalSpan:new{ width = Size.padding.small }, date } or date
+        end
     end
     local right_box = LeftContainer:new{ dimen = Geom:new{ w = right_w, h = inner_h },
         right and FrameContainer:new{ padding = 0, bordersize = 0,
@@ -477,21 +765,15 @@ function ListRow:init()
     local line1, line2
     if self.group then
         line1 = self.group.name
-        line2 = #self.group.books == 1 and _("1 book") or T(_("%1 books"), #self.group.books)
+        line2 = M.groupSecondLine(self.group)
     else
-        line1 = book.title
-        line2 = book.authors and table.concat(book.authors, ", ") or ""
-        if book.series then
-            local s = book.series
-            if book.series_index then s = s .. " #" .. (tostring(book.series_index):gsub("%.0$", "")) end
-            line2 = line2 ~= "" and (line2 .. " · " .. s) or s
-        end
+        line1, line2 = M.bookLines(book, self.series_number, self.author_first)
     end
     local texts = VerticalGroup:new{
         align = "left",
         TextWidget:new{ text = line1 or "", face = f.title, bold = true, max_width = text_w },
         VerticalSpan:new{ width = Size.padding.small },
-        TextWidget:new{ text = line2 or "", face = f.sub, max_width = text_w, fgcolor = Blitbuffer.COLOR_GRAY_3 },
+        TextWidget:new{ text = line2 or "", face = f.sub, max_width = text_w, fgcolor = Blitbuffer.COLOR_GRAY_4 },
     }
     local text_box = LeftContainer:new{ dimen = Geom:new{ w = text_w, h = inner_h }, texts }
 
@@ -507,9 +789,47 @@ function ListRow:init()
             right_box,
             HorizontalSpan:new{ width = margin },
         },
-        LineWidget:new{
-            background = Blitbuffer.COLOR_GRAY_9,
-            dimen = Geom:new{ w = self.width, h = line },
+        -- a light rule from the text column to the right edge, like a phone list
+        HorizontalGroup:new{
+            HorizontalSpan:new{ width = margin + self.thumb_w + pad },
+            LineWidget:new{
+                background = Blitbuffer.COLOR_GRAY_D,
+                dimen = Geom:new{ w = math.max(0, self.width - 2 * margin - self.thumb_w - pad), h = line },
+            },
+        },
+    }
+end
+
+--- Text-only shelf row: the name (and a series' authors) and the book count.
+function ListRow:initText(f, margin, pad, line, inner_h)
+    self.needs_cover = false
+    local right = pill(tostring(#self.group.books), true)
+    local right_w = right:getSize().w
+    local text_w = self.width - 2 * margin - pad - right_w
+    local texts = VerticalGroup:new{
+        align = "left",
+        TextWidget:new{ text = self.group.name or "", face = f.title, bold = true, max_width = text_w },
+    }
+    local sub = M.seriesAuthors(self.group)
+    if sub then
+        table.insert(texts, VerticalSpan:new{ width = Size.padding.small })
+        table.insert(texts, TextWidget:new{ text = sub, face = f.sub, max_width = text_w,
+            fgcolor = Blitbuffer.COLOR_GRAY_4 })
+    end
+    self[1] = VerticalGroup:new{
+        align = "left",
+        HorizontalGroup:new{
+            align = "center",
+            HorizontalSpan:new{ width = margin },
+            LeftContainer:new{ dimen = Geom:new{ w = text_w, h = inner_h }, texts },
+            HorizontalSpan:new{ width = pad },
+            CenterContainer:new{ dimen = Geom:new{ w = right_w, h = inner_h }, right },
+            HorizontalSpan:new{ width = margin },
+        },
+        HorizontalGroup:new{
+            HorizontalSpan:new{ width = margin },
+            LineWidget:new{ background = Blitbuffer.COLOR_GRAY_D,
+                dimen = Geom:new{ w = math.max(0, self.width - 2 * margin), h = line } },
         },
     }
 end
@@ -520,41 +840,111 @@ ListRow.onTapTile = Tile.onTapTile
 ListRow.onHoldTile = Tile.onHoldTile
 
 ----------------------------------------------------------------------------
--- Chip (tabs and status filters)
+-- Compact row (compact view): one line, many rows per page
 ----------------------------------------------------------------------------
+
+local CompactRow = InputContainer:extend{
+    width = nil,
+    height = nil,
+    book = nil,
+    group = nil,
+    on_tap = nil,
+    on_hold = nil,
+    series_number = false,
+    author_first = false,
+    date_text = nil,
+}
+M.CompactRow = CompactRow
+
+function CompactRow:init()
+    self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
+    self.ges_events = {
+        TapTile = { GestureRange:new{ ges = "tap", range = self.dimen } },
+        HoldTile = { GestureRange:new{ ges = "hold", range = self.dimen } },
+    }
+    self.needs_cover = false
+    local face = M.compactFace()
+    local margin = Size.margin.default + Size.padding.default
+    local pad = Size.padding.large
+    local line = Size.line.thin
+    local inner_h = self.height - line
+    local left, right_text = M.compactText(self.group or self.book, self.group and "groups" or "books",
+        self.series_number, self.author_first, self.date_text)
+    local right = TextWidget:new{ text = right_text or "", face = face, fgcolor = Blitbuffer.COLOR_GRAY_4 }
+    local right_w = right:getSize().w
+    local text_w = self.width - 2 * margin - (right_w > 0 and (pad + right_w) or 0)
+    local row = HorizontalGroup:new{
+        align = "center",
+        HorizontalSpan:new{ width = margin },
+        LeftContainer:new{ dimen = Geom:new{ w = text_w, h = inner_h },
+            -- TextWidget ends a cut line with an ellipsis
+            TextWidget:new{ text = left or "", face = face, max_width = text_w,
+                bold = self.book and self.book.status == "reading" or false } },
+    }
+    if right_w > 0 then
+        table.insert(row, HorizontalSpan:new{ width = pad })
+        table.insert(row, CenterContainer:new{ dimen = Geom:new{ w = right_w, h = inner_h }, right })
+    end
+    table.insert(row, HorizontalSpan:new{ width = margin })
+    self[1] = VerticalGroup:new{
+        align = "left",
+        row,
+        HorizontalGroup:new{
+            HorizontalSpan:new{ width = margin },
+            LineWidget:new{ background = Blitbuffer.COLOR_GRAY_E,
+                dimen = Geom:new{ w = math.max(0, self.width - 2 * margin), h = line } },
+        },
+    }
+end
+
+CompactRow.getSize = Tile.getSize
+CompactRow.paintTo = Tile.paintTo
+CompactRow.onTapTile = Tile.onTapTile
+CompactRow.onHoldTile = Tile.onHoldTile
+
+----------------------------------------------------------------------------
+-- Chip (status filters, Resume, back): a rounded pill
+----------------------------------------------------------------------------
+
+--- Smallest touch target for chips and tabs, about 7 mm.
+function M.minTouch()
+    return Screen:scaleBySize(42)
+end
 
 local Chip = InputContainer:extend{
     text = nil,
     selected = false,
     callback = nil,
     width = nil,
+    max_text_w = nil, -- truncate long text (no fixed width)
 }
 M.Chip = Chip
 
 function Chip:init()
     local f = getFaces()
     local fg = self.selected and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
-    local bg = self.selected and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE
+    local bg = self.selected and Blitbuffer.COLOR_GRAY_2 or Blitbuffer.COLOR_WHITE
+    local hpad = Size.padding.large
     local text = TextWidget:new{ text = self.text, face = f.chip, bold = self.selected, fgcolor = fg, bgcolor = bg,
-        max_width = self.width and (self.width - 2 * Size.padding.default) or nil }
+        max_width = self.width and (self.width - 2 * hpad) or self.max_text_w }
+    local b = Size.border.thin
+    local h = math.max(text:getSize().h + 2 * Size.padding.default, math.floor(M.minTouch() * 0.85))
+    local w = self.width or (text:getSize().w + 2 * hpad + 2 * b)
     local frame = FrameContainer:new{
-        padding = Size.padding.small,
-        padding_left = Size.padding.default,
-        padding_right = Size.padding.default,
-        bordersize = Size.border.thin,
-        radius = Size.radius.button,
+        padding = 0,
+        bordersize = b,
+        color = self.selected and Blitbuffer.COLOR_GRAY_2 or Blitbuffer.COLOR_GRAY_7,
+        radius = math.floor(h / 2),
         background = bg,
-        width = self.width,
+        width = w,
+        height = h,
         CenterContainer:new{
-            dimen = Geom:new{
-                w = (self.width or (text:getSize().w + 2 * Size.padding.default)) - 2 * Size.padding.default - 2 * Size.border.thin,
-                h = text:getSize().h,
-            },
+            dimen = Geom:new{ w = w - 2 * b, h = h - 2 * b },
             text,
         },
     }
     self[1] = frame
-    self.dimen = Geom:new{ x = 0, y = 0, w = frame:getSize().w, h = frame:getSize().h }
+    self.dimen = Geom:new{ x = 0, y = 0, w = w, h = h }
     self.ges_events = { TapChip = { GestureRange:new{ ges = "tap", range = self.dimen } } }
 end
 
@@ -567,5 +957,40 @@ function Chip:onTapChip()
     if self.callback then self.callback() end
     return true
 end
+
+----------------------------------------------------------------------------
+-- Tab (Books | Collections | Authors | Series): text with an underline
+----------------------------------------------------------------------------
+
+local Tab = InputContainer:extend{
+    text = nil,
+    selected = false,
+    callback = nil,
+    width = nil,
+}
+M.Tab = Tab
+
+function Tab:init()
+    local f = getFaces()
+    local text = TextWidget:new{
+        text = self.text, face = f.tab, bold = self.selected,
+        fgcolor = self.selected and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_5,
+        max_width = self.width - 2 * Size.padding.default,
+    }
+    local mark_h = math.max(3, Screen:scaleBySize(2.5))
+    local h = math.max(M.minTouch(), text:getSize().h + 2 * Size.padding.default + mark_h)
+    local mark_w = math.min(self.width - 2 * Size.padding.large, text:getSize().w + 2 * Size.padding.large)
+    self[1] = VerticalGroup:new{
+        align = "center",
+        CenterContainer:new{ dimen = Geom:new{ w = self.width, h = h - mark_h }, text },
+        self.selected and LineWidget:new{ background = Blitbuffer.COLOR_BLACK, dimen = Geom:new{ w = mark_w, h = mark_h } }
+            or VerticalSpan:new{ width = mark_h },
+    }
+    self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = h }
+    self.ges_events = { TapChip = { GestureRange:new{ ges = "tap", range = self.dimen } } }
+end
+
+Tab.paintTo = Chip.paintTo
+Tab.onTapChip = Chip.onTapChip
 
 return M
