@@ -16,6 +16,7 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local DataStorage = require("datastorage")
 local Device = require("device")
 local Dispatcher = require("dispatcher")
+local Event = require("ui/event")
 local DocumentRegistry = require("document/documentregistry")
 local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
@@ -48,6 +49,9 @@ local DEFAULTS = {
     series_skip_finished = true, -- Next in series skips books already finished
     reader_tab = true,          -- a Library tab (book icon) in the reader's top menu bar
     rounded_keyboard = true,    -- "Rounded keyboard in search": softer keys for the search bar only
+    remember_views = true,      -- each shelf (collection, author, series, tab) remembers its layout, sort, filter
+    controls_panel = true,      -- swipe down from the Library's top-right corner: light, warmth, toggles
+    -- view_memory: { [key] = { view =, sort =, filter =, t = } }, see Core.viewKey
     -- sleep_cover_prev: KOReader's sleep screen settings from before
     -- "Sleep screen: cover of last book" was turned on (restored when turned off)
 }
@@ -73,6 +77,7 @@ local shared = {
     started = false,      -- the start-up Library has been shown once
     reopen = false,       -- a book was opened from the Library
     view = nil,
+    controls = nil,       -- the open Controls panel
 }
 Library.shared = shared
 
@@ -256,10 +261,12 @@ end
 
 function Library:newView()
     local LibraryView = require("libraryview")
+    local prefs = Core.viewPrefs(self.settings, "books")
     return LibraryView:new{
         plugin = self,
         cols = self.settings.columns,
         view_mode = Core.viewMode(self.settings.view),
+        filter = prefs and prefs.filter or "all",
         show_continue = self.settings.show_continue ~= false,
         top_row = Core.topRow(self.settings.top_row),
         sort = self.settings.sort,
@@ -267,6 +274,33 @@ function Library:newView()
         barely_threshold = Core.barelyThreshold(self.settings.barely_threshold),
         rounded_keyboard = Core.roundedKeyboard(self.settings),
     }
+end
+
+----------------------------------------------------------------------------
+-- Per-shelf memory: layout, sort and filter (see Core.viewPrefs)
+----------------------------------------------------------------------------
+
+--- What `key` should show, or nil when "Remember layout for each shelf" is off.
+function Library:viewPrefs(key)
+    return Core.viewPrefs(self.settings, key)
+end
+
+--- A layout, sort or filter was changed at `key`. With the memory off, the
+-- layout and sort are global (as before) and the filter is not kept.
+function Library:rememberViewPref(key, field, value)
+    local changed
+    if Core.rememberViews(self.settings) then
+        changed = Core.rememberViewPref(self.settings, key, field, value)
+    elseif field ~= "filter" and self.settings[field] ~= value then
+        self.settings[field] = value
+        changed = true
+    end
+    if changed then self:saveSettings() end
+end
+
+function Library:resetViewPrefs(key)
+    Core.resetViewPrefs(self.settings, key)
+    self:saveSettings()
 end
 
 ----------------------------------------------------------------------------
@@ -387,6 +421,72 @@ function Library:onViewClosed(view)
     if shared.view == view then shared.view = nil end
 end
 
+----------------------------------------------------------------------------
+-- Controls panel (librarycontrols.lua, loaded on first use)
+----------------------------------------------------------------------------
+
+function Library:controlsEnabled()
+    return self.settings.controls_panel ~= false and Device:isTouchDevice()
+end
+
+function Library:openControls()
+    if shared.controls or not self:controlsEnabled() then return false end
+    local Controls = require("librarycontrols")
+    local panel = Controls:new{ plugin = self }
+    shared.controls = panel
+    UIManager:show(panel, "ui")
+    return true
+end
+
+function Library:onControlsClosed(panel)
+    if shared.controls == panel then shared.controls = nil end
+end
+
+--- Send a KOReader event (night mode, rotation) to the file browser or reader.
+function Library:sendUIEvent(ev)
+    if self.ui and self.ui.handleEvent then
+        self.ui:handleEvent(ev)
+    else
+        UIManager:broadcastEvent(ev)
+    end
+end
+
+--- The Library plugin of whatever is on screen now (the file browser is
+-- rebuilt when it rotates).
+local function currentLibrary(fallback)
+    local ReaderUI = package.loaded["apps/reader/readerui"]
+    local FileManager = package.loaded["apps/filemanager/filemanager"]
+    local ui = (ReaderUI and ReaderUI.instance) or (FileManager and FileManager.instance)
+    return ui and ui.library or fallback
+end
+
+--- Rotate 90° clockwise and bring the Library back where it was: it is laid
+-- out for one screen size, so it is rebuilt.
+function Library:rotateLibrary()
+    local view = shared.view
+    local state = view and view:placeState()
+    if view then UIManager:close(view) end
+    self:sendUIEvent(Event:new("IterateRotation"))
+    UIManager:nextTick(function()
+        local lib = currentLibrary(self)
+        lib:onShowLibrary()
+        if state and shared.view then shared.view:restorePlace(state) end
+    end)
+end
+
+function Library:controlsMenu()
+    return {
+        text = _("Controls panel (swipe down from top-right corner)"),
+        help_text = _("In the Library, swipe down from the top-right corner for brightness, warmth, Wi-Fi, night mode, the cover sleep screen, rotation and sleep. Swipe up or tap outside the panel to close it. Controls your device does not have are left out."),
+        enabled_func = function() return Device:isTouchDevice() end,
+        checked_func = function() return self.settings.controls_panel ~= false end,
+        callback = function()
+            self.settings.controls_panel = self.settings.controls_panel == false
+            self:saveSettings()
+        end,
+    }
+end
+
 --- Re-read sidecars that changed and history order (cheap, mtime-based).
 function Library:refreshReadingState()
     local index = shared.index
@@ -453,12 +553,10 @@ function Library:showLibraryMenu(view)
     local sort_row, col_row = {}, {}
     for _, mode in ipairs({ "recent", "title", "author", "series", "added" }) do
         table.insert(sort_row, {
-            text = (self.settings.sort == mode and "✓ " or "") .. SORT_NAMES[mode],
+            text = (view.sort == mode and "✓ " or "") .. SORT_NAMES[mode],
             callback = function()
                 close()
-                self.settings.sort = mode
-                self:saveSettings()
-                view:resort(mode)
+                view:resort(mode) -- remembered for this shelf (or the default, on the Books tab)
             end,
         })
     end
@@ -466,11 +564,9 @@ function Library:showLibraryMenu(view)
     for _i, mode in ipairs(Core.VIEWS) do
         local name = mode == "list" and _("List") or _("Grid")
         table.insert(view_row, {
-            text = (Core.viewMode(self.settings.view) == mode and "✓ " or "") .. T(_("View: %1"), name),
+            text = (Core.viewMode(view.view_mode) == mode and "✓ " or "") .. T(_("View: %1"), name),
             callback = function()
                 close()
-                self.settings.view = mode
-                self:saveSettings()
                 view:setViewMode(mode)
             end,
         })
@@ -509,41 +605,59 @@ function Library:showLibraryMenu(view)
             end,
         })
     end
-    dialog = ButtonDialog:new{
-        title = _("Library"),
-        title_align = "center",
-        buttons = {
-            sort_row,
-            view_row,
-            col_row,
-            barely_row,
+    local buttons = { sort_row, view_row, col_row, barely_row }
+    -- Each shelf remembers its own layout, sort and filter: offer to forget them.
+    local remember = Core.rememberViews(self.settings)
+    if remember then
+        local place = view:placeName()
+        local on_books = view:viewKey() == "books"
+        table.insert(buttons, {
             {
-                {
-                    text = (self.settings.start_with_library and "✓ " or "") .. _("Start with Library"),
-                    callback = function()
-                        close()
-                        self.settings.start_with_library = not self.settings.start_with_library
-                        self:saveSettings()
-                    end,
-                },
-                {
-                    text = _("Rescan"),
-                    callback = function()
-                        close()
-                        self:onRescanLibrary()
-                    end,
-                },
+                text = on_books and _("\u{21BA} Reset default layout (grid, Recent, All)")
+                    or T(_("\u{21BA} Reset “%1” to default"), place),
+                enabled = view:hasRemembered(),
+                callback = function()
+                    close()
+                    view:resetRemembered()
+                end,
             },
-            {
-                {
-                    text = _("File browser"),
-                    callback = function()
-                        close()
-                        UIManager:close(view)
-                    end,
-                },
-            },
+        })
+    end
+    local title = _("Library")
+    if remember and view:viewKey() ~= "books" then
+        title = T(_("Library · %1"), view:placeName())
+            .. (view:hasRemembered() and ("\n" .. _("Layout, sort and filter remembered here")) or "")
+    end
+    table.insert(buttons, {
+        {
+            text = (self.settings.start_with_library and "✓ " or "") .. _("Start with Library"),
+            callback = function()
+                close()
+                self.settings.start_with_library = not self.settings.start_with_library
+                self:saveSettings()
+            end,
         },
+        {
+            text = _("Rescan"),
+            callback = function()
+                close()
+                self:onRescanLibrary()
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
+            text = _("File browser"),
+            callback = function()
+                close()
+                UIManager:close(view)
+            end,
+        },
+    })
+    dialog = ButtonDialog:new{
+        title = title,
+        title_align = "center",
+        buttons = buttons,
     }
     UIManager:show(dialog)
 end
@@ -658,6 +772,40 @@ function Library:addReaderTab(menu_items)
     }
 end
 
+--- ☰ → Library → Remember layout for each shelf, and a way to forget them all.
+function Library:rememberViewsMenu()
+    return {
+        text = _("Remember layout for each shelf"),
+        help_text = _("Each collection, author, series and tab remembers its own layout (grid or list), sort and status filter, and opens the way you left it. The Books tab sets the default for places you have not changed. To reset the place you are in, use the Library's ☰ menu. Long-press this item to forget every shelf at once."),
+        checked_func = function() return Core.rememberViews(self.settings) end,
+        callback = function()
+            self.settings.remember_views = not Core.rememberViews(self.settings)
+            self:saveSettings()
+            if shared.view then
+                shared.view:applyRemembered()
+                shared.view:refreshBody(true)
+            end
+        end,
+        hold_callback = function(touchmenu_instance)
+            local n = Core.countViewMemory(self.settings)
+            local ConfirmBox = require("ui/widget/confirmbox")
+            UIManager:show(ConfirmBox:new{
+                text = T(_("Forget the layout, sort and filter remembered for %1 shelves? The Books tab's default stays."), n),
+                ok_text = _("Forget"),
+                ok_callback = function()
+                    Core.resetAllViewPrefs(self.settings)
+                    self:saveSettings()
+                    if shared.view then
+                        shared.view:applyRemembered()
+                        shared.view:refreshBody(true)
+                    end
+                    if touchmenu_instance then touchmenu_instance:updateItems() end
+                end,
+            })
+        end,
+    }
+end
+
 --- G_reader_settings, as the small interface Core's sleep screen helpers use.
 local function readerSettings()
     return {
@@ -667,6 +815,24 @@ local function readerSettings()
     }
 end
 
+function Library:sleepCoverIsOn()
+    return Core.sleepCoverOn(readerSettings())
+end
+
+--- Turn "Sleep screen: cover of last book" on or off (menu and Controls panel).
+function Library:toggleSleepCover()
+    local gs = readerSettings()
+    if Core.sleepCoverOn(gs) then
+        Core.sleepCoverDisable(gs, self.settings.sleep_cover_prev)
+        self.settings.sleep_cover_prev = nil
+    else
+        self.settings.sleep_cover_prev = Core.sleepCoverEnable(gs)
+    end
+    self:saveSettings()
+    logger.info("Library: sleep screen", G_reader_settings:readSetting("screensaver_type"),
+        "hide in file browser:", G_reader_settings:readSetting("screensaver_hide_cover_in_filemanager"))
+end
+
 --- ☰ → Library → Sleep screen: cover of last book. A shortcut to KOReader's
 -- own "Show book cover on sleep screen", which also covers the file browser
 -- and the Library; turning it off restores the previous sleep screen.
@@ -674,19 +840,8 @@ function Library:sleepCoverMenu()
     return {
         text = _("Sleep screen: cover of last book"),
         help_text = _("When the device sleeps, show the cover of the book you read last, also when you are in the Library or the file browser. This turns on KOReader's own \"Show book cover on sleep screen\" (Settings → Screen → Sleep screen). If the book has no cover, KOReader shows its usual sleep screen image. Turning this off brings back the sleep screen you had before."),
-        checked_func = function() return Core.sleepCoverOn(readerSettings()) end,
-        callback = function()
-            local gs = readerSettings()
-            if Core.sleepCoverOn(gs) then
-                Core.sleepCoverDisable(gs, self.settings.sleep_cover_prev)
-                self.settings.sleep_cover_prev = nil
-            else
-                self.settings.sleep_cover_prev = Core.sleepCoverEnable(gs)
-            end
-            self:saveSettings()
-            logger.info("Library: sleep screen", G_reader_settings:readSetting("screensaver_type"),
-                "hide in file browser:", G_reader_settings:readSetting("screensaver_hide_cover_in_filemanager"))
-        end,
+        checked_func = function() return self:sleepCoverIsOn() end,
+        callback = function() self:toggleSleepCover() end,
     }
 end
 
@@ -778,6 +933,8 @@ function Library:addToMainMenu(menu_items)
                     if shared.view then shared.view:setRoundedKeyboard(self.settings.rounded_keyboard) end
                 end,
             },
+            self:rememberViewsMenu(),
+            self:controlsMenu(),
             {
                 text = _("Next in series skips finished books"),
                 help_text = _("Next in series opens the next book you have not finished. Turn this off to always open the very next book."),

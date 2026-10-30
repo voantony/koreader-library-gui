@@ -1120,4 +1120,256 @@ function Core.roundedKeyboard(settings)
     return not (settings and settings.rounded_keyboard == false)
 end
 
+
+----------------------------------------------------------------------------
+-- Per-view memory: layout, sort and filter for each shelf
+----------------------------------------------------------------------------
+-- A "view" is a place in the Library: the Books tab, the Collections /
+-- Authors / Series lists, or one collection, author or series. The Books tab
+-- holds the defaults (settings.view, settings.sort, as before); every other
+-- place keeps its own layout, sort and filter once you change them there,
+-- in settings.view_memory[key] = { view =, sort =, filter = }.
+
+Core.MEMORY_FIELDS = { "view", "sort", "filter" }
+Core.DEFAULT_PREFS = { view = "grid", sort = "recent", filter = "all" }
+Core.VIEW_MEMORY_MAX = 300 -- oldest entries are dropped past this
+
+--- "Remember layout for each shelf": on unless turned off.
+function Core.rememberViews(settings)
+    return not (settings and settings.remember_views == false)
+end
+
+--- The memory key for a place: "books", "tab:authors", "series:Oz", ...
+function Core.viewKey(tab, group)
+    if group then return (group.kind or tab or "group") .. ":" .. tostring(group.name) end
+    if not tab or tab == "books" then return "books" end
+    return "tab:" .. tab
+end
+
+local function validPref(field, v)
+    if v == nil then return nil end
+    if field == "view" then return (v == "list" or v == "grid") and v or nil end
+    if field == "sort" then
+        for _, m in ipairs(Core.SORTS) do if m == v then return v end end
+        return nil
+    end
+    if field == "filter" then
+        for _, f in ipairs(Core.FILTERS) do if f == v then return v end end
+        return nil
+    end
+end
+
+--- The defaults every place starts from (what the Books tab shows).
+function Core.defaultPrefs(settings)
+    local mem = settings.view_memory and settings.view_memory.books or {}
+    return {
+        view = validPref("view", settings.view) or Core.DEFAULT_PREFS.view,
+        sort = validPref("sort", settings.sort) or Core.DEFAULT_PREFS.sort,
+        filter = validPref("filter", mem.filter) or Core.DEFAULT_PREFS.filter,
+    }
+end
+
+--- Layout, sort and filter for `key`, and whether anything is remembered
+-- for it (other than the defaults). With the memory turned off this is nil:
+-- the Library keeps whatever is showing, as before.
+function Core.viewPrefs(settings, key)
+    if not Core.rememberViews(settings) then return nil, false end
+    local prefs = Core.defaultPrefs(settings)
+    if key == "books" then
+        local d = Core.DEFAULT_PREFS
+        return prefs, prefs.view ~= d.view or prefs.sort ~= d.sort or prefs.filter ~= d.filter
+    end
+    local entry = settings.view_memory and settings.view_memory[key]
+    local remembered = false
+    if type(entry) == "table" then
+        for _, f in ipairs(Core.MEMORY_FIELDS) do
+            local v = validPref(f, entry[f])
+            if v then prefs[f] = v; remembered = true end
+        end
+    end
+    return prefs, remembered
+end
+
+--- Remember `field` = `value` for `key`. The Books tab writes the defaults.
+-- Returns true when something changed (the caller saves the settings).
+function Core.rememberViewPref(settings, key, field, value, now)
+    value = validPref(field, value)
+    if not value then return false end
+    if key == "books" and field ~= "filter" then
+        if settings[field] == value then return false end
+        settings[field] = value
+        return true
+    end
+    if not Core.rememberViews(settings) then return false end
+    settings.view_memory = settings.view_memory or {}
+    local entry = settings.view_memory[key]
+    if type(entry) ~= "table" then entry = {}; settings.view_memory[key] = entry end
+    if entry[field] == value then return false end
+    entry[field] = value
+    entry.t = now or os.time()
+    Core.pruneViewMemory(settings.view_memory, Core.VIEW_MEMORY_MAX)
+    return true
+end
+
+--- Drop the oldest entries past `max` (the Books tab's entry is kept).
+function Core.pruneViewMemory(memory, max)
+    local keys = {}
+    for k, e in pairs(memory) do
+        if k ~= "books" then keys[#keys + 1] = { k = k, t = type(e) == "table" and e.t or 0 } end
+    end
+    if #keys <= max then return 0 end
+    table.sort(keys, function(a, b)
+        if a.t ~= b.t then return a.t > b.t end
+        return a.k < b.k
+    end)
+    local dropped = 0
+    for i = max + 1, #keys do memory[keys[i].k] = nil; dropped = dropped + 1 end
+    return dropped
+end
+
+--- Forget what `key` remembers. For the Books tab this puts the defaults
+-- back to grid, Recent, All.
+function Core.resetViewPrefs(settings, key)
+    if key == "books" then
+        settings.view, settings.sort = Core.DEFAULT_PREFS.view, Core.DEFAULT_PREFS.sort
+        if settings.view_memory then settings.view_memory.books = nil end
+        return
+    end
+    if settings.view_memory then settings.view_memory[key] = nil end
+end
+
+--- Forget every place (the Books tab's defaults are kept).
+function Core.resetAllViewPrefs(settings)
+    local books = settings.view_memory and settings.view_memory.books
+    settings.view_memory = books and { books = books } or {}
+end
+
+--- Number of places with their own settings.
+function Core.countViewMemory(settings)
+    local n = 0
+    for k in pairs(settings.view_memory or {}) do if k ~= "books" then n = n + 1 end end
+    return n
+end
+
+
+----------------------------------------------------------------------------
+-- Controls panel (librarycontrols.lua): the pure parts — where it opens,
+-- which toggles it shows, slider maths and the layout.
+----------------------------------------------------------------------------
+
+--- The corner a downward swipe must start in: the top-right eighth of the
+-- width and of the height (KOReader's own DTAP_ZONE_TOP_RIGHT size).
+function Core.inControlsCorner(x, y, w, h)
+    return x >= w * 7 / 8 and y <= h / 8
+end
+
+Core.CONTROL_TOGGLES = { "wifi", "night", "cover_sleep", "rotate", "bluetooth", "sleep" }
+
+--- The toggles this device can use, in panel order. `caps[id]` is true when
+-- the device supports it (Bluetooth: KOReader has no API, so never).
+function Core.controlsToggles(caps)
+    local out = {}
+    for _, id in ipairs(Core.CONTROL_TOGGLES) do
+        if caps and caps[id] then out[#out + 1] = id end
+    end
+    return out
+end
+
+--- The value under `x` on a slider track, rounded to a whole step.
+function Core.sliderValue(x, track_x, track_w, min, max)
+    if track_w <= 0 or max <= min then return min end
+    local f = (x - track_x) / track_w
+    if f < 0 then f = 0 elseif f > 1 then f = 1 end
+    return math.floor(min + f * (max - min) + 0.5)
+end
+
+--- How far along the track `v` is, 0..1.
+function Core.sliderFraction(v, min, max)
+    if max <= min then return 0 end
+    local f = (v - min) / (max - min)
+    if f < 0 then return 0 elseif f > 1 then return 1 end
+    return f
+end
+
+--- Where everything goes, for a screen of w x h with `n_sliders` sliders and
+-- `n_toggles` round toggles (3 per row). Sizes follow the 1264 px wide
+-- Colorsoft and scale with the short side. All rects are { x, y, w, h };
+-- circles are { cx, cy, r }.
+function Core.controlsLayout(w, h, n_sliders, n_toggles)
+    local u = math.min(w, h) / 1264
+    local function px(v) return math.floor(v * u + 0.5) end
+    local L = {}
+    local margin, pad, r = px(20), px(52), px(40)
+    local pw = math.min(w - 2 * margin, px(920))
+    local x = w - margin - pw
+    local left, right = x + pad, x + pw - pad
+    L.u, L.radius, L.left, L.right = u, r, left, right
+    L.header_y = px(36)
+    local y = L.header_y + px(96)
+    L.sliders = {}
+    for i = 1, n_sliders do
+        local s = { label_y = y }
+        local cy = y + px(132)
+        local br = px(38)
+        s.minus = { cx = left + br, cy = cy, r = br }
+        s.plus = { cx = right - br, cy = cy, r = br }
+        local tx = left + 2 * br + px(34)
+        s.track = { x = tx, y = cy - px(11), w = (right - left) - 4 * br - px(68), h = px(22) }
+        s.knob_r = px(34)
+        -- the whole row takes taps and drags, not just the thin track
+        s.hit = { x = left, y = y, w = right - left, h = cy + px(50) - y }
+        L.sliders[i] = s
+        y = cy + px(74)
+    end
+    if n_sliders > 0 then
+        L.divider_y = y
+        y = y + px(44)
+    end
+    L.toggles = {}
+    local cw = (right - left) / 3
+    local cr = px(74)
+    local row_h = px(290)
+    local rows = math.ceil(n_toggles / 3)
+    for i = 1, n_toggles do
+        local row, col = math.floor((i - 1) / 3), (i - 1) % 3
+        local in_row = math.min(3, n_toggles - row * 3)
+        -- centre a short last row
+        local offset = (3 - in_row) * cw / 2
+        L.toggles[i] = {
+            cx = math.floor(left + offset + cw * col + cw / 2),
+            cy = y + cr + row * row_h,
+            r = cr,
+            label_y = y + cr + row * row_h + cr + px(18),
+            sub_y = y + cr + row * row_h + cr + px(66),
+        }
+    end
+    y = y + rows * row_h
+    L.handle = { x = x + math.floor(pw / 2) - px(60), y = y + px(4), w = px(120), h = px(12) }
+    y = y + px(40)
+    -- the panel hangs from the top edge: its top corners are off screen
+    L.panel = { x = x, y = -r, w = pw, h = y + r }
+    L.bottom = y
+    return L
+end
+
+--- Which part of the layout a point hits: "slider", i / "minus", i /
+-- "plus", i / "toggle", i / "panel" / nil (outside: close).
+function Core.controlsHit(L, x, y)
+    local function inCircle(c) return (x - c.cx) ^ 2 + (y - c.cy) ^ 2 <= (c.r * 1.25) ^ 2 end
+    local function inRect(r) return x >= r.x and x < r.x + r.w and y >= r.y and y < r.y + r.h end
+    for i, s in ipairs(L.sliders) do
+        if inCircle(s.minus) then return "minus", i end
+        if inCircle(s.plus) then return "plus", i end
+        if inRect(s.hit) then return "slider", i end
+    end
+    for i, t in ipairs(L.toggles) do
+        if inCircle(t) or (math.abs(x - t.cx) <= t.r * 1.3 and y >= t.cy and y <= t.sub_y + t.r * 0.5) then
+            return "toggle", i
+        end
+    end
+    local p = L.panel
+    if x >= p.x and x < p.x + p.w and y < p.y + p.h then return "panel" end
+    return nil
+end
+
 return Core

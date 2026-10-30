@@ -858,24 +858,91 @@ function LibraryView:setTab(id)
         self.query = ""
     end
     self.tab, self.group, self.page = id, nil, 1
+    self:applyRemembered()
     self:refreshBody(true)
 end
 
 function LibraryView:setFilter(f)
     self:keyboardGuard()
     self.filter, self.page = f, 1
+    self:rememberPref("filter", f)
     self:refreshBody(true)
 end
 
 function LibraryView:openGroup(group)
     self.saved_page = self.page
     self.group, self.page = group, 1
+    self:applyRemembered()
     self:refreshBody(true)
 end
 
 function LibraryView:closeGroup()
     self.group = nil
     self.page = self.saved_page or 1
+    self:applyRemembered()
+    self:refreshBody(true)
+end
+
+----------------------------------------------------------------------------
+-- Per-shelf memory (layout, sort, filter)
+----------------------------------------------------------------------------
+
+--- The key this place's layout, sort and filter are remembered under.
+function LibraryView:viewKey()
+    return Core.viewKey(self.tab, self.group)
+end
+
+--- A name for this place in menus: "Oz", "Authors", "Books".
+function LibraryView:placeName()
+    if self.group then return self.group.name end
+    for _, t in ipairs(TABS) do if t.id == self.tab then return t.text end end
+    return _("Books")
+end
+
+--- After the sort changed, the open group's book list is stale: pick the
+-- same group again from the re-sorted data.
+function LibraryView:reresolveGroup()
+    local g = self.group
+    if not g then return end
+    local kind = g.kind
+    if kind ~= "collections" and kind ~= "authors" and kind ~= "series" then return end
+    for _, ng in ipairs(self:groupsFor(kind)) do
+        if ng.name == g.name then self.group = ng; return end
+    end
+end
+
+--- Put back what this place remembers (nothing when the memory is off).
+-- Does not redraw; the caller does.
+function LibraryView:applyRemembered()
+    local prefs = self.plugin.viewPrefs and self.plugin:viewPrefs(self:viewKey())
+    if not prefs then return false end
+    self.view_mode = Core.viewMode(prefs.view)
+    self.filter = prefs.filter
+    if prefs.sort ~= self.sort then
+        self.sort = prefs.sort
+        self:reloadData()
+        self:reresolveGroup()
+    end
+    return true
+end
+
+--- Remember a change for this place (see Core.rememberViewPref).
+function LibraryView:rememberPref(field, value)
+    if self.plugin.rememberViewPref then self.plugin:rememberViewPref(self:viewKey(), field, value) end
+end
+
+--- Whether this place has its own remembered layout/sort/filter.
+function LibraryView:hasRemembered()
+    if not self.plugin.viewPrefs then return false end
+    local _prefs, remembered = self.plugin:viewPrefs(self:viewKey())
+    return remembered
+end
+
+--- "Reset to default": forget this place's settings and show the defaults.
+function LibraryView:resetRemembered()
+    if self.plugin.resetViewPrefs then self.plugin:resetViewPrefs(self:viewKey()) end
+    self.page = 1
+    self:applyRemembered()
     self:refreshBody(true)
 end
 
@@ -909,6 +976,7 @@ function LibraryView:stepSeries(dir)
     if not g then return false end
     self.group = g
     self.page = dir > 0 and 1 or math.huge
+    self:applyRemembered()
     self:refreshBody(true)
     return true
 end
@@ -936,6 +1004,12 @@ function LibraryView:onPrevPage() self:turnPage(-1); return true end
 
 function LibraryView:onSwipe(_, ges)
     local dir = ges.direction
+    if dir == "south" and self.plugin.openControls
+            and Core.inControlsCorner(ges.pos.x, ges.pos.y, self.dimen.w, self.dimen.h)
+            and self.plugin:openControls() then
+        self:keyboardGuard()
+        return true
+    end
     if dir == "west" or dir == "north" then
         self:turnPage(1, true)
     elseif dir == "east" or dir == "south" then
@@ -994,21 +1068,50 @@ function LibraryView:onCloseWidget()
     if self.plugin then self.plugin:onViewClosed(self) end
 end
 
+--- Where the Library is (tab, open group, page, search), to rebuild it
+-- after the screen rotates.
+function LibraryView:placeState()
+    return {
+        tab = self.tab,
+        group = self.group and { kind = self.group.kind, name = self.group.name },
+        page = self.page,
+        query = self.query ~= "" and self.query or nil,
+    }
+end
+
+function LibraryView:restorePlace(st)
+    if st.tab and st.tab ~= self.tab then self:setTab(st.tab) end
+    if st.group then
+        for _, g in ipairs(self:groupsFor(st.group.kind)) do
+            if g.name == st.group.name then self:openGroup(g); break end
+        end
+    end
+    if st.query then
+        self.search_input:setText(st.query)
+        self:applySearch(st.query)
+    end
+    if st.page and st.page > 1 then self:goToPage(st.page) end
+end
+
 --- After a book's status or metadata changed.
 function LibraryView:refreshData()
     self:reloadData()
+    self:reresolveGroup()
     self:refreshBody(true)
 end
 
 function LibraryView:resort(mode)
     self.sort = mode
+    self:rememberPref("sort", mode)
     self:reloadData()
+    self:reresolveGroup()
     self.page = 1
     self:refreshBody(true)
 end
 
 function LibraryView:setViewMode(mode)
     self.view_mode = Core.viewMode(mode)
+    self:rememberPref("view", self.view_mode)
     self.page = 1
     self:refreshBody(true)
 end
