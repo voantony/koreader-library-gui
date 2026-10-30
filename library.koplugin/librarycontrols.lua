@@ -19,78 +19,18 @@ local C = Blitbuffer
 -- (a fallback font of "cfont", so plain TextWidgets render them).
 local GLYPH = {
     brightness = "\u{EC98}", warmth = "\u{ECA5}", wifi = "\u{ECA8}", wifi_off = "\u{ECA9}",
-    night = "\u{EC0D}", auto_light = "A", cover_sleep = "\u{E9E8}", rotate = "\u{EB74}", sleep = "\u{23FE}",
+    night = "\u{EC0D}", cover_sleep = "\u{E9E8}", rotate = "\u{EB74}", sleep = "\u{23FE}",
 }
-
-----------------------------------------------------------------------------
--- Kindle auto-brightness: the firmware's own switch, com.lab126.powerd
--- flAuto (1 on, 0 off). Read when the panel opens; written only when the
--- user taps Auto, or moves the brightness slider while Auto is on (which
--- turns it off, like a phone). Never written on open or at startup.
--- Uses KOReader's lipc handle when it has one, else the lipc-get-prop /
--- lipc-set-prop tools. Every call is pcall'd; any failure reads as nil.
-----------------------------------------------------------------------------
-
-local AutoLight = { SERVICE = "com.lab126.powerd", PROP = "flAuto" }
-
---- "0\n" -> false, "1" -> true, anything else -> nil.
-function AutoLight.parse(out)
-    local n = tonumber(tostring(out or ""):match("^%s*(%d+)%s*$"))
-    if n == nil then return nil end
-    return n ~= 0
-end
-
---- Run a shell command; returns its output and whether it exited 0.
-function AutoLight.sh(cmd)
-    local ok, out, code = pcall(function()
-        local f = io.popen(cmd .. " 2>&1; echo \"__rc=$?\"")
-        if not f then return "", -1 end
-        local all = f:read("*a") or ""
-        f:close()
-        local body, rc = all:match("^(.-)__rc=(%d+)%s*$")
-        return body or all, tonumber(rc) or -1
-    end)
-    if not ok then return "", false end
-    return out, code == 0
-end
-
---- The current state: true / false, or nil when it can't be read.
-function AutoLight.get(powerd)
-    local h = powerd and powerd.lipc_handle
-    if h then
-        local ok, v = pcall(h.get_int_property, h, AutoLight.SERVICE, AutoLight.PROP)
-        if ok and type(v) == "number" then return v ~= 0 end
-    end
-    local out, ok = AutoLight.sh("lipc-get-prop " .. AutoLight.SERVICE .. " " .. AutoLight.PROP)
-    if not ok then return nil end
-    return AutoLight.parse(out)
-end
-
---- Switch it on or off, then read it back; returns the real state (or nil).
-function AutoLight.set(powerd, on)
-    local v = on and 1 or 0
-    local h = powerd and powerd.lipc_handle
-    local done = false
-    if h then
-        done = pcall(h.set_int_property, h, AutoLight.SERVICE, AutoLight.PROP, v)
-    end
-    if not done then
-        AutoLight.sh("lipc-set-prop " .. AutoLight.SERVICE .. " " .. AutoLight.PROP .. " " .. v)
-    end
-    return AutoLight.get(powerd)
-end
 
 local Controls = InputContainer:extend{
     name = "LibraryControls",
     plugin = nil,
     covers_fullscreen = true,
-    AutoLight = AutoLight,
 }
 
 function Controls:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.powerd = Device:getPowerDevice()
-    self:readAutoLight()
     self.sliders = self:makeSliders()
     self.toggles = self:makeToggles()
     self.L = Core.controlsLayout(self.dimen.w, self.dimen.h, #self.sliders, #self.toggles)
@@ -121,7 +61,6 @@ function Controls:makeSliders()
             min = p.fl_min, max = p.fl_max,
             get = function() return p:frontlightIntensity() end,
             set = function(v)
-                self:autoLightOffForSlider()
                 if v <= p.fl_min then
                     p:turnOffFrontlight()
                 else
@@ -168,12 +107,6 @@ function Controls:makeToggles()
                 self:refresh("full")
             end,
         },
-        auto_light = {
-            label = _("Auto"), glyph = GLYPH.auto_light,
-            on = function() return self.auto_on == true end,
-            sub = function(on) return on and _("On") or _("Off") end,
-            run = function() self:toggleAutoLight() end,
-        },
         cover_sleep = {
             label = _("Cover sleep"), glyph = GLYPH.cover_sleep,
             on = function() return plugin:sleepCoverIsOn() end,
@@ -201,7 +134,6 @@ function Controls:makeToggles()
     }
     local ids = Core.controlsToggles({
         wifi = NetworkMgr and true or false,
-        auto_light = self.auto_on ~= nil,
         night = true,
         cover_sleep = true,
         rotate = not Device:isAlwaysPortrait(),
@@ -214,33 +146,6 @@ function Controls:makeToggles()
         out[#out + 1] = t
     end
     return out
-end
-
---- Read flAuto once (Kindle only). self.auto_on stays nil when it can't
--- be read, and then the Auto toggle isn't shown.
-function Controls:readAutoLight()
-    self.auto_on = nil
-    local ok, kindle = pcall(function() return Device.isKindle and Device:isKindle() end)
-    if not (ok and kindle and Device:hasFrontlight()) then return end
-    local ok2, v = pcall(AutoLight.get, self.powerd)
-    if ok2 then self.auto_on = v end
-end
-
-function Controls:toggleAutoLight()
-    if self.auto_on == nil then return end
-    local ok, v = pcall(AutoLight.set, self.powerd, not self.auto_on)
-    if ok and v ~= nil then self.auto_on = v end
-    self:refresh()
-end
-
---- The brightness slider was moved: if Auto is on, turn it off first.
-function Controls:autoLightOffForSlider()
-    if not self.auto_on then return end
-    local ok, v = pcall(AutoLight.set, self.powerd, false)
-    if ok and v ~= nil then self.auto_on = v else self.auto_on = false end
-    for i, t in ipairs(self.toggles or {}) do
-        if t.id == "auto_light" and self.L then self:refreshToggle(i) end
-    end
 end
 
 ----------------------------------------------------------------------------
@@ -372,19 +277,6 @@ end
 
 Controls.SETTLE_AFTER_TAP = 0.6   -- s of no taps before the cleanup flash
 Controls.SETTLE_WATCHDOG = 1.5    -- s of no drag movement before the cleanup flash
-
---- The square around round toggle i, with its label and sub-label.
-function Controls:toggleRect(i)
-    local t = self.L.toggles[i]
-    local half = math.floor(t.r * 1.5)
-    local bottom = t.sub_y + math.floor(40 * self.L.u)
-    return Geom:new{ x = t.cx - half, y = t.cy - t.r - 4, w = 2 * half, h = bottom - (t.cy - t.r - 4) }
-end
-
-function Controls:refreshToggle(i)
-    local rect = self:toggleRect(i)
-    UIManager:setDirty(self, function() return "ui", rect end)
-end
 
 function Controls:refreshRow(i, mode)
     local rect = self:sliderRowRect(i)
