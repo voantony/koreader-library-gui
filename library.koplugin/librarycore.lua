@@ -270,16 +270,18 @@ function Core.comparator(mode, collate)
         if a.title ~= b.title then return cmpText(a.title, b.title, collate) end
         return a.path < b.path
     end
-    if mode == "author" then
-        return function(a, b)
-            local aa, ba = firstAuthor(a), firstAuthor(b)
-            if aa ~= ba then
-                if aa == Core.UNKNOWN then return false end
-                if ba == Core.UNKNOWN then return true end
-                return cmpText(aa, ba, collate)
-            end
-            return byTitle(a, b)
+    -- Author (unknown last), then title within an author.
+    local function byAuthor(a, b)
+        local aa, ba = firstAuthor(a), firstAuthor(b)
+        if aa ~= ba then
+            if aa == Core.UNKNOWN then return false end
+            if ba == Core.UNKNOWN then return true end
+            return cmpText(aa, ba, collate)
         end
+        return byTitle(a, b)
+    end
+    if mode == "author" then
+        return byAuthor
     elseif mode == "series" then
         return function(a, b)
             local as, bs = a.series or Core.UNKNOWN, b.series or Core.UNKNOWN
@@ -295,14 +297,11 @@ function Core.comparator(mode, collate)
             return byTitle(a, b)
         end
     elseif mode == "recent" then
-        -- Last opened first; never-opened books after them, newest file first.
+        -- Last opened first; never-opened books (and equal times) by author.
         return function(a, b)
             local ao, bo = a.last_opened or 0, b.last_opened or 0
             if ao ~= bo then return ao > bo end
-            if a.modification ~= b.modification then
-                return (a.modification or 0) > (b.modification or 0)
-            end
-            return byTitle(a, b)
+            return byAuthor(a, b)
         end
     elseif mode == "added" then
         -- Newest first.
