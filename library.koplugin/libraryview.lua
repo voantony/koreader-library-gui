@@ -84,6 +84,7 @@ local LibraryView = InputContainer:extend{
     continue_slots = 5,
     barely_threshold = 0.10, -- "Barely started": opened, below this fraction
     rounded_keyboard = true, -- "Rounded keyboard in search"
+    fuzzy_search = true,     -- "Typo-tolerant search"
 }
 
 --- The search bar's text box: KOReader's InputText, with our own keyboard
@@ -264,6 +265,15 @@ function LibraryView:setRoundedKeyboard(on)
     self:refreshBody(true)
 end
 
+--- Turn "Typo-tolerant search" on or off and redo the current search.
+function LibraryView:setFuzzySearch(on)
+    on = on and true or false
+    if on == self.fuzzy_search then return end
+    self.fuzzy_search = on
+    self.last_query, self.last_results = nil, nil
+    if self.query ~= "" then self:refreshBody(true) end
+end
+
 ----------------------------------------------------------------------------
 -- Data
 ----------------------------------------------------------------------------
@@ -310,7 +320,7 @@ function LibraryView:searchBooks(base)
     if self.last_base == base and Core.isRefinement(self.last_query, self.query) then
         previous = self.last_results
     end
-    local results = Core.searchIndexed(base, self.query, lower, previous)
+    local results = Core.searchIndexed(base, self.query, lower, previous, self.fuzzy_search)
     self.last_base, self.last_query, self.last_results = base, self.query, results
     return results
 end

@@ -196,4 +196,16 @@ describe("Index", function()
         eq(#Core.searchIndexed(books, "austen"), 3)
         os.remove(CACHE)
     end)
+
+    it("precomputes the words typo-tolerant search uses", function()
+        local idx = newIndex()
+        local books = idx:build()
+        for _, b in ipairs(books) do
+            eq(type(b.search_tokens), "table")
+            eq(type(b.search_norm), "string")
+        end
+        eq(#Core.searchIndexed(books, "austne", nil, nil, true), 3)
+        eq(#Core.searchIndexed(books, "prometeus", nil, nil, true), 1)
+        os.remove(CACHE)
+    end)
 end)

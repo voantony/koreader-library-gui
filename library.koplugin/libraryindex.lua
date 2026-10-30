@@ -16,6 +16,10 @@ re-read when the sidecar's mtime changed. The last-opened time comes from
 KOReader's reading history.
 
 Cache key per book: path + size + mtime (+ the calibre file's mtime).
+
+Each book's search text (Core.buildSearchKey) is worked out here, once per
+build: the lower-cased key for the plain search, plus the accent-free words
+"Typo-tolerant search" compares against, so typing never re-normalises a book.
 --]]
 
 local Core = require("librarycore")

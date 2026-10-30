@@ -522,6 +522,199 @@ function Core.countFilters(books, threshold)
 end
 
 ----------------------------------------------------------------------------
+-- Typo-tolerant search ("Typo-tolerant search", on unless turned off)
+----------------------------------------------------------------------------
+--
+-- Each book gets, once, when it is indexed (Core.buildSearchKey):
+--   search_norm   title, authors, series and file name (its search_key),
+--                 with accents folded (Brontë -> bronte) and punctuation
+--                 turned into spaces;
+--   search_tokens the words of search_norm.
+-- A query word then matches a book when it is a substring of search_norm,
+-- or, for words of 4+ letters, when it is within a small edit distance of
+-- the start of one of the book's words (so a typo is forgiven while the
+-- word is still being typed). Distances are memoised per (query word, book
+-- word), so every keystroke only computes words it has not met before.
+
+--- Accented Latin letters (both cases) -> plain ASCII, keyed by UTF-8 sequence.
+local FOLD = {}
+do
+    local groups = {
+        a = "àáâãäåāăąǎÀÁÂÃÄÅĀĂĄǍ", c = "çćĉċčÇĆĈĊČ", d = "ďđðĎĐÐ",
+        e = "èéêëēĕėęěÈÉÊËĒĔĖĘĚ", g = "ĝğġģĜĞĠĢ", h = "ĥħĤĦ",
+        i = "ìíîïĩīĭįıǐÌÍÎÏĨĪĬĮİǏ", j = "ĵĴ", k = "ķĶ", l = "ĺļľŀłĹĻĽĿŁ",
+        n = "ñńņňŉÑŃŅŇ", o = "òóôõöøōŏőǒÒÓÔÕÖØŌŎŐǑ", r = "ŕŗřŔŖŘ",
+        s = "śŝşšŚŜŞŠ", t = "ţťŧŢŤŦ", u = "ùúûüũūŭůűųǔÙÚÛÜŨŪŬŮŰŲǓ",
+        w = "ŵŴ", y = "ýÿŷÝŸŶ", z = "źżžŹŻŽ",
+        ss = "ß", ae = "æÆ", oe = "œŒ", th = "þÞ",
+    }
+    for plain, chars in pairs(groups) do
+        for ch in chars:gmatch("[\192-\247][\128-\191]*") do FOLD[ch] = plain end
+    end
+end
+Core.FOLD = FOLD
+
+--- Lower-case, fold accents, drop apostrophes and turn other punctuation
+-- into spaces. Letters of other scripts are kept as they are.
+function Core.normalizeText(s, lower)
+    if type(s) ~= "string" or s == "" then return "" end
+    s = (lower or string.lower)(s)
+    if s:find("[\128-\255]") then
+        s = s:gsub("[\195-\201][\128-\191]", FOLD)
+        s = s:gsub("\226\128[\152\153]", "") -- ‘ ’
+        s = s:gsub("\226\128[\147\148\156\157\166]", " ") -- – — “ ” …
+        s = s:gsub("\194[\160-\191]", " ") -- no-break space, « » ¿ ¡ · etc.
+        s = s:lower() -- folded capitals
+    end
+    if s:find("[%c%p]") then
+        s = s:gsub("'", ""):gsub("[%c%p]", " ")
+    end
+    return s
+end
+
+--- Edits forgiven in a query word of `n` letters.
+function Core.typoBudget(n)
+    if n >= 8 then return 2 elseif n >= 4 then return 1 end
+    return 0
+end
+
+local byte = string.byte
+local min = math.min
+-- reusable rows for the distance table
+local row2, row1, row0 = {}, {}, {}
+
+--- Smallest Damerau-Levenshtein (optimal string alignment) distance between
+-- `q` and any prefix of `t`, or nil when it is above `cap`. Columns walk `t`
+-- one letter at a time; it gives up as soon as a whole column is over `cap`.
+function Core.prefixDistance(q, t, cap)
+    local n, m = #q, #t
+    if m < n - cap then return nil end
+    local prev2, prev, cur = row2, row1, row0
+    for i = 0, n do prev[i] = i end
+    local best = prev[n]
+    local tj1 -- t's previous letter
+    for j = 1, m do
+        local tj = byte(t, j)
+        cur[0] = j
+        local colmin = j
+        local qi1
+        for i = 1, n do
+            local qi = byte(q, i)
+            local cost = (qi == tj) and 0 or 1
+            local v = prev[i - 1] + cost
+            local del = prev[i] + 1
+            if del < v then v = del end
+            local ins = cur[i - 1] + 1
+            if ins < v then v = ins end
+            if i > 1 and j > 1 and qi == tj1 and qi1 == tj then
+                local tr = prev2[i - 2] + 1
+                if tr < v then v = tr end
+            end
+            cur[i] = v
+            if v < colmin then colmin = v end
+            qi1 = qi
+        end
+        if cur[n] < best then best = cur[n] end
+        if best == 0 or colmin > cap then break end
+        prev2, prev, cur = prev, cur, prev2
+        tj1 = tj
+    end
+    if best <= cap then return best end
+    return nil
+end
+
+-- memo[query word][book word] = distance or false; reset when it grows big.
+local memo, memo_words = {}, 0
+
+local function wordCost(word, budget, tokens)
+    local cache = memo[word]
+    if not cache then
+        if memo_words >= 64 then memo, memo_words = {}, 0 end
+        cache = {}
+        memo[word] = cache
+        memo_words = memo_words + 1
+    end
+    local best
+    for k = 1, #tokens do
+        local t = tokens[k]
+        local d = cache[t]
+        if d == nil then
+            d = Core.prefixDistance(word, t, budget) or false
+            cache[t] = d
+        end
+        if d and (not best or d < best) then
+            best = d
+            if d == 0 then break end
+        end
+    end
+    return best
+end
+
+--- How well `book` matches the normalised query words:
+-- 0 = every word is a substring (after folding), n > 0 = total edits, nil = no match.
+function Core.fuzzyScore(book, words, lower)
+    local norm = book.search_norm
+    if not norm then Core.buildSearchKey(book, lower); norm = book.search_norm end
+    local find = string.find
+    local total = 0
+    for j = 1, #words do
+        local w = words[j]
+        if not find(norm, w, 1, true) then
+            local budget = Core.typoBudget(#w)
+            if budget == 0 then return nil end
+            local d = wordCost(w, budget, book.search_tokens)
+            if not d then return nil end
+            total = total + d
+        end
+    end
+    return total
+end
+
+--- Search with typos forgiven. Order: books where every word is found as
+-- typed (the plain search), then books that match once accents and
+-- punctuation are ignored, then close matches by number of edits. Within
+-- each group the order of `books` is kept.
+function Core.searchFuzzy(books, query, lower)
+    local raw = Core.queryWords(query, lower)
+    if #raw == 0 then return books end
+    local words = {}
+    for w in Core.normalizeText(query, lower):gmatch("%S+") do words[#words + 1] = w end
+    local exact, buckets, maxd = {}, {}, 0
+    local find = string.find
+    for i = 1, #books do
+        local b = books[i]
+        local key = b.search_key or Core.buildSearchKey(b, lower)
+        local ok = true
+        for j = 1, #raw do
+            if not find(key, raw[j], 1, true) then ok = false; break end
+        end
+        if ok then
+            exact[#exact + 1] = b
+        elseif #words > 0 then
+            local d = Core.fuzzyScore(b, words, lower)
+            if d then
+                local bucket = buckets[d]
+                if not bucket then bucket = {}; buckets[d] = bucket end
+                bucket[#bucket + 1] = b
+                if d > maxd then maxd = d end
+            end
+        end
+    end
+    for d = 0, maxd do
+        local bucket = buckets[d]
+        if bucket then
+            for k = 1, #bucket do exact[#exact + 1] = bucket[k] end
+        end
+    end
+    return exact
+end
+
+--- "Typo-tolerant search": on unless turned off.
+function Core.fuzzySearch(settings)
+    return not (settings and settings.fuzzy_search == false)
+end
+
+----------------------------------------------------------------------------
 -- Search index
 ----------------------------------------------------------------------------
 
@@ -530,12 +723,18 @@ end
 -- Unicode-aware one.
 function Core.buildSearchKey(book, lower)
     lower = lower or string.lower
+    local authors = table.concat(book.authors or {}, " ")
     book.search_key = lower(table.concat({
         book.title or "",
-        table.concat(book.authors or {}, " "),
+        authors,
         book.series or "",
         book.name or "",
     }, "\n"))
+    -- for "Typo-tolerant search" (see Core.searchFuzzy)
+    local norm = Core.normalizeText(book.search_key)
+    local tokens, n = {}, 0
+    for w in norm:gmatch("%S+") do n = n + 1; tokens[n] = w end
+    book.search_norm, book.search_tokens = norm, tokens
     return book.search_key
 end
 
@@ -556,7 +755,10 @@ end
 --- Fast search over precomputed keys. Every word must appear somewhere.
 -- When `previous` (the results for a shorter prefix of this query) is
 -- given, only those are scanned: typing narrows, it never widens.
-function Core.searchIndexed(books, query, lower, previous)
+-- With `fuzzy`, typos are forgiven (Core.searchFuzzy); `previous` is then
+-- ignored, since a longer word may forgive more and results are ranked.
+function Core.searchIndexed(books, query, lower, previous, fuzzy)
+    if fuzzy then return Core.searchFuzzy(books, query, lower) end
     local words = Core.queryWords(query, lower)
     if #words == 0 then return books end
     local source = previous or books

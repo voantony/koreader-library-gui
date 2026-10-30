@@ -49,6 +49,7 @@ local DEFAULTS = {
     series_skip_finished = true, -- Next in series skips books already finished
     reader_tab = true,          -- a Library tab (book icon) in the reader's top menu bar
     rounded_keyboard = true,    -- "Rounded keyboard in search": softer keys for the search bar only
+    fuzzy_search = true,        -- "Typo-tolerant search": accents ignored, small typos forgiven
     remember_views = true,      -- each shelf (collection, author, series, tab) remembers its layout, sort, filter
     controls_panel = true,      -- swipe down from the Library's top-right corner: light, warmth, toggles
     -- view_memory: { [key] = { view =, sort =, filter =, t = } }, see Core.viewKey
@@ -273,6 +274,7 @@ function Library:newView()
         debounce_s = (self.settings.debounce_ms or 150) / 1000,
         barely_threshold = Core.barelyThreshold(self.settings.barely_threshold),
         rounded_keyboard = Core.roundedKeyboard(self.settings),
+        fuzzy_search = Core.fuzzySearch(self.settings),
     }
 end
 
@@ -931,6 +933,16 @@ function Library:addToMainMenu(menu_items)
                     self.settings.rounded_keyboard = not Core.roundedKeyboard(self.settings)
                     self:saveSettings()
                     if shared.view then shared.view:setRoundedKeyboard(self.settings.rounded_keyboard) end
+                end,
+            },
+            {
+                text = _("Typo-tolerant search"),
+                help_text = _("Search also finds close matches: accents and punctuation are ignored (bronte finds Brontë) and small typos are forgiven (harry poter finds Harry Potter). Exact matches stay at the top."),
+                checked_func = function() return Core.fuzzySearch(self.settings) end,
+                callback = function()
+                    self.settings.fuzzy_search = not Core.fuzzySearch(self.settings)
+                    self:saveSettings()
+                    if shared.view then shared.view:setFuzzySearch(self.settings.fuzzy_search) end
                 end,
             },
             self:rememberViewsMenu(),
