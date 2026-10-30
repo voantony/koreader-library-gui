@@ -9,7 +9,7 @@ FILES := _meta.lua main.lua librarycore.lua libraryindex.lua libraryview.lua lib
 test:
 	$(LUA) spec/run.lua
 
-# Exactly the files that go to the device (see INSTALL_PLAN.md).
+# Exactly the files that go to the device.
 stage: clean
 	mkdir -p dist/$(PLUGIN)
 	cd $(PLUGIN) && cp $(FILES) ../dist/$(PLUGIN)/

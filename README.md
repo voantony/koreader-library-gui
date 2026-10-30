@@ -50,6 +50,10 @@ To update, replace the `library.koplugin` folder with the new one and restart KO
 
 If **Library** is missing from the menu, check ☰ → Tools → More tools → Plugin management, where it is listed as Library GUI.
 
+### For developers and Mac users
+
+[`tools/kpush/`](tools/kpush/) is an optional command-line tool for macOS that copies the plugin files to a Kindle over MTP in one go, without Calibre. It was written for the Kindle Colorsoft, whose USB connection tends to drop after each libmtp command. See its [README](tools/kpush/README.md) for how to build and use it. You don't need it to install the plugin.
+
 ## Compatibility
 
 - Tested on a **Kindle Colorsoft** running KOReader v2026.07.1, and in the KOReader desktop emulator.
