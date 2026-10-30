@@ -41,6 +41,8 @@ function Controls:init()
         Pan = { GestureRange:new{ ges = "pan", range = range } },
         PanRelease = { GestureRange:new{ ges = "pan_release", range = range } },
         Hold = { GestureRange:new{ ges = "hold", range = range } },
+        HoldPan = { GestureRange:new{ ges = "hold_pan", range = range } },
+        HoldRelease = { GestureRange:new{ ges = "hold_release", range = range } },
     }
     if Device:hasKeys() then
         self.key_events = { Close = { { Device.input.group.Back } } }
@@ -253,16 +255,68 @@ function Controls:refresh(mode)
     UIManager:setDirty(self, function() return mode or "ui", rect end)
 end
 
+--- The strip of screen one slider row covers (label, buttons, track, knob).
+function Controls:sliderRowRect(i)
+    local p, row = self.L.panel, self.L.sliders[i]
+    local bottom = row.track.y + row.track.h + row.knob_r + math.floor(8 * self.L.u)
+    return Geom:new{ x = p.x, y = row.label_y, w = p.w, h = bottom - row.label_y }
+end
+
 ----------------------------------------------------------------------------
--- Gestures
+-- Sliders and e-ink refreshes
+--
+-- While a finger moves a slider, only that slider's row is redrawn, with
+-- KOReader's quick non-flashing "fast" refresh, so the light follows the
+-- finger. Fast refreshes leave ghosting, so when the finger lifts (wherever
+-- it is by then) the whole panel gets one "flashui" refresh: KOReader's
+-- flashing UI refresh, the one it recommends for clearing ghosts from a
+-- region without the cost of a "full" screen refresh. Taps on the track or
+-- on -/+ redraw the row with "ui" and flash once after the taps stop.
+-- A drag whose release never arrives is cleaned up the same way.
 ----------------------------------------------------------------------------
 
-function Controls:setSlider(i, v, fast)
+Controls.SETTLE_AFTER_TAP = 0.6   -- s of no taps before the cleanup flash
+Controls.SETTLE_WATCHDOG = 1.5    -- s of no drag movement before the cleanup flash
+
+function Controls:refreshRow(i, mode)
+    local rect = self:sliderRowRect(i)
+    UIManager:setDirty(self, function() return mode, rect end)
+end
+
+--- One flashing refresh of the panel; cancels any pending one.
+function Controls:settle()
+    self:cancelSettle()
+    if self.closed then return end
+    local rect = self:panelRect()
+    UIManager:setDirty(self, function() return "flashui", rect end)
+end
+
+function Controls:cancelSettle()
+    if self._settle_fn then
+        UIManager:unschedule(self._settle_fn)
+        self._settle_fn = nil
+    end
+end
+
+function Controls:settleIn(delay)
+    self:cancelSettle()
+    self._settle_fn = function() self._settle_fn = nil; self._drag = nil; self:settle() end
+    UIManager:scheduleIn(delay, self._settle_fn)
+end
+
+--- Set slider i to v. `how` is "drag" (finger moving) or nil (a tap).
+function Controls:setSlider(i, v, how)
     local s = self.sliders[i]
     if v < s.min then v = s.min elseif v > s.max then v = s.max end
-    if v == s.get() then return end
+    if v == s.get() then return false end
     s.set(v)
-    self:refresh(fast and "fast" or "ui")
+    if how == "drag" then
+        self:refreshRow(i, "fast")
+    else
+        self:refreshRow(i, "ui")
+        self:settleIn(self.SETTLE_AFTER_TAP)
+    end
+    return true
 end
 
 function Controls:sliderAt(i, x)
@@ -270,6 +324,10 @@ function Controls:sliderAt(i, x)
     local s = self.sliders[i]
     return Core.sliderValue(x, t.x, t.w, s.min, s.max)
 end
+
+----------------------------------------------------------------------------
+-- Gestures
+----------------------------------------------------------------------------
 
 function Controls:onTap(_, ges)
     local what, i = Core.controlsHit(self.L, ges.pos.x, ges.pos.y)
@@ -287,10 +345,37 @@ function Controls:onTap(_, ges)
     return true
 end
 
+--- Start (or continue) dragging. The slider is picked where the finger went
+-- down; after that the finger can wander anywhere on screen.
+function Controls:dragTo(start_pos, pos)
+    if not self._drag then
+        local what, i = Core.controlsHit(self.L, start_pos.x, start_pos.y)
+        if what ~= "slider" then return false end
+        self._drag = i
+    end
+    self:setSlider(self._drag, self:sliderAt(self._drag, pos.x), "drag")
+    self:settleIn(self.SETTLE_WATCHDOG)
+    return true
+end
+
+--- The finger lifted: one cleanup flash if it was dragging a slider.
+function Controls:endDrag()
+    if not self._drag then return false end
+    self._drag = nil
+    self:settle()
+    return true
+end
+
 function Controls:onSwipe(_, ges)
-    local what, i = Core.controlsHit(self.L, ges.pos.x, ges.pos.y)
-    if what == "slider" and (ges.direction == "east" or ges.direction == "west") then
-        self:setSlider(i, self:sliderAt(i, ges.end_pos and ges.end_pos.x or ges.pos.x))
+    -- A quick drag ends as a swipe instead of a pan_release.
+    local start = ges.start_pos or ges.pos
+    local what, i = Core.controlsHit(self.L, start.x, start.y)
+    if self._drag or (what == "slider" and (ges.direction == "east" or ges.direction == "west")) then
+        i = self._drag or i
+        local x = ges.end_pos and ges.end_pos.x or ges.pos.x
+        self._drag = i
+        self:setSlider(i, self:sliderAt(i, x), "drag")
+        self:endDrag()
     elseif ges.direction == "north" or not what then
         self:close()
     end
@@ -298,21 +383,37 @@ function Controls:onSwipe(_, ges)
 end
 
 function Controls:onPan(_, ges)
-    local what, i = Core.controlsHit(self.L, ges.start_pos.x, ges.start_pos.y)
-    if what == "slider" then
-        self._dragged = true
-        self:setSlider(i, self:sliderAt(i, ges.pos.x), true)
+    self:dragTo(ges.start_pos or ges.pos, ges.pos)
+    return true
+end
+
+function Controls:onPanRelease()
+    self:endDrag()
+    return true
+end
+
+-- Holding the knob, then moving, arrives as hold / hold_pan / hold_release.
+function Controls:onHold(_, ges)
+    if ges and ges.pos then
+        local what, i = Core.controlsHit(self.L, ges.pos.x, ges.pos.y)
+        if what == "slider" then
+            self._drag = i
+            self:setSlider(i, self:sliderAt(i, ges.pos.x), "drag")
+            self:settleIn(self.SETTLE_WATCHDOG)
+        end
     end
     return true
 end
 
--- Drags refresh fast (and a bit ghosty); clean up once the finger lifts.
-function Controls:onPanRelease()
-    if self._dragged then self._dragged = nil; self:refresh() end
+function Controls:onHoldPan(_, ges)
+    self:dragTo(ges.start_pos or ges.pos, ges.pos)
     return true
 end
 
-function Controls:onHold() return true end
+function Controls:onHoldRelease()
+    self:endDrag()
+    return true
+end
 
 function Controls:onClose()
     self:close()
@@ -326,6 +427,7 @@ function Controls:close()
 end
 
 function Controls:onCloseWidget()
+    self:cancelSettle()
     if self.plugin then self.plugin:onControlsClosed(self) end
 end
 
