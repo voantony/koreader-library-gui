@@ -375,6 +375,82 @@ function Core.group(books, grouping, collate)
 end
 
 ----------------------------------------------------------------------------
+-- Genres (from the keywords / Calibre tags already in the index)
+----------------------------------------------------------------------------
+
+--- Split a keywords string into genre names: on new lines, commas and
+-- semicolons (never on "&": "Mystery & Thriller" is one genre), trimmed.
+function Core.splitKeywords(s)
+    local out = {}
+    if type(s) ~= "string" then return out end
+    for part in s:gmatch("[^\n\r,;]+") do
+        part = trim(part):gsub("%s+", " ")
+        if part ~= "" then out[#out + 1] = part end
+    end
+    return out
+end
+
+--- Union of two keywords strings (e.g. Calibre tags and the book's own
+-- subjects), split as above, without repeats (case-insensitive), joined by
+-- new lines. Nil when both are empty.
+function Core.mergeKeywords(a, b)
+    local out, seen = {}, {}
+    for i = 1, 2 do
+        for _, k in ipairs(Core.splitKeywords(i == 1 and a or b)) do
+            local key = k:lower()
+            if not seen[key] then seen[key] = true; out[#out + 1] = k end
+        end
+    end
+    return #out > 0 and table.concat(out, "\n") or nil
+end
+
+--- Group books by genre. Names are merged case-insensitively (`lower`, a
+-- UTF-8 aware lower-caser, defaults to string.lower) and shown in their most
+-- common spelling. A book with several genres is in each; books with none
+-- are in one group (`unsorted = true`, named `unsorted_name`) at the end.
+-- @treturn table list of `{ kind = "genres", name =, books = }`, by name
+function Core.genreGroups(books, collate, lower, unsorted_name)
+    lower = lower or string.lower
+    local buckets, order, none = {}, {}, {}
+    for _, book in ipairs(books) do
+        local seen = {}
+        for _, name in ipairs(Core.splitKeywords(book.keywords)) do
+            local key = lower(name)
+            if not seen[key] then
+                seen[key] = true
+                local g = buckets[key]
+                if not g then
+                    g = { kind = "genres", books = {}, spellings = {}, first = {} }
+                    buckets[key] = g
+                    order[#order + 1] = g
+                end
+                g.spellings[name] = (g.spellings[name] or 0) + 1
+                if not g.first[name] then g.first[name] = #g.books + 1 end
+                g.books[#g.books + 1] = book
+            end
+        end
+        if not next(seen) then none[#none + 1] = book end
+    end
+    for _, g in ipairs(order) do
+        local best
+        for name, n in pairs(g.spellings) do
+            local bn = best and g.spellings[best]
+            if not best or n > bn or (n == bn and g.first[name] < g.first[best]) then best = name end
+        end
+        g.name = best
+        g.spellings, g.first = nil, nil
+    end
+    table.sort(order, function(a, b)
+        if a.name ~= b.name then return cmpText(a.name, b.name, collate) end
+        return false
+    end)
+    if #none > 0 then
+        order[#order + 1] = { kind = "genres", name = unsorted_name or "Unsorted", books = none, unsorted = true }
+    end
+    return order
+end
+
+----------------------------------------------------------------------------
 -- Search
 ----------------------------------------------------------------------------
 

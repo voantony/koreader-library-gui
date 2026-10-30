@@ -135,18 +135,23 @@ end
 
 --- Fill metadata for a book whose cache entry is missing or stale.
 function Index:fillMeta(book, calibre_map, calibre_stamp, sidecar_data)
-    local props, src = calibre_map[book.path], "calibre"
-    if not props and self.opts.bim then
-        local ok, info = pcall(self.opts.bim.getBookInfo, self.opts.bim, book.path, false)
-        if ok and type(info) == "table" and (info.title or info.authors) then
-            props, src = info, "bim"
-        end
+    local calibre = calibre_map[book.path]
+    local info
+    if self.opts.bim then
+        local ok, i = pcall(self.opts.bim.getBookInfo, self.opts.bim, book.path, false)
+        if ok and type(i) == "table" and (i.title or i.authors) then info = i end
     end
-    if not props and sidecar_data and type(sidecar_data.doc_props) == "table" then
-        props, src = sidecar_data.doc_props, "sidecar"
-    end
+    local doc_props = sidecar_data and type(sidecar_data.doc_props) == "table" and sidecar_data.doc_props or nil
+    local props, src = calibre, "calibre"
+    if not props and info then props, src = info, "bim" end
+    if not props and doc_props then props, src = doc_props, "sidecar" end
     if not props then src = "file" end
     Core.applyProps(book, props or {})
+    -- Genres: Calibre's tags plus the book's own subjects (as KOReader read them).
+    if calibre then
+        local own = (info and info.keywords) or (doc_props and doc_props.keywords)
+        book.keywords = Core.mergeKeywords(book.keywords, type(own) == "string" and own or nil)
+    end
     book.src = src
     book.cal = calibre_stamp
 end

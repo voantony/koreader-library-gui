@@ -1,0 +1,27 @@
+[
+ {
+  "lpath": "documents/Agatha Christie/The Mysterious Affair at Styles.epub",
+  "title": "The Mysterious Affair at Styles",
+  "authors": ["Agatha Christie"],
+  "tags": ["Mystery & Thriller", "Classics"],
+  "series": null,
+  "series_index": null,
+  "size": 300000
+ },
+ {
+  "lpath": "documents/H. G. Wells/The Time Machine.epub",
+  "title": "The Time Machine",
+  "authors": ["H. G. Wells"],
+  "tags": ["Science Fiction", "classics"],
+  "series": null,
+  "series_index": null
+ },
+ {
+  "lpath": "documents/John Buchan/The Thirty-Nine Steps.epub",
+  "title": "The Thirty-Nine Steps",
+  "authors": ["John Buchan"],
+  "tags": [],
+  "series": "Richard Hannay",
+  "series_index": 1
+ }
+]
