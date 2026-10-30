@@ -318,9 +318,13 @@ function LibraryView:reloadData()
 end
 
 function LibraryView:groupsFor(tab)
+    if tab == "collections" and self:showingGenres() then return self:groupsFor("genres") end
     if self.groups_cache[tab] then return self.groups_cache[tab] end
     local groups
-    if tab == "collections" then
+    if tab == "genres" then
+        -- the keywords (Calibre tags) already in the index: no book is opened
+        groups = Core.genreGroups(self.sorted, self.plugin.collate, lower, _("Unsorted"))
+    elseif tab == "collections" then
         groups = self.plugin:getCollections()
         -- Like the Kindle: a collection's books follow the chosen sort.
         for _, g in ipairs(groups) do
@@ -344,12 +348,33 @@ function LibraryView:groupsFor(tab)
     return groups
 end
 
+--- The Collections tab shows Genres instead (the switch under the tabs).
+function LibraryView:showingGenres()
+    local s = self.plugin.settings
+    return s ~= nil and s.collections_view == "genres"
+end
+
+--- Flip the Collections tab between "collections" and "genres" (remembered).
+function LibraryView:setCollectionsView(mode)
+    local s = self.plugin.settings
+    if not s then return end
+    local want = mode == "genres" and "genres" or nil
+    if s.collections_view == want then return end
+    self:keyboardGuard()
+    s.collections_view = want
+    if self.plugin.saveSettings then self.plugin:saveSettings() end
+    self.page = 1
+    self:updateSearchHint()
+    self:refreshBody(true)
+end
+
 --- The search bar's placeholder: what it searches here.
 function LibraryView:searchHint()
     if self.group then return T(_("Search in %1\u{2026}"), self.group.name) end
     local scope = Core.searchScope(self.tab, self.group)
     if scope == "authors" then return _("Search authors\u{2026}") end
     if scope == "series" then return _("Search series or authors\u{2026}") end
+    if scope == "collections" and self:showingGenres() then return _("Search genres\u{2026}") end
     if scope == "collections" then return _("Search collections\u{2026}") end
     return _("Search title, author, series")
 end
@@ -457,7 +482,32 @@ function TapArea:onTapArea()
     return true
 end
 
-local GROUP_COUNT = { authors = _("%1 authors"), series = _("%1 series"), collections = _("%1 collections") }
+local GROUP_COUNT = { authors = _("%1 authors"), series = _("%1 series"), collections = _("%1 collections"),
+    genres = _("%1 genres") }
+
+--- Collections tab: the Collections | Genres switch.
+function LibraryView:buildCollectionsSwitch()
+    local margin = Size.margin.default + Size.padding.default
+    local genres = self:showingGenres()
+    local row = HorizontalGroup:new{
+        align = "center",
+        Tiles.Chip:new{ text = _("Collections"), selected = not genres,
+            callback = function() self:setCollectionsView("collections") end },
+        HorizontalSpan:new{ width = Size.padding.default },
+        Tiles.Chip:new{ text = _("Genres"), selected = genres,
+            callback = function() self:setCollectionsView("genres") end },
+    }
+    local pad = Size.padding.default
+    return FrameContainer:new{
+        padding = 0,
+        padding_left = margin,
+        padding_top = pad,
+        bordersize = 0,
+        width = self.width,
+        height = row:getSize().h + 2 * pad,
+        row,
+    }
+end
 
 function LibraryView:buildChips(counts)
     local margin = Size.margin.default + Size.padding.default
@@ -504,7 +554,8 @@ function LibraryView:buildFooter(page, pages, total, kind)
     local margin = Size.margin.default + Size.padding.default
     local f = Font:getFace("cfont", 15)
     local left = kind == "books" and T(_("%1 books · %2"), total, self.plugin:sortName(self.sort))
-        or T(GROUP_COUNT[self.tab] or _("%1 groups"), total)
+        or T(GROUP_COUNT[(self.tab == "collections" and self:showingGenres()) and "genres" or self.tab]
+            or _("%1 groups"), total)
     if self:inSeries() then
         local pr = Core.seriesProgress(self.group.books)
         left = T(_("%1 of %2 read"), pr.read, pr.total)
@@ -763,6 +814,7 @@ function LibraryView:buildBody()
 
     local tabs = self:buildTabs()
     local chips = data.kind == "books" and self:buildChips(data.counts) or nil
+    if not chips and self.tab == "collections" and not self.group then chips = self:buildCollectionsSwitch() end
     local sep = VerticalSpan:new{ width = Size.padding.small }
     local footer_probe = self:buildFooter(1, 1, 0, data.kind)
     local fixed = self.title_bar:getHeight() + self.search_row:getSize().h + Size.padding.small
@@ -1058,7 +1110,7 @@ function LibraryView:reresolveGroup()
     local g = self.group
     if not g then return end
     local kind = g.kind
-    if kind ~= "collections" and kind ~= "authors" and kind ~= "series" then return end
+    if kind ~= "collections" and kind ~= "authors" and kind ~= "series" and kind ~= "genres" then return end
     for _, ng in ipairs(self:groupsFor(kind)) do
         if ng.name == g.name then self.group = ng; return end
     end
