@@ -228,9 +228,10 @@ describe("Library core: grid, filters, search index, calibre, cache", function()
             status = "abandoned", last_opened = 80, modification = 0 },
     }
 
-    it("sorts by recent: last opened first, then newest files", function()
+    it("sorts by recent: last opened first, then never-opened books by author", function()
         local sorted = Core.sortBooks(books, "recent")
-        same({ sorted[1].path, sorted[2].path, sorted[3].path, sorted[4].path }, { "/d", "/b", "/c", "/a" })
+        -- Emma (Jane Austen) before Ivanhoe (Walter Scott), though Ivanhoe's file is newer
+        same({ sorted[1].path, sorted[2].path, sorted[3].path, sorted[4].path }, { "/d", "/b", "/a", "/c" })
     end)
 
     it("filters by status chip", function()
