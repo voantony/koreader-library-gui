@@ -1,207 +1,75 @@
-# koreader-library-search-toolbar
+# Library GUI for KOReader
 
-**Library** (`library.koplugin`) is a KOReader plugin that gives you a Kindle-style library: a cover grid (or a compact list) sorted by the book you opened last, a **Continue reading** row with the books you're in the middle of, a search bar that stays at the top of the screen and filters as you type, and one-tap filters for All / Unread / Reading / Finished. Collections, Authors and Series are top-level tabs.
+Library GUI (`library.koplugin`) is a KOReader plugin that replaces the file browser with a library screen that looks and works more like the Kindle's own home screen: book covers with reading progress, a search bar at the top, tabs for Books, Collections, Authors and Series, and a quick settings panel you pull down from the corner.
 
-It works alongside KOReader's file browser, History and Collections. It shows covers on its own. If **Project: Title** or the built-in Cover browser is enabled, it reuses their cover cache, so covers you already have show up straight away. It never moves or renames your books.
+It sits alongside KOReader's file browser, History and Collections. It never moves or renames your books, and closing it takes you back to the normal file browser.
 
-> **Early release (v0.2.0).** It has been tested in the KOReader desktop emulator (v2026.07.1), but not yet on many real devices. Please [open an issue](https://github.com/voantony/koreader-library-search-toolbar/issues) if something looks wrong on yours.
-
-## Screenshots
-
-| Library, sorted by recent | Searching as you type |
-|---|---|
-| ![Library, sorted by recent](screenshots/01-library-recent.png) | ![Search results while typing](screenshots/03-search-results.png) |
-
-| Continue reading row | List view | List view, searching |
+| Books, covers | Compact · 2 columns | Controls panel |
 |---|---|---|
-| ![Grid with the Continue reading row](screenshots/12-grid-continue-reading.png) | ![List view](screenshots/13-list-view.png) | ![List view with a search](screenshots/14-list-search.png) |
+| ![Books tab with covers and the Continue reading row](docs/screenshots/01-books-covers.png) | ![Compact view in two columns](docs/screenshots/02-compact-2-columns.png) | ![Controls panel with brightness and warmth sliders](docs/screenshots/09-controls-panel.png) |
 
-| Built-in covers: placeholders first | Covers a moment later |
-|---|---|
-| ![Placeholders while covers are extracted](screenshots/15-covers-placeholders.png) | ![Covers extracted without Project: Title](screenshots/16-covers-built-in.png) |
+| Authors | Series | Search with typos |
+|---|---|---|
+| ![Authors tab as a list](docs/screenshots/04-authors.png) | ![Series tab with covers](docs/screenshots/05-series.png) | !["wutherng hieghts" still finds Wuthering Heights](docs/screenshots/06-search-typos.png) |
 
-More are in [screenshots/](screenshots/). They were taken in the emulator with dummy public-domain books.
+| Sort from the footer | View picker in the ☰ menu | Compact with dates |
+|---|---|---|
+| ![Sort picker opened from the footer label](docs/screenshots/07-sort-picker.png) | ![The ☰ menu with the view picker](docs/screenshots/08-menu-view-picker.png) | ![Compact view sorted by Last read, with dates](docs/screenshots/03-compact.png) |
 
-## Install
-
-1. Download **`library.koplugin.zip`** from the [latest release](https://github.com/voantony/koreader-library-search-toolbar/releases/latest).
-2. Unzip it into KOReader's `plugins/` folder, so you end up with `…/koreader/plugins/library.koplugin/main.lua`:
-
-   | Device | Plugins folder |
-   |---|---|
-   | Kindle | `/mnt/us/koreader/plugins/` |
-   | Kobo | `/mnt/onboard/.adds/koreader/plugins/` |
-   | PocketBook | `/mnt/ext1/applications/koreader/plugins/` |
-   | Android | `koreader/plugins/` on internal storage |
-   | Linux desktop | `~/.config/koreader/plugins/` |
-
-3. Restart KOReader.
-4. Open ☰ → **Library** → **Open Library**. If **Library** isn't in the menu, enable it under ☰ → Tools → More tools → Plugin management.
-5. Optional: tick ☰ → Library → **Open Library at startup**.
-
-Updating works the same way: replace the `library.koplugin` folder with the new one. Kindles that only connect over MTP, such as the Colorsoft: see [INSTALL_PLAN.md](INSTALL_PLAN.md).
+The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's screen size (1264×1680), with a library of public-domain books.
 
 ## Features
 
-- **Search bar, always on screen.** It is part of the Library screen, not a pop-up. Tap it and type: results update as you type, matching title, author, series and file name. Every word must match, case is ignored, and a search for `jane aus` finds *Jane Austen*. Searching runs on an in-memory index, waits 150 ms after the last key and redraws only the grid area below the bar. Tap **Enter** or anywhere outside the keyboard to hide the keyboard and keep the results. Tap **✕** to clear. The bar searches what the tab shows, and its placeholder says so: Books searches every book; **Authors** searches author names (*Search authors…*); **Series** searches series names and their authors (*Search series or authors…*); **Collections** searches collection names; inside an author, series or collection it searches that shelf's books. Typo-tolerant matching works in every scope. On the **Authors** list the keyboard drops its number row and the letter keys get the space; numbers are still behind the symbols key (⌥). (Rounded keyboard only.) Switching tabs clears the search; opening a shelf from a filtered list and going back restores the list's search.
-- **Cover grid** with a reading-progress bar and the percentage read, a **✓** on finished books, **NEW** on books you haven't opened and **on hold** on abandoned ones. Books with no cover yet get a plain placeholder with the title until the cover is extracted.
-- **Views.** ☰ → View row: **Small covers**, **Medium covers**, **Large covers** (5, 4 or 3 columns), then **List**, **Compact** and **Compact · 2 columns**.
-  - **List** shows one book per row: a small cover, the title, the author (and series), and on the right the percentage read with a bar, or **✓**, **NEW** or **on hold**. Sorted by Author, the author comes first. Tap a row to open the book; long-press it for the same menu as on a cover.
-  - On **Authors** (a text list by default, A–Z: name and book count, about 14 per page) and **Series** (covers by default; List shows the series name, its authors and the book count), List rows are text only. Collections keep their covers.
-  - **Compact** shows one line per row: *Title · Author* (*Author · Title* when sorted by author), cut with … when too long, with the percentage or ✓ on the right. Rows are at least 5 mm tall so they stay easy to tap: about 20 per page on a Kindle Colorsoft. On Authors and Series it shows *name · authors* and the book count; it works inside shelves too. The Continue reading row is hidden in Compact (the Resume icon still works).
-  - **Compact · 2 columns** puts compact rows in two columns with a thin rule between them, filled down the left column first: about 40 per page on a Kindle Colorsoft.
-- **Continue reading.** At the top of the Books tab, a row of up to five larger covers shows the books you're reading, most recently opened first, each with its progress bar and a caption such as *43 % · 3 h ago* (older than a month: the date). Tap one to pick up where you left off: the book opens on the page you were on, not page 1. The **Resume** icon (an open book, top right of the title bar) opens the most recent one in one tap, from any tab or shelf; long-press it to see which book it opens. The row hides while you search, when a filter other than *All* is selected, while the keyboard is up, and when nothing is in progress. Turn it off with ☰ → **Show Continue reading**.
-- **Recently opened.** ☰ → Library → **Top row** switches the row at the top of the Books tab between *Continue reading* (the default) and *Recently opened*, which shows the last five books you opened, newest first, whatever their status: finished books (with **✓**), books on hold, and books you opened but haven't started. Books you have never opened, and books whose file is gone, are left out. The order comes from KOReader's History. The **Resume** icon stays on the most recent book you are still reading (it is hidden if there is none), so one tap still takes you back into your current book even when the newest cover is one you finished.
-- **Sort**: tap the footer label (*202 books · Last read ▾*) or use the ☰ menu: Author, Title, Date added (newest first), Last read (most recently opened first; the default), Series.
-  Sorted by **Last read** or **Date added**, each book shows its date: on the right of a List or Compact row (the title is cut, never the date) and on the line under a cover. Recent dates are relative (*Just now*, *2h ago*, *Yesterday*), then *12 Oct*, with the year when it isn't this year. Books never opened show no date under Last read. Other sorts show no date.
-- **Tabs**: Books · Collections · Authors · Series. Opening a group shows its books, with a **← group** chip to go back.
-- **Series.** Opening a series lists its books in series order, each titled with its number (*3 · Ozma of Oz*); books without a number come last, by title. The footer shows how far you are (*2 of 7 read · series 5 of 10*). Swiping past the last page of a series opens the next series, and swiping back past the first page opens the previous one, so you can page through all your series without going back to the list.
-- **Next in series, from inside a book.** ☰ → Library shows **Next in series: 4 · Dorothy and the Wizard in Oz** and **Previous in series: 2 · …** while you read a book that is part of a series. *Next* skips books you have already finished (turn that off in ☰ → Library); if every later book is finished it opens the very next one. Books open where you left off.
-- **Library tab in the reader menu.** While reading, the top menu bar has a Library tab (the open-book icon, next to the file browser's folder). Tap the top of the screen, then the icon, and the Library opens over the book. Turn it off with ☰ → Library → **Library tab in the reader menu**.
-- **Sleep screen: cover of last book.** ☰ → Library → **Sleep screen: cover of last book** makes the sleep screen show the cover of the book you read last, both while reading and from the Library or file browser. It switches on KOReader's own *Show book cover on sleep screen* (Settings → Screen → Sleep screen) and, if *hide the cover in the file browser* was on, turns that off. If the book has no cover, or KOReader can't read one, you get your usual sleep screen image (or the KOReader logo). Turning the option off puts back the sleep screen you had before. Off by default.
-- **Filters**: All / Unread / Reading / Barely started / Finished, each with a count. On-hold books appear only under *All*. **Barely started** shows books you have opened but read less than 10 % of (5, 10, 20 or 25 %; set it in ☰ → Library or the Library's ☰ menu). Books you have never opened, and books at 0 %, are not included. On narrow screens the chips drop the counts of the unselected filters to fit.
-- **Each shelf remembers its layout.** Switch a series to the list, sort a collection by title or show only *Unread* for an author, and that place opens the same way next time; everywhere else keeps the Books tab's layout and sort. The Library's ☰ menu shows *Library · Oz — Layout, sort and filter remembered here* and a **↺ Reset "Oz" to default** button (on the Books tab: **Reset default layout (covers, Last read, All)**). Turn it off with ☰ → Library → **Remember layout for each shelf**; long-press that item to forget every shelf at once. With it off, layout and sort are the same everywhere, as in v0.2.
-- **Controls panel.** In the Library, swipe down from the top-right corner for a panel with **Brightness** and **Warmth** sliders (drag, tap the track, or tap − / +) and round toggles for **Light** (front light on/off; it comes back at the same level), **Night**, **Refresh** (one full e-ink flash to clear ghosting; the panel stays open), then **Wi-Fi**, **Rotate** and **Cover sleep** (the sleep screen option above). Dragging a slider redraws only the slider, fast, at most every 60 ms. Anything your device lacks is left out (no Warmth without natural light; Bluetooth is never shown because KOReader has no Bluetooth support). Swipe up, tap outside the panel or press Back to close it. Turn it off with ☰ → Library → **Controls panel**; with it off, a downward swipe in the corner turns back a page as before.
-- **Long-press a book** to set its status, show its folder, view book information or open it.
-- **Swipe** left and right, or use the page keys, to turn pages. The **‹ 1 / 25 ›** buttons do the same.
-- **Startup**: optionally show the Library instead of the file browser when KOReader starts, and go back to it after closing a book. Closing the Library (☰ → **✕ Close Library**, or Back) always takes you to the normal file browser, so it is a safe fallback.
-- **Gestures**: these actions can be assigned under *Taps and gestures*:
+- **Search** at the top of every tab. It filters as you type and searches whatever the tab shows: books on Books, author names on Authors, series on Series, collection names on Collections, and only that shelf's books inside an author, series or collection. Small typos, missing accents and punctuation are forgiven, so `charlote bronte` finds Charlotte Brontë.
+- **Filters**: All, Unread, Reading, Barely started and Finished, each with a count.
+- **Sort** by Author, Title, Date added, Last read or Series. Tap the label in the footer (*202 books · Last read ▾*) to change it.
+- **Views**: Small, Medium or Large covers, List, Compact, and Compact · 2 columns. The view, sort and filter are remembered for each tab and each author, series or collection you open.
+- **Dates**: sorted by Last read or Date added, each book shows its date (*3h ago*, *Yesterday*, *12 Oct*).
+- **Continue reading**: a row of the books you are in the middle of, at the top of the Books tab. Tap one and it opens on the page you were on.
+- **Resume icon** in the top-right corner opens the book you read last in one tap.
+- **Recently opened**: switch the top row to show the last five books you opened instead, finished ones included.
+- **Collections and Series** as tabs. A series lists its books in order, and swiping past its last page opens the next series.
+- **Go to page**: tap the page number in the footer (*1 / 51*) and type a page.
+- **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
+- **Controls panel**: swipe down from the top-right corner for Brightness and Warmth sliders and buttons for Light, Night, Refresh (clears e-ink ghosting), Wi-Fi, Rotate and Cover sleep. Anything your device doesn't have is left out.
+- **Covers without other plugins.** Library GUI extracts covers itself in the background. If Project: Title or Cover browser is enabled, it reuses their cover cache.
+- **Gestures**: Open Library, Search library, Resume last book, Rescan library, and Next / Previous in series can be assigned under *Taps and gestures*.
 
-  | Action | Where | What it does |
-  |---|---|---|
-  | Library (`library_show`) | everywhere | Open the Library |
-  | Search library (`library_search`) | everywhere | Open the Library with the keyboard up |
-  | Resume last book (`library_resume`) | everywhere | Open the most recently read unfinished book where you left off |
-  | Rescan library (`library_rescan`) | everywhere | Re-read the library folder |
-  | Next in series (`library_next_in_series`) | while reading | Open the next unread book of this book's series (or the very next one, see above) |
-  | Previous in series (`library_prev_in_series`) | while reading | Open the book before this one in its series |
+## Install
 
-### Where the metadata comes from
+1. Download `library-gui-<version>.zip` from [Releases](https://github.com/voantony/koreader-library-gui/releases).
+2. Unzip it. You get a folder called `library.koplugin`.
+3. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
+   - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).
+   - On a Mac, newer Kindles such as the Colorsoft connect over MTP and don't show up in Finder. [OpenMTP](https://openmtp.ganeshrvel.com/) works for copying the folder across.
+   - Kobo: `/mnt/onboard/.adds/koreader/plugins/`. PocketBook: `/mnt/ext1/applications/koreader/plugins/`. Android: `koreader/plugins/` on internal storage.
+4. Restart KOReader (☰ → Exit → Restart KOReader).
+5. Open ☰ → **Library** → **Open Library**. To open it every time KOReader starts, tick **Open Library at startup** in the same menu.
 
-For each book the plugin uses the first source that has data:
+To update, replace the `library.koplugin` folder with the new one and restart KOReader.
 
-1. **`metadata.calibre`** (written by calibre or KOReader's Calibre plugin), if one exists in the library folder, one of its parent folders or the inbox folder.
-2. **The cover cache** (`BookInfoManager`) of Project: Title or Cover browser, if one of them is enabled.
-3. **The book's sidecar** (`.sdr`) once you have opened the book.
-4. **The file name.**
+If **Library** is missing from the menu, check ☰ → Tools → More tools → Plugin management, where it is listed as Library GUI.
 
-Reading status and progress always come from the sidecar. *Last opened* comes from KOReader's History. The index is saved to `settings/library_index.lua`, keyed by each file's path, size and modification time, so later scans only re-read what changed.
+## Compatibility
 
-### Where the covers come from
-
-For each tile the plugin uses the first of these that has a cover:
-
-1. Its own thumbnail of the book, in `cache/library_covers/`.
-2. The Project: Title / Cover browser cache, if one of them is enabled.
-
-If neither has one, the tile shows a placeholder with the title, and the cover is extracted in the background:
-
-- **With Project: Title or Cover browser enabled**, the plugin asks their cache to extract it, as before. Their cache is shared with the file browser, so each cover is stored once.
-- **Without them**, the plugin does it itself. A background process opens the book with KOReader's own `getCoverImage`, so a custom cover set under *Book information* wins over the one in the book. It shrinks the cover to the largest tile the grid uses (3 columns) and saves it as a small JPEG in `cache/library_covers/`. Books on the current page go first, then the Continue reading row, then the rest. The process stops when you close the Library. If a book has no cover, or can't be opened, the plugin writes a small marker file and doesn't try that book again until the file changes.
-
-Each tile redraws when its cover arrives. Covers you see are scaled from these files, so turning pages doesn't open any books. Changing the number of columns doesn't re-extract anything. Setting or removing a custom cover replaces the thumbnail. ☰ → Library → **Clear cover cache** deletes the thumbnails, and they are extracted again the next time you open the Library.
-
-## Requirements
-
-- KOReader **v2025.04 or newer**. Tested on **v2026.07.1**, in the desktop emulator.
-- Nothing else. Covers no longer need Project: Title or Cover browser. If one of them is enabled, the Library uses its cover cache too.
-
-## Install from source
-
-Copy the `library.koplugin` folder from this repository into KOReader's `plugins/` folder, using the table above. Only the seven `.lua` files inside it are needed.
-
-## Settings
-
-You can change these under ☰ → Library, or with the ☰ button in the Library's top-left corner:
-
-| Setting | Default |
-|---|---|
-| Open Library at startup | off |
-| Return to Library after closing a book | on |
-| Sort | Last read |
-| View | Medium covers (Small / Medium / Large covers, List, Compact, Compact · 2 columns); Authors: List |
-| Show Continue reading | on |
-| Top row | Continue reading (Continue reading / Recently opened) |
-| Columns | 4 (5 / 4 / 3 from the View row; 6 still honoured if set before) |
-| Library folder | KOReader home folder |
-| Include hidden folders | off |
-| Barely started: below | 10 % (5 / 10 / 20 / 25 %) |
-| Library tab in the reader menu | on |
-| Sleep screen: cover of last book | off |
-| Next in series skips finished books | on |
-
-Settings are stored in `settings.reader.lua` under the key `library_plugin`.
+- Tested on a **Kindle Colorsoft** running KOReader v2026.07.1, and in the KOReader desktop emulator.
+- Needs KOReader v2025.04 or newer.
+- It should work on other devices that run KOReader (Kobo, PocketBook, Android), but I haven't tried them. If you do, please open an issue and say how it went.
 
 ## Uninstall
 
-1. Turn off **Open Library at startup** if you turned it on. This step isn't strictly needed: without the plugin, the setting is ignored.
-2. Delete `plugins/library.koplugin/`.
-3. Delete `settings/library_index.lua` (the plugin's index) and the `cache/library_covers/` folder (its cover thumbnails). If KOReader was closed while covers were being extracted, a `cache/library_covers_cr3tmp/` folder may be left too; delete it as well.
-4. Restart KOReader.
-5. Optional: with KOReader closed, remove the `["library_plugin"] = { … },` block from `settings.reader.lua`. If you leave it, it does no harm.
+Delete `koreader/plugins/library.koplugin/` and restart KOReader. To remove everything it made, also delete `koreader/settings/library_index.lua` and the `koreader/cache/library_covers/` folder.
 
-The plugin writes to two places other than its own files. First, the status buttons write to the book's sidecar; these are the same buttons KOReader's History uses. Second, when Project: Title or Cover browser is enabled, it adds missing covers to their cache, which is the same thing those plugins do on their own.
+## About this project
 
-## Performance
+This is the first thing I've developed in public. I built it with Grok Bot, and I'm happy to take any suggestions and feedback: [open an issue](https://github.com/voantony/koreader-library-gui/issues) for bugs, ideas or anything that looks off on your device.
 
-These were measured in the KOReader v2026.07.1 desktop emulator with 200 dummy EPUBs and a 1264×1680 screen at 300 dpi. See [bench/RESULTS.md](bench/RESULTS.md) for details and for how to rerun them.
-
-| | median | max |
-|---|---|---|
-| Search: filtering the 200-book index per keystroke | 0.06 ms | 0.31 ms |
-| Search: filtering a 2,000-book index per keystroke | 0.02 ms | 0.77 ms |
-| Search: filter + rebuild + repaint per keystroke | 33 ms | 33 ms |
-| First scan (no index cache, metadata.calibre) | 6 ms | 11 ms |
-| First scan (no index cache, no metadata.calibre, cover DB) | 14 ms | 20 ms |
-| Cached scan (index cache on disk) | 4 ms | 5 ms |
-| Open the Library: build + paint | 31 + 18 ms | |
-| Turn a page (covers not yet scaled) | 27 ms | 37 ms |
-| Turn a page (covers cached) | 17 ms | 29 ms |
-
-Built-in covers, with Project: Title and Cover browser disabled:
-
-| | |
-|---|---|
-| Extract all 200 covers, empty cache | 5.7 s (first page shown after 0.6 s) |
-| Turn a page while extracting | 21 ms median, 25 ms max |
-| Thumbnail cache on disk | 3.7 MB for 200 books (396×594 JPEGs) |
-| Open the Library, thumbnails on disk | 43 ms median, 55 ms max |
-| Turn a page, thumbnails on disk | 33 ms median, 34 ms max |
-
-A Kindle is much slower than a desktop and e-ink refreshes take their own time, so treat these as relative numbers.
+Ideas came from [Project: Title](https://github.com/joshuacant/ProjectTitle), [SimpleUI](https://github.com/doctorhetfield-cmd/simpleui.koplugin) and ZenOS. Only ideas: no code was copied from them or from KOReader, and Library GUI is written from scratch under the MIT licence.
 
 ## Development
 
-```
-library.koplugin/
-  _meta.lua          plugin name and description
-  main.lua           menus, settings, startup, dialogs, gestures
-  libraryview.lua    the Library screen: title bar, search bar, tabs, chips, Continue reading, grid or list, footer
-  librarytile.lua    cover tiles, list rows, badges, chips, tabs, progress bars, LRU cache of scaled covers
-  librarycovers.lua  built-in covers: thumbnail files, extraction queue, background process
-  librarykeyboard.lua  "Rounded keyboard in search": a restyled keyboard for the search bar only
-  librarycontrols.lua  the Controls panel (corner swipe): light, warmth and toggles; loaded on first use
-  libraryindex.lua   scan + metadata (calibre > cover DB > sidecar) + on-disk cache
-  librarycore.lua    pure logic: sorting, grouping, filters, search index, grid and list maths, Continue reading picks
-spec/                tests (run.lua is a tiny runner for LuaJIT / Lua 5.1)
-tools/
-  make_dummy_library.py     generates N public-domain EPUBs with covers + metadata.calibre
-  librarybench.koplugin/    emulator benchmark + screenshots (development only, never install)
-screenshots/         emulator screenshots of the dummy library
-bench/RESULTS.md     benchmark numbers
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for running the tests and the emulator. Benchmarks are in [bench/RESULTS.md](bench/RESULTS.md).
 
-```sh
-make test                   # or: luajit spec/run.lua  (KOReader's own luajit works)
-make stage                  # dist/library.koplugin/ + dist/SHA256SUMS, the files to install
-```
-
-The tests use in-memory fixtures. The emulator library is generated from public-domain titles. `.gitignore` excludes books, `.sdr` folders, KOReader settings, history and cache files, so device data can't be committed by accident.
-
-## Roadmap
-
-- Read EPUB covers straight from the zip, without opening the book in the rendering engine. This would make first extraction faster for EPUBs. Not started.
-
-## License
+## Licence
 
 [MIT](LICENSE)

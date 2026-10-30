@@ -575,6 +575,31 @@ function Library:showSortPicker(view)
     return dialog
 end
 
+--- Go to page: a number box opened from the footer's "63 / 72".
+function Library:showPageJump(view)
+    local InputDialog = require("ui/widget/inputdialog")
+    local dialog
+    local function go()
+        local n = tonumber(dialog:getInputText())
+        if not n then return end
+        UIManager:close(dialog)
+        view:goToPage(math.floor(n))
+    end
+    dialog = InputDialog:new{
+        title = _("Go to page"),
+        input = "",
+        input_hint = T(_("1 – %1"), view.pages),
+        input_type = "number",
+        buttons = { {
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Go"), is_enter_default = true, callback = go },
+        } },
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+    return dialog
+end
+
 --- The ☰ menu inside the Library view.
 function Library:showLibraryMenu(view)
     local dialog

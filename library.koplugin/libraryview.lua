@@ -528,10 +528,17 @@ function LibraryView:buildFooter(page, pages, total, kind)
         return btn
     end
     local more = self:inSeries() -- past the last page: the next series
+    -- "63 / 72": tap it to type a page number (only when there is more than one page).
+    local page_label = TextWidget:new{ text = T(_("%1 / %2"), page, pages), face = f, bold = true }
+    self.page_label = nil
+    if pages > 1 then
+        page_label = TapArea:new{ min_h = touch, callback = function() self:showPageJump() end, page_label }
+        self.page_label = page_label
+    end
     local pager = HorizontalGroup:new{
         align = "center",
         arrow("chevron.left", -1, page > 1 or more),
-        TextWidget:new{ text = T(_("%1 / %2"), page, pages), face = f, bold = true },
+        page_label,
         arrow("chevron.right", 1, page < pages or more),
     }
     -- "202 books · Last read ▾": tap it to pick the sort (books only; a
@@ -1247,6 +1254,13 @@ end
 function LibraryView:showSortPicker()
     self:keyboardGuard()
     self.plugin:showSortPicker(self)
+end
+
+--- The footer's "63 / 72" was tapped: ask for a page number.
+function LibraryView:showPageJump()
+    if not self.pages or self.pages < 2 then return end
+    self:keyboardGuard()
+    self.plugin:showPageJump(self)
 end
 
 function LibraryView:resort(mode)
