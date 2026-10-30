@@ -34,6 +34,16 @@ function Controls:init()
     self.sliders = self:makeSliders()
     self.toggles = self:makeToggles()
     self.L = Core.controlsLayout(self.dimen.w, self.dimen.h, #self.sliders, #self.toggles)
+    if self.probe_line then
+        -- TEMP PROBE: make room for one text line above the handle
+        self.probe_lines = {}
+        for line in (self.probe_line .. "\n"):gmatch("(.-)\n") do self.probe_lines[#self.probe_lines + 1] = line end
+        local L, extra = self.L, math.floor(48 * #self.probe_lines * self.L.u + 22 * self.L.u)
+        L.probe_y = L.handle.y - math.floor(14 * L.u)
+        L.handle.y = L.handle.y + extra
+        L.panel.h = L.panel.h + extra
+        L.bottom = L.bottom + extra
+    end
     local range = self.dimen
     self.ges_events = {
         Tap = { GestureRange:new{ ges = "tap", range = range } },
@@ -239,6 +249,14 @@ function Controls:paintTo(bb, x, y)
         bb:paintRect(L.left, L.divider_y, L.right - L.left, math.max(2, math.floor(3 * L.u)), C.COLOR_GRAY_D)
     end
     for i, t in ipairs(self.toggles) do self:paintToggle(bb, t, L.toggles[i]) end
+    if self.probe_lines and L.probe_y then
+        for k, line in ipairs(self.probe_lines) do
+            local t = TextWidget:new{ text = line, face = Font:getFace("cfont", 13), bold = true,
+                max_width = L.right - L.left, fgcolor = C.COLOR_BLACK }
+            t:paintTo(bb, L.left, L.probe_y + math.floor((k - 1) * 48 * L.u))
+            t:free()
+        end
+    end
     local hd = L.handle
     bb:paintRoundedRect(hd.x, hd.y, hd.w, hd.h, C.COLOR_GRAY_B, math.floor(hd.h / 2))
 end
