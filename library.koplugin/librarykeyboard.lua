@@ -99,6 +99,31 @@ function M.restyle(kb, st, white)
     return true
 end
 
+--- Is `row` a row of digit keys (the number row on top of most layouts)?
+-- A key is a table of layers; layer 2 (lower case) holds "1" or a popup
+-- table whose [1] is "1".
+function M.isNumberRow(row)
+    if type(row) ~= "table" or #row < 8 then return false end
+    local digits = 0
+    for _, key in ipairs(row) do
+        local c = type(key) == "table" and key[2]
+        if type(c) == "table" then c = c[1] end
+        if type(c) == "string" and c:match("^%d$") then digits = digits + 1 end
+    end
+    return digits >= 8
+end
+
+--- The keyboard's rows without the number row on top (a new list; the
+-- layout module's own table is shared, so it is never changed). Rows are
+-- returned as they are when the top row is not a number row. The symbols
+-- key still reaches numbers (and the period key's popup the apostrophe).
+function M.withoutNumberRow(keys)
+    if type(keys) ~= "table" or #keys < 3 or not M.isNumberRow(keys[1]) then return keys end
+    local out = {}
+    for i = 2, #keys do out[#out + 1] = keys[i] end
+    return out
+end
+
 local RoundedKeyboard
 
 --- The RoundedKeyboard class (made on first use), or nil when KOReader's
@@ -121,6 +146,9 @@ function M.class()
         library_rounded = true,
     }
     function RoundedKeyboard:addKeys()
+        -- Letters only (Authors search): the same board height over one row
+        -- fewer, so the letter keys are taller.
+        if self.hide_number_row then self.KEYS = M.withoutNumberRow(self.KEYS) end
         VirtualKeyboard.addKeys(self)
         local done, err = pcall(M.restyle, self, st, Blitbuffer.COLOR_WHITE)
         if not done then require("logger").warn("Library: rounded keyboard:", err) end

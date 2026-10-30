@@ -72,6 +72,7 @@ local VIEW_NAMES = {
     large = _("Large covers"),
     list = _("List"),
     compact = _("Compact"),
+    compact2 = _("Compact · 2 columns"),
 }
 
 local Library = WidgetContainer:extend{
@@ -556,6 +557,24 @@ function Library:showBookDialog(book, view)
     UIManager:show(dialog)
 end
 
+--- The sort picker from the Library's footer label ("202 books · Last read ▾").
+function Library:showSortPicker(view)
+    local dialog
+    local buttons = {}
+    for _, mode in ipairs(Core.SORT_MENU) do
+        table.insert(buttons, { {
+            text = (view.sort == mode and "\u{2713} " or "") .. SORT_NAMES[mode],
+            callback = function()
+                UIManager:close(dialog)
+                if view.sort ~= mode then view:resort(mode) end -- remembered for this tab or shelf
+            end,
+        } })
+    end
+    dialog = ButtonDialog:new{ title = _("Sort by"), title_align = "center", buttons = buttons }
+    UIManager:show(dialog)
+    return dialog
+end
+
 --- The ☰ menu inside the Library view.
 function Library:showLibraryMenu(view)
     local dialog
@@ -571,10 +590,11 @@ function Library:showLibraryMenu(view)
         })
     end
     -- View: Small, Medium, Large covers (columns, for every shelf), List, Compact.
-    local view_row = {}
+    -- (two rows: the cover sizes, then the text views)
+    local view_row, text_row = {}, {}
     local pick = Core.viewPick(view.view_mode, self.settings.columns)
     for _i, p in ipairs(Core.VIEW_PICKER) do
-        table.insert(view_row, {
+        table.insert(p.columns and view_row or text_row, {
             text = (pick == p.id and "✓ " or "") .. VIEW_NAMES[p.id],
             callback = function()
                 close()
@@ -610,7 +630,7 @@ function Library:showLibraryMenu(view)
             end,
         })
     end
-    local buttons = { sort_row, view_row, col_row, barely_row }
+    local buttons = { sort_row, view_row, text_row, col_row, barely_row }
     -- Each shelf remembers its own layout, sort and filter: offer to forget them.
     local remember = Core.rememberViews(self.settings)
     if remember then

@@ -481,7 +481,7 @@ end
 --- A compact row's text: "Title · Author" (or "Author · Title" when sorted
 -- by author) for a book, "Name · Author" for a series, the name for other
 -- shelves; and what goes on the right (status, or the book count).
-function M.compactText(item, kind, series_number, author_first)
+function M.compactText(item, kind, series_number, author_first, date_text)
     if kind == "groups" then
         local a = M.seriesAuthors(item)
         return a and (item.name .. " · " .. a) or item.name, M.bookCount(item)
@@ -496,6 +496,10 @@ function M.compactText(item, kind, series_number, author_first)
     if item.status == "complete" then right = "\u{2713}"
     elseif item.status == "abandoned" then right = _("on hold")
     elseif item.percent and item.status ~= "new" then right = T(_("%1 %"), math.floor(item.percent * 100 + 0.5))
+    end
+    -- Last read / Date added: the date too (the title is cut, never the date)
+    if date_text and date_text ~= "" then
+        right = right ~= "" and (right .. " · " .. date_text) or date_text
     end
     return left, right
 end
@@ -526,6 +530,7 @@ local Tile = InputContainer:extend{
     on_hold = nil,
     one_line = false, -- title only under the cover
     caption = nil,    -- second line instead of the author (Continue reading)
+    date_text = nil,  -- second line instead of the author (sorted by Last read / Date added)
     series_number = false, -- "3 · Title" (inside a series)
 }
 M.Tile = Tile
@@ -567,7 +572,7 @@ function Tile:init()
         line2 = M.groupSecondLine(self.group)
     else
         line1 = M.bookTitle(book, self.series_number)
-        line2 = M.secondLine(book, self.caption)
+        line2 = M.secondLine(book, self.caption or self.date_text)
     end
     local text_w = self.width - 2 * pad
     local label = VerticalGroup:new{
@@ -741,6 +746,13 @@ function ListRow:init()
         right = pill(tostring(#self.group.books), true)
     else
         right = rowStatus(book, right_w)
+        if self.date_text then
+            -- Last read / Date added: a small date under the status
+            local date = TextWidget:new{ text = self.date_text, face = f.sub, fgcolor = Blitbuffer.COLOR_GRAY_4 }
+            right_w = math.max(right_w, date:getSize().w)
+            right = right and VerticalGroup:new{ align = "right", right,
+                VerticalSpan:new{ width = Size.padding.small }, date } or date
+        end
     end
     local right_box = LeftContainer:new{ dimen = Geom:new{ w = right_w, h = inner_h },
         right and FrameContainer:new{ padding = 0, bordersize = 0,
@@ -840,6 +852,7 @@ local CompactRow = InputContainer:extend{
     on_hold = nil,
     series_number = false,
     author_first = false,
+    date_text = nil,
 }
 M.CompactRow = CompactRow
 
@@ -856,7 +869,7 @@ function CompactRow:init()
     local line = Size.line.thin
     local inner_h = self.height - line
     local left, right_text = M.compactText(self.group or self.book, self.group and "groups" or "books",
-        self.series_number, self.author_first)
+        self.series_number, self.author_first, self.date_text)
     local right = TextWidget:new{ text = right_text or "", face = face, fgcolor = Blitbuffer.COLOR_GRAY_4 }
     local right_w = right:getSize().w
     local text_w = self.width - 2 * margin - (right_w > 0 and (pad + right_w) or 0)

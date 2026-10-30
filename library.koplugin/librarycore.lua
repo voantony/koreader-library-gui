@@ -886,11 +886,11 @@ end
 
 -- grid: covers; list: a row per item (covers for books, text for authors
 -- and series); compact: one line per row, many rows per page.
-Core.VIEWS = { "grid", "list", "compact" }
+Core.VIEWS = { "grid", "list", "compact", "compact2" }
 
 --- A saved view mode, falling back to "grid".
 function Core.viewMode(v)
-    if v == "list" or v == "compact" then return v end
+    if v == "list" or v == "compact" or v == "compact2" then return v end
     return "grid"
 end
 
@@ -901,7 +901,34 @@ Core.VIEW_PICKER = {
     { id = "large", view = "grid", columns = 3 },
     { id = "list", view = "list" },
     { id = "compact", view = "compact" },
+    { id = "compact2", view = "compact2" },
 }
+
+--- One line per row (Compact, or Compact in two columns).
+function Core.isCompact(view_mode)
+    return view_mode == "compact" or view_mode == "compact2"
+end
+
+--- Columns of rows: 2 for "compact2", else 1.
+function Core.listColumns(view_mode)
+    return view_mode == "compact2" and 2 or 1
+end
+
+--- Split a page into `cols` columns of up to `rows`, filled column by
+-- column (down the left column, then the right).
+function Core.columnMajor(items, rows, cols)
+    local out = {}
+    for c = 1, cols do
+        local col = {}
+        for r = 1, rows do
+            local item = items[(c - 1) * rows + r]
+            if item == nil then break end
+            col[#col + 1] = item
+        end
+        out[c] = col
+    end
+    return out
+end
 
 --- Which picker entry is showing now (nil: a grid at another column count).
 function Core.viewPick(view_mode, columns)
@@ -1035,6 +1062,35 @@ function Core.relativeTime(ts, now, max_days)
     local days = math.floor(d / 86400)
     if days == 1 then return "yesterday" end
     if days <= (max_days or 30) then return string.format("%d days ago", days) end
+    return nil
+end
+
+local MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
+
+--- A short date for a row: "Just now", "5m ago", "2h ago", "Yesterday",
+-- "12 Oct", or "12 Oct 2024" in another year. nil without a time.
+function Core.shortDate(ts, now)
+    ts, now = tonumber(ts), tonumber(now)
+    if not ts or ts <= 0 then return nil end
+    now = now or os.time()
+    local d = now - ts
+    if d >= 0 and d < 60 then return "Just now" end
+    if d >= 0 and d < 3600 then return string.format("%dm ago", math.floor(d / 60)) end
+    if d >= 0 and d < 86400 then return string.format("%dh ago", math.floor(d / 3600)) end
+    local t, n = os.date("*t", ts), os.date("*t", now)
+    local y = os.date("*t", now - 86400)
+    if t.year == y.year and t.yday == y.yday then return "Yesterday" end
+    local s = t.day .. " " .. MONTHS[t.month]
+    if t.year ~= n.year then s = s .. " " .. t.year end
+    return s
+end
+
+--- The date a row shows for its sort: when it was last opened (Last read)
+-- or added (Date added); nil for other sorts and never-opened books.
+function Core.sortDate(book, sort, now)
+    if not book then return nil end
+    if sort == "recent" then return Core.shortDate(book.last_opened, now) end
+    if sort == "added" then return Core.shortDate(book.modification, now) end
     return nil
 end
 
@@ -1414,7 +1470,7 @@ end
 
 local function validPref(field, v)
     if v == nil then return nil end
-    if field == "view" then return (v == "list" or v == "grid" or v == "compact") and v or nil end
+    if field == "view" then return Core.viewMode(v) == v and v or nil end
     if field == "sort" then
         for _, m in ipairs(Core.SORTS) do if m == v then return v end end
         return nil
