@@ -1465,10 +1465,11 @@ function Core.inControlsCorner(x, y, w, h)
     return x >= w * 7 / 8 and y <= h / 8
 end
 
-Core.CONTROL_TOGGLES = { "wifi", "night", "cover_sleep", "rotate", "bluetooth", "sleep" }
+Core.CONTROL_TOGGLES = { "auto_light", "wifi", "night", "cover_sleep", "rotate", "bluetooth", "sleep" }
 
 --- The toggles this device can use, in panel order. `caps[id]` is true when
--- the device supports it (Bluetooth: KOReader has no API, so never).
+-- the device supports it (Bluetooth: KOReader has no API, so never;
+-- auto_light: only a Kindle whose flAuto can be read).
 function Core.controlsToggles(caps)
     local out = {}
     for _, id in ipairs(Core.CONTROL_TOGGLES) do

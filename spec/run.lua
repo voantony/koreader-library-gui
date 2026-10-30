@@ -55,7 +55,7 @@ _G.same = function(actual, expected, msg)
     end
 end
 
-for _, spec in ipairs({ "librarycore_spec", "libraryindex_spec", "librarycovers_spec", "libraryfeatures_spec", "librarysh_spec", "librarysearchtap_spec", "librarygui_spec", "libraryviewmemory_spec", "librarycontrols_spec", "librarycontrolsrefresh_spec", "libraryfuzzy_spec" }) do
+for _, spec in ipairs({ "librarycore_spec", "libraryindex_spec", "librarycovers_spec", "libraryfeatures_spec", "librarysh_spec", "librarysearchtap_spec", "librarygui_spec", "libraryviewmemory_spec", "librarycontrols_spec", "librarycontrolsrefresh_spec", "librarycontrolsauto_spec", "libraryfuzzy_spec" }) do
     require(spec)
 end
 
