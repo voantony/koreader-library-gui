@@ -1352,6 +1352,15 @@ end
 
 --- Put `id` into a menu-order list just before `before` (at the end when
 -- `before` is missing), or take it out when not `enabled`. Idempotent.
+--- Move `id` to the front of a menu order list (added once, however often called).
+function Core.placeFirst(list, id)
+    for i = #list, 1, -1 do
+        if list[i] == id then table.remove(list, i) end
+    end
+    table.insert(list, 1, id)
+    return list
+end
+
 function Core.placeMenuButton(buttons, id, before, enabled)
     for i = #buttons, 1, -1 do
         if buttons[i] == id then table.remove(buttons, i) end
