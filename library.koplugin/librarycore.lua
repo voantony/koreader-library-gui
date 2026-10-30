@@ -259,7 +259,9 @@ local function firstAuthor(book)
     return book.authors and book.authors[1] or Core.UNKNOWN
 end
 
-Core.SORTS = { "recent", "title", "author", "series", "added", "size" }
+-- The ☰ menu's sort order: Author, Title, Date added, Last read, then Series.
+Core.SORT_MENU = { "author", "title", "added", "recent", "series" }
+Core.SORTS = { "author", "title", "added", "recent", "series", "size" }
 
 --- Return a comparator for `mode`.
 -- @tparam[opt] function collate locale-aware `a < b` for strings
@@ -303,10 +305,10 @@ function Core.comparator(mode, collate)
             return byTitle(a, b)
         end
     elseif mode == "added" then
+        -- Newest first.
         return function(a, b)
-            if a.modification ~= b.modification then
-                return a.modification > b.modification
-            end
+            local am, bm = a.modification or 0, b.modification or 0
+            if am ~= bm then return am > bm end
             return byTitle(a, b)
         end
     elseif mode == "size" then
@@ -735,6 +737,10 @@ function Core.buildSearchKey(book, lower)
     local tokens, n = {}, 0
     for w in norm:gmatch("%S+") do n = n + 1; tokens[n] = w end
     book.search_norm, book.search_tokens = norm, tokens
+    local into = book.search_into -- (a shelf: keep the key on the shelf itself)
+    if into then
+        into.search_key, into.search_norm, into.search_tokens = book.search_key, norm, tokens
+    end
     return book.search_key
 end
 
@@ -774,6 +780,39 @@ function Core.searchIndexed(books, query, lower, previous, fuzzy)
         if ok then out[#out + 1] = b end
     end
     return out
+end
+
+--- What the search bar searches here: the books of an open shelf, all
+-- books on the Books tab, else the shelves of the tab ("authors",
+-- "series", "collections").
+function Core.searchScope(tab, group)
+    if group or tab == "books" or tab == nil then return "books" end
+    return tab
+end
+
+--- The distinct authors of `books`, in order of first appearance.
+function Core.groupAuthors(books)
+    local seen, out = {}, {}
+    for _, b in ipairs(books or {}) do
+        for _, a in ipairs(b.authors or {}) do
+            if a ~= "" and not seen[a] then seen[a] = true; out[#out + 1] = a end
+        end
+    end
+    return out
+end
+
+--- Search a tab's shelves by name, with the same matcher as books
+-- (typos forgiven when `fuzzy`). A series also matches its authors.
+function Core.searchGroups(groups, query, lower, fuzzy)
+    for _, g in ipairs(groups) do
+        if not g.search_key then
+            if g.kind == "series" and not g.authors then g.authors = Core.groupAuthors(g.books) end
+            -- the key holds only the name (and a series' authors)
+            Core.buildSearchKey({ name = g.name, authors = g.kind == "series" and g.authors or nil,
+                search_into = g }, lower)
+        end
+    end
+    return Core.searchIndexed(groups, query, lower, nil, fuzzy)
 end
 
 --- True when `new_query` only extends `old_query` (so old results can be narrowed).
@@ -845,12 +884,37 @@ function Core.listLayout(height, min_row_h, pad, opts)
     return { rows = rows, row_h = row_h, thumb_w = thumb_w, thumb_h = thumb_h, per_page = rows }
 end
 
-Core.VIEWS = { "grid", "list" }
+-- grid: covers; list: a row per item (covers for books, text for authors
+-- and series); compact: one line per row, many rows per page.
+Core.VIEWS = { "grid", "list", "compact" }
 
 --- A saved view mode, falling back to "grid".
 function Core.viewMode(v)
-    if v == "list" then return "list" end
+    if v == "list" or v == "compact" then return v end
     return "grid"
+end
+
+--- The ☰ menu's View picker: three cover sizes (columns), List, Compact.
+Core.VIEW_PICKER = {
+    { id = "small", view = "grid", columns = 5 },
+    { id = "medium", view = "grid", columns = 4 },
+    { id = "large", view = "grid", columns = 3 },
+    { id = "list", view = "list" },
+    { id = "compact", view = "compact" },
+}
+
+--- Which picker entry is showing now (nil: a grid at another column count).
+function Core.viewPick(view_mode, columns)
+    view_mode = Core.viewMode(view_mode)
+    for _, p in ipairs(Core.VIEW_PICKER) do
+        if p.view == view_mode and (p.columns == nil or p.columns == columns) then return p.id end
+    end
+    return nil
+end
+
+--- List rows of shelves are text only (no cover art) on Authors and Series.
+function Core.textRows(view_mode, kind, tab)
+    return Core.viewMode(view_mode) == "list" and kind == "groups" and (tab == "authors" or tab == "series")
 end
 
 ----------------------------------------------------------------------------
@@ -1350,7 +1414,7 @@ end
 
 local function validPref(field, v)
     if v == nil then return nil end
-    if field == "view" then return (v == "list" or v == "grid") and v or nil end
+    if field == "view" then return (v == "list" or v == "grid" or v == "compact") and v or nil end
     if field == "sort" then
         for _, m in ipairs(Core.SORTS) do if m == v then return v end end
         return nil
@@ -1371,6 +1435,10 @@ function Core.defaultPrefs(settings)
     }
 end
 
+-- Places that start with another layout than the Books tab's (until changed
+-- there): Authors is a text list, A-Z.
+Core.PLACE_DEFAULTS = { ["tab:authors"] = { view = "list" } }
+
 --- Layout, sort and filter for `key`, and whether anything is remembered
 -- for it (other than the defaults). With the memory turned off this is nil:
 -- the Library keeps whatever is showing, as before.
@@ -1381,6 +1449,7 @@ function Core.viewPrefs(settings, key)
         local d = Core.DEFAULT_PREFS
         return prefs, prefs.view ~= d.view or prefs.sort ~= d.sort or prefs.filter ~= d.filter
     end
+    for f, v in pairs(Core.PLACE_DEFAULTS[key] or {}) do prefs[f] = v end
     local entry = settings.view_memory and settings.view_memory[key]
     local remembered = false
     if type(entry) == "table" then
@@ -1465,10 +1534,11 @@ function Core.inControlsCorner(x, y, w, h)
     return x >= w * 7 / 8 and y <= h / 8
 end
 
-Core.CONTROL_TOGGLES = { "wifi", "night", "cover_sleep", "rotate", "bluetooth", "sleep" }
+-- Row 1 is the screen (Light, Night, Refresh), row 2 the device (Wi-Fi, Rotate, Cover sleep).
+Core.CONTROL_TOGGLES = { "light", "night", "refresh", "wifi", "rotate", "cover_sleep" }
 
 --- The toggles this device can use, in panel order. `caps[id]` is true when
--- the device supports it (Bluetooth: KOReader has no API, so never).
+-- the device supports it (light: has a front light; refresh: e-ink screen).
 function Core.controlsToggles(caps)
     local out = {}
     for _, id in ipairs(Core.CONTROL_TOGGLES) do

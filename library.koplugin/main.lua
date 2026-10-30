@@ -58,12 +58,20 @@ local DEFAULTS = {
 }
 
 local SORT_NAMES = {
-    recent = _("Recent"),
+    recent = _("Last read"),
     title  = _("Title"),
     author = _("Author"),
     series = _("Series"),
     added  = _("Date added"),
     size   = _("Size"),
+}
+
+local VIEW_NAMES = {
+    small = _("Small covers"),
+    medium = _("Medium covers"),
+    large = _("Large covers"),
+    list = _("List"),
+    compact = _("Compact"),
 }
 
 local Library = WidgetContainer:extend{
@@ -553,7 +561,7 @@ function Library:showLibraryMenu(view)
     local dialog
     local function close() UIManager:close(dialog) end
     local sort_row, col_row = {}, {}
-    for _, mode in ipairs({ "recent", "title", "author", "series", "added" }) do
+    for _, mode in ipairs(Core.SORT_MENU) do
         table.insert(sort_row, {
             text = (view.sort == mode and "✓ " or "") .. SORT_NAMES[mode],
             callback = function()
@@ -562,18 +570,24 @@ function Library:showLibraryMenu(view)
             end,
         })
     end
+    -- View: Small, Medium, Large covers (columns, for every shelf), List, Compact.
     local view_row = {}
-    for _i, mode in ipairs(Core.VIEWS) do
-        local name = mode == "list" and _("List") or _("Grid")
+    local pick = Core.viewPick(view.view_mode, self.settings.columns)
+    for _i, p in ipairs(Core.VIEW_PICKER) do
         table.insert(view_row, {
-            text = (Core.viewMode(view.view_mode) == mode and "✓ " or "") .. T(_("View: %1"), name),
+            text = (pick == p.id and "✓ " or "") .. VIEW_NAMES[p.id],
             callback = function()
                 close()
-                view:setViewMode(mode)
+                if p.columns and self.settings.columns ~= p.columns then
+                    self.settings.columns = p.columns
+                    self:saveSettings()
+                    view:setColumns(p.columns)
+                end
+                view:setViewMode(p.view)
             end,
         })
     end
-    table.insert(view_row, {
+    table.insert(col_row, {
         text = (self.settings.show_continue ~= false and "✓ " or "")
             .. (Core.topRow(self.settings.top_row) == "recent" and _("Show Recently opened") or _("Show Continue reading")),
         callback = function()
@@ -583,17 +597,6 @@ function Library:showLibraryMenu(view)
             view:setShowContinue(self.settings.show_continue)
         end,
     })
-    for _i, n in ipairs({ 3, 4, 5, 6 }) do
-        table.insert(col_row, {
-            text = (self.settings.columns == n and "✓ " or "") .. T(_("%1 columns"), n),
-            callback = function()
-                close()
-                self.settings.columns = n
-                self:saveSettings()
-                view:setColumns(n)
-            end,
-        })
-    end
     local barely_row = {}
     local th = Core.barelyThreshold(self.settings.barely_threshold)
     for _i, t in ipairs(Core.BARELY_THRESHOLDS) do
@@ -615,7 +618,7 @@ function Library:showLibraryMenu(view)
         local on_books = view:viewKey() == "books"
         table.insert(buttons, {
             {
-                text = on_books and _("\u{21BA} Reset default layout (grid, Recent, All)")
+                text = on_books and _("\u{21BA} Reset default layout (covers, Last read, All)")
                     or T(_("\u{21BA} Reset “%1” to default"), place),
                 enabled = view:hasRemembered(),
                 callback = function()
@@ -647,9 +650,10 @@ function Library:showLibraryMenu(view)
             end,
         },
     })
+    -- Last item: leave the Library for the file browser (the title bar has no X).
     table.insert(buttons, {
         {
-            text = _("File browser"),
+            text = "\u{2715} " .. _("Close Library"),
             callback = function()
                 close()
                 UIManager:close(view)
@@ -739,7 +743,7 @@ function Library:topRowMenu()
         text_func = function()
             return T(_("Top row: %1"), TOP_ROW_NAMES[Core.topRow(self.settings.top_row)])
         end,
-        help_text = _("The row of large covers at the top of the Books tab. Continue reading shows the books you are reading. Recently opened shows every book you have opened, newest first, including finished and on-hold ones. The Resume button always opens the most recent book you are still reading."),
+        help_text = _("The row of large covers at the top of the Books tab. Continue reading shows the books you are reading. Recently opened shows every book you have opened, newest first, including finished and on-hold ones. The Resume icon (top right) always opens the most recent book you are still reading."),
         sub_item_table = items,
     }
 end

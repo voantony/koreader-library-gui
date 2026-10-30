@@ -3,11 +3,11 @@ Full-screen Library view.
 
 Layout, top to bottom:
 
-    title bar        (menu, title, close -> file browser)
+    title bar        (menu, title, Resume icon; "Close Library" lives in the menu)
     search bar       (always visible InputText; filters as you type)
     tabs             Books | Collections | Authors | Series
     status chips     All | Unread | Reading | Barely started | Finished
-    continue reading (Books tab, no search or filter: a Resume button and
+    continue reading (Books tab, no search or filter:
                      the books in progress, with percent and last-read time)
     cover grid or list
     footer           page x of y, sort (in a series: "2 of 5 read")
@@ -32,6 +32,7 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconButton = require("ui/widget/iconbutton")
+local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputText = require("ui/widget/inputtext")
 local LeftContainer = require("ui/widget/container/leftcontainer")
@@ -78,7 +79,7 @@ local LibraryView = InputContainer:extend{
     sort = "recent",
     tab = "books",
     filter = "all",
-    view_mode = "grid",     -- "grid" | "list"
+    view_mode = "grid",     -- "grid" | "list" | "compact"
     show_continue = true,   -- the Continue reading strip on the Books tab
     top_row = "continue",   -- what that strip shows: "continue" | "recent" (Recently opened)
     continue_slots = 5,
@@ -154,19 +155,41 @@ end
 ----------------------------------------------------------------------------
 
 function LibraryView:buildChrome()
+    self:buildTitleBar()
+    self:buildSearchRow()
+end
+
+--- ☰ on the left, the title, and on the right a Resume icon that opens the
+-- last book being read (hidden when there is none). No X: "Close Library"
+-- is the last item of the ☰ menu. Swipes pass through the icon, so the
+-- corner swipe-down for Controls still starts here.
+function LibraryView:buildTitleBar()
+    local book = self.last_book
     self.title_bar = TitleBar:new{
         width = self.width,
         fullscreen = true,
         align = "center",
-        title = _("Library"),
+        title = self._title or _("Library"),
         left_icon = "appbar.menu",
         left_icon_tap_callback = function() self:onLeftIcon() end,
         left_icon_hold_callback = function() self.plugin:showLibraryMenu(self) end,
-        close_callback = function() self:onClose() end,
+        right_icon = book and "book.opened" or nil,
+        right_icon_tap_callback = book and function() self:onResume() end or nil,
+        right_icon_hold_callback = book and function() self:showResumeHint() end or nil,
         show_parent = self,
     }
+    self._title_bar_resume = book and true or false
+end
 
-    self:buildSearchRow()
+--- Long-press on the Resume icon: which book it opens.
+function LibraryView:showResumeHint()
+    local book = self.last_book
+    if not book then return end
+    local pct = Core.percentText(book.percent)
+    UIManager:show(InfoMessage:new{
+        text = T(_("Resume: %1"), book.title or book.name) .. (pct and ("  ·  " .. pct) or ""),
+        timeout = 2,
+    })
 end
 
 --- The search bar: a rounded field with a magnifier, the text box and a
@@ -199,9 +222,10 @@ function LibraryView:buildSearchRow(text)
         text = text or self.search_input:getText()
         self.search_input:onCloseWidget() -- frees its keyboard
     end
+    self._search_hint = self:searchHint()
     self.search_input = SearchInput:new{
         text = text or "",
-        hint = _("Search title, author, series"),
+        hint = self._search_hint,
         width = input_w,
         face = face,
         focused = false,
@@ -284,6 +308,12 @@ function LibraryView:reloadData()
     self.sorted = Core.sortBooks(self.all_books, self.sort, self.plugin.collate)
     self.last_query, self.last_results = nil, nil
     self.groups_cache = {}
+    -- The book the Resume icon opens; show or hide the icon to match.
+    self.last_book = Core.resumeBook(self.all_books)
+    if self.title_bar and self._title_bar_resume ~= (self.last_book ~= nil) then
+        self:buildTitleBar()
+        self._title_changed = true -- repaint the whole view, title bar included
+    end
 end
 
 function LibraryView:groupsFor(tab)
@@ -313,6 +343,32 @@ function LibraryView:groupsFor(tab)
     return groups
 end
 
+--- The search bar's placeholder: what it searches here.
+function LibraryView:searchHint()
+    if self.group then return T(_("Search in %1\u{2026}"), self.group.name) end
+    local scope = Core.searchScope(self.tab, self.group)
+    if scope == "authors" then return _("Search authors\u{2026}") end
+    if scope == "series" then return _("Search series or authors\u{2026}") end
+    if scope == "collections" then return _("Search collections\u{2026}") end
+    return _("Search title, author, series")
+end
+
+--- Rebuild the search bar when its placeholder should change (new tab or shelf).
+function LibraryView:updateSearchHint()
+    if self._search_hint and self._search_hint ~= self:searchHint() then
+        self:buildSearchRow(self.query)
+    end
+end
+
+--- Empty the search without searching again (the caller rebuilds the body).
+function LibraryView:resetQuery()
+    if self._search_action then UIManager:unschedule(self._search_action); self._search_action = nil end
+    if self.query ~= "" then
+        self.search_input:setText("")
+        self.query = ""
+    end
+end
+
 --- Books matching the query (narrowing previous results while typing).
 function LibraryView:searchBooks(base)
     if self.query == "" then return base end
@@ -332,11 +388,14 @@ function LibraryView:currentItems()
         local books = self:searchBooks(self.group.books)
         return { kind = "books", items = Core.filterStatus(books, self.filter, th), counts = Core.countFilters(books, th) }
     end
-    if self.tab == "books" or self.query ~= "" then
+    if Core.searchScope(self.tab) == "books" then
         local books = self:searchBooks(self.sorted)
         return { kind = "books", items = Core.filterStatus(books, self.filter, th), counts = Core.countFilters(books, th) }
     end
-    return { kind = "groups", items = self:groupsFor(self.tab) }
+    -- Authors, Series, Collections: the search narrows the tab's shelves.
+    local groups = self:groupsFor(self.tab)
+    if self.query ~= "" then groups = Core.searchGroups(groups, self.query, lower, self.fuzzy_search) end
+    return { kind = "groups", items = groups }
 end
 
 ----------------------------------------------------------------------------
@@ -359,8 +418,7 @@ function LibraryView:buildTabs()
         table.insert(row, Tiles.Tab:new{
             text = tab.text,
             width = w,
-            selected = (self.group == nil and self.query == "" and self.tab == tab.id)
-                or (self.query ~= "" and tab.id == "books" and self.group == nil),
+            selected = self.group == nil and self.tab == tab.id,
             callback = function() self:setTab(tab.id) end,
         })
     end
@@ -376,6 +434,7 @@ function LibraryView:buildTabs()
 end
 
 local FILTER_SHORT = { barely = _("Barely") }
+local GROUP_COUNT = { authors = _("%1 authors"), series = _("%1 series"), collections = _("%1 collections") }
 
 function LibraryView:buildChips(counts)
     local margin = Size.margin.default + Size.padding.default
@@ -422,7 +481,7 @@ function LibraryView:buildFooter(page, pages, total, kind)
     local margin = Size.margin.default + Size.padding.default
     local f = Font:getFace("cfont", 15)
     local left = kind == "books" and T(_("%1 books · %2"), total, self.plugin:sortName(self.sort))
-        or T(_("%1 groups"), total)
+        or T(GROUP_COUNT[self.tab] or _("%1 groups"), total)
     if self:inSeries() then
         local pr = Core.seriesProgress(self.group.books)
         left = T(_("%1 of %2 read"), pr.read, pr.total)
@@ -523,9 +582,12 @@ function LibraryView:buildList(items, kind, layout, height)
     local list = VerticalGroup:new{ align = "left" }
     self.tiles = {}
     self.missing_covers = {}
+    local compact = self.view_mode == "compact"
+    local Row = compact and Tiles.CompactRow or Tiles.ListRow
+    local text_only = Core.textRows(self.view_mode, kind, self.tab) and not self.group
     for idx = 1, math.min(#items, layout.rows) do
         local item = items[idx]
-        local row = Tiles.ListRow:new{
+        local row = Row:new{
             width = self.width,
             height = layout.row_h,
             thumb_w = layout.thumb_w,
@@ -533,6 +595,8 @@ function LibraryView:buildList(items, kind, layout, height)
             book = kind == "books" and item or nil,
             group = kind == "groups" and item or nil,
             series_number = kind == "books" and self:inSeries(),
+            author_first = kind == "books" and self.sort == "author",
+            text_only = text_only,
             covers = self.covers,
             cover_cache = self.cover_cache,
             on_tap = function(t) self:onTileTap(t) end,
@@ -574,28 +638,13 @@ function LibraryView:resumeCaption(book, now)
     return table.concat(parts, " · ")
 end
 
---- The strip's heading: "Continue reading" or "Recently opened", and a
--- one-tap Resume button for the most recently opened book still being read
--- (in Continue reading, the first cover). No button when there is none.
-function LibraryView:buildContinueHeader(book)
+--- The strip's heading: "Continue reading" or "Recently opened". (Resume
+-- is the icon in the title bar.)
+function LibraryView:buildContinueHeader()
     local f = Font:getFace("cfont", 17)
     local heading = Core.topRow(self.top_row) == "recent" and _("Recently opened") or _("Continue reading")
     local label = TextWidget:new{ text = heading, face = f, bold = true }
     local row = HorizontalGroup:new{ align = "center", label }
-    self.resume_chip = nil
-    if book then
-        local pct = Core.percentText(book.percent)
-        local avail = self.width - 2 * (Size.margin.default + self.gap) - label:getSize().w - Size.padding.large
-        local chip = Tiles.Chip:new{
-            text = "\u{25B6} " .. T(_("Resume %1"), book.title or book.name) .. (pct and ("  " .. pct) or ""),
-            selected = true,
-            max_text_w = math.max(50, avail - 2 * Size.padding.default - 2 * Size.border.thin),
-            callback = function() self:onResume() end,
-        }
-        self.resume_chip = chip
-        table.insert(row, HorizontalSpan:new{ width = math.max(Size.padding.large, avail - chip:getSize().w) })
-        table.insert(row, chip)
-    end
     return FrameContainer:new{
         padding = 0,
         padding_left = Size.margin.default + self.gap,
@@ -605,9 +654,9 @@ function LibraryView:buildContinueHeader(book)
     }
 end
 
---- The Continue reading strip: a heading with Resume, and up to `slots` large covers.
+--- The Continue reading strip: a heading and up to `slots` large covers.
 function LibraryView:buildContinue(books, cl)
-    local header = self:buildContinueHeader(self.resume_book)
+    local header = self:buildContinueHeader()
     local row = HorizontalGroup:new{ align = "top", HorizontalSpan:new{ width = self.gap } }
     self.continue_tiles = {}
     local now = os.time()
@@ -638,8 +687,7 @@ end
 function LibraryView:continueHeaderHeight()
     if not self._continue_header_h then
         local t = TextWidget:new{ text = "Ag", face = Font:getFace("cfont", 17), bold = true }
-        local chip = Tiles.Chip:new{ text = "Ag" }
-        self._continue_header_h = math.max(t:getSize().h, chip:getSize().h) + Size.padding.default
+        self._continue_header_h = t:getSize().h + Size.padding.default
         t:free()
     end
     return self._continue_header_h
@@ -666,8 +714,7 @@ function LibraryView:buildBody()
     local strip
     self.continue_tiles = nil
     self.continue_books = nil
-    self.resume_book = nil
-    if data.kind == "books" and Core.showContinue{
+    if data.kind == "books" and self.view_mode ~= "compact" and Core.showContinue{
             enabled = self.show_continue, tab = self.tab, group = self.group,
             query = self.query, filter = self.filter, keyboard = keyboard_h > 0 } then
         local cbooks = Core.topRowBooks(self.top_row, self.all_books, self.continue_slots, fileExists)
@@ -676,7 +723,6 @@ function LibraryView:buildBody()
             self:continueHeaderHeight(), self.gap, { slots = self.continue_slots, min_rest = min_rest, frac = 0.3 })
         if cl then
             self.continue_books = cbooks
-            self.resume_book = Core.resumeBook(self.all_books)
             self.continue_layout = cl
             grid_h = grid_h - cl.height
             strip = cl
@@ -684,7 +730,12 @@ function LibraryView:buildBody()
     end
 
     local layout
-    if self.view_mode == "list" then
+    if self.view_mode == "compact" then
+        layout = Core.listLayout(grid_h, Tiles.compactRowHeight(), 0, { max_rows = 40 })
+    elseif Core.textRows(self.view_mode, data.kind, self.tab) then
+        -- Authors: one line per row; Series: the name over its authors.
+        layout = Core.listLayout(grid_h, Tiles.textRowHeight(self.tab == "series" and 2 or 1), 0, { max_rows = 24 })
+    elseif self.view_mode == "list" then
         layout = Core.listLayout(grid_h, self.list_row_h, Size.padding.small, { max_rows = 10 })
     else
         -- Under the Continue reading strip, accept smaller covers for a second row.
@@ -699,7 +750,7 @@ function LibraryView:buildBody()
     local strip_widget = strip and self:buildContinue(self.continue_books, strip)
     local continue_missing = self.missing_covers
     local grid
-    if self.view_mode == "list" then
+    if self.view_mode == "list" or self.view_mode == "compact" then
         grid = self:buildList(page_items, data.kind, layout, grid_h)
     else
         grid = self:buildGrid(page_items, data.kind, layout, grid_h)
@@ -863,11 +914,9 @@ end
 
 function LibraryView:setTab(id)
     self:keyboardGuard()
-    if self.query ~= "" then
-        self.search_input:setText("")
-        self.query = ""
-    end
+    self:resetQuery() -- each tab searches its own things: start afresh
     self.tab, self.group, self.page = id, nil, 1
+    self:updateSearchHint()
     self:applyRemembered()
     self:refreshBody(true)
 end
@@ -881,7 +930,10 @@ end
 
 function LibraryView:openGroup(group)
     self.saved_page = self.page
+    self.saved_query = self.query -- e.g. "tolk" on Authors, back on close
+    self:resetQuery()
     self.group, self.page = group, 1
+    self:updateSearchHint()
     self:applyRemembered()
     self:refreshBody(true)
 end
@@ -889,6 +941,13 @@ end
 function LibraryView:closeGroup()
     self.group = nil
     self.page = self.saved_page or 1
+    self:resetQuery()
+    if self.saved_query and self.saved_query ~= "" then
+        self.query = self.saved_query
+        self.search_input:setText(self.query)
+    end
+    self.saved_query = nil
+    self:updateSearchHint()
     self:applyRemembered()
     self:refreshBody(true)
 end
@@ -1041,7 +1100,7 @@ end
 
 function LibraryView:onResume()
     self:keyboardGuard()
-    local book = self.resume_book or Core.resumeBook(self.all_books)
+    local book = self.last_book or Core.resumeBook(self.all_books)
     if book then self.plugin:openBook(book.path, self) end
 end
 

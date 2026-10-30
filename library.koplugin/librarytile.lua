@@ -439,6 +439,67 @@ function M.statusLine(book)
     return nil
 end
 
+--- The second line under a shelf: a series' author(s), else "3 books"
+-- (the count is also on the shelf's pill).
+function M.groupSecondLine(group)
+    return M.seriesAuthors(group) or M.bookCount(group)
+end
+
+--- "Terry Pratchett, Neil Gaiman +1" for a series shelf; nil otherwise.
+function M.seriesAuthors(group)
+    if group.kind ~= "series" then return nil end
+    local authors = group.authors or Core.groupAuthors(group.books)
+    group.authors = authors
+    if #authors == 0 then return nil end
+    local s = table.concat(authors, ", ", 1, math.min(2, #authors))
+    if #authors > 2 then s = s .. " +" .. (#authors - 2) end
+    return s
+end
+
+function M.bookCount(group)
+    local n = #group.books
+    return n == 1 and _("1 book") or T(_("%1 books"), n)
+end
+
+--- A list row's two lines for a book: the title over "authors · series #n",
+-- or, sorted by author, the authors over the title.
+function M.bookLines(book, series_number, author_first)
+    local title = M.bookTitle(book, series_number)
+    local authors = book.authors and table.concat(book.authors, ", ") or ""
+    local series = book.series
+    if series and book.series_index then
+        series = series .. " #" .. (tostring(book.series_index):gsub("%.0$", ""))
+    end
+    if author_first and authors ~= "" then
+        return authors, series and (title .. " · " .. series) or title
+    end
+    local line2 = authors
+    if series then line2 = line2 ~= "" and (line2 .. " · " .. series) or series end
+    return title, line2
+end
+
+--- A compact row's text: "Title · Author" (or "Author · Title" when sorted
+-- by author) for a book, "Name · Author" for a series, the name for other
+-- shelves; and what goes on the right (status, or the book count).
+function M.compactText(item, kind, series_number, author_first)
+    if kind == "groups" then
+        local a = M.seriesAuthors(item)
+        return a and (item.name .. " · " .. a) or item.name, M.bookCount(item)
+    end
+    local title = M.bookTitle(item, series_number)
+    local author = item.authors and item.authors[1]
+    local left = title
+    if author and author ~= "" then
+        left = author_first and (author .. " · " .. title) or (title .. " · " .. author)
+    end
+    local right = ""
+    if item.status == "complete" then right = "\u{2713}"
+    elseif item.status == "abandoned" then right = _("on hold")
+    elseif item.percent and item.status ~= "new" then right = T(_("%1 %"), math.floor(item.percent * 100 + 0.5))
+    end
+    return left, right
+end
+
 --- The second line under a grid cover: the caption when given (Continue
 -- reading), else the author (the bar and badges already show the status),
 -- else the status.
@@ -503,8 +564,7 @@ function Tile:init()
     local line1, line2
     if self.group then
         line1 = self.group.name
-        line2 = T(_("%1 books"), #self.group.books)
-        if #self.group.books == 1 then line2 = _("1 book") end
+        line2 = M.groupSecondLine(self.group)
     else
         line1 = M.bookTitle(book, self.series_number)
         line2 = M.secondLine(book, self.caption)
@@ -556,6 +616,36 @@ end
 ----------------------------------------------------------------------------
 
 --- Smallest row that fits the two text lines with padding.
+--- A text-only shelf row: one line (authors) or two (series, with authors).
+function M.textRowHeight(lines)
+    local f = getFaces()
+    local t = TextWidget:new{ text = "Ag", face = f.title, bold = true }
+    local h = t:getSize().h + 2 * Size.padding.default + Size.line.thin
+    t:free()
+    if lines == 2 then
+        local s = TextWidget:new{ text = "Ag", face = f.sub }
+        h = h + s:getSize().h + Size.padding.small
+        s:free()
+    end
+    return math.max(h, M.minTouch())
+end
+
+--- A compact row: one line in a smaller font, still a ~5 mm tap target.
+function M.compactRowHeight()
+    local t = TextWidget:new{ text = "Ag", face = M.compactFace() }
+    local h = t:getSize().h + 2 * Size.border.thin + Size.line.thin
+    t:free()
+    return math.max(h, M.mmToPx(5))
+end
+
+--- `mm` millimetres in pixels on this screen.
+function M.mmToPx(mm)
+    local dpi = Screen.getDPI and Screen:getDPI() or 160
+    return math.floor(mm * dpi / 25.4 + 0.5)
+end
+
+function M.compactFace() return Font:getFace("cfont", 13) end
+
 function M.listRowHeight()
     local f = getFaces()
     local t = TextWidget:new{ text = "Ag", face = f.title, bold = true }
@@ -594,6 +684,8 @@ local ListRow = InputContainer:extend{
     on_tap = nil,
     on_hold = nil,
     series_number = false, -- "3 · Title" (inside a series)
+    author_first = false,  -- sorted by author: the authors on the first line
+    text_only = false,     -- shelves on Authors and Series: no cover art
 }
 M.ListRow = ListRow
 
@@ -610,6 +702,7 @@ function ListRow:init()
     local line = Size.line.thin
     local inner_h = self.height - line
     local shadow = shadowSize()
+    if self.text_only then return self:initText(f, margin, pad, line, inner_h) end
 
     -- thumbnail (cover or placeholder) with a 2:3 shape, centred in a fixed box
     local th = math.min(self.thumb_h, inner_h - 2 * Size.padding.small) - shadow
@@ -660,15 +753,9 @@ function ListRow:init()
     local line1, line2
     if self.group then
         line1 = self.group.name
-        line2 = #self.group.books == 1 and _("1 book") or T(_("%1 books"), #self.group.books)
+        line2 = M.groupSecondLine(self.group)
     else
-        line1 = M.bookTitle(book, self.series_number)
-        line2 = book.authors and table.concat(book.authors, ", ") or ""
-        if book.series then
-            local s = book.series
-            if book.series_index then s = s .. " #" .. (tostring(book.series_index):gsub("%.0$", "")) end
-            line2 = line2 ~= "" and (line2 .. " · " .. s) or s
-        end
+        line1, line2 = M.bookLines(book, self.series_number, self.author_first)
     end
     local texts = VerticalGroup:new{
         align = "left",
@@ -701,10 +788,106 @@ function ListRow:init()
     }
 end
 
+--- Text-only shelf row: the name (and a series' authors) and the book count.
+function ListRow:initText(f, margin, pad, line, inner_h)
+    self.needs_cover = false
+    local right = pill(tostring(#self.group.books), true)
+    local right_w = right:getSize().w
+    local text_w = self.width - 2 * margin - pad - right_w
+    local texts = VerticalGroup:new{
+        align = "left",
+        TextWidget:new{ text = self.group.name or "", face = f.title, bold = true, max_width = text_w },
+    }
+    local sub = M.seriesAuthors(self.group)
+    if sub then
+        table.insert(texts, VerticalSpan:new{ width = Size.padding.small })
+        table.insert(texts, TextWidget:new{ text = sub, face = f.sub, max_width = text_w,
+            fgcolor = Blitbuffer.COLOR_GRAY_4 })
+    end
+    self[1] = VerticalGroup:new{
+        align = "left",
+        HorizontalGroup:new{
+            align = "center",
+            HorizontalSpan:new{ width = margin },
+            LeftContainer:new{ dimen = Geom:new{ w = text_w, h = inner_h }, texts },
+            HorizontalSpan:new{ width = pad },
+            CenterContainer:new{ dimen = Geom:new{ w = right_w, h = inner_h }, right },
+            HorizontalSpan:new{ width = margin },
+        },
+        HorizontalGroup:new{
+            HorizontalSpan:new{ width = margin },
+            LineWidget:new{ background = Blitbuffer.COLOR_GRAY_D,
+                dimen = Geom:new{ w = math.max(0, self.width - 2 * margin), h = line } },
+        },
+    }
+end
+
 ListRow.getSize = Tile.getSize
 ListRow.paintTo = Tile.paintTo
 ListRow.onTapTile = Tile.onTapTile
 ListRow.onHoldTile = Tile.onHoldTile
+
+----------------------------------------------------------------------------
+-- Compact row (compact view): one line, many rows per page
+----------------------------------------------------------------------------
+
+local CompactRow = InputContainer:extend{
+    width = nil,
+    height = nil,
+    book = nil,
+    group = nil,
+    on_tap = nil,
+    on_hold = nil,
+    series_number = false,
+    author_first = false,
+}
+M.CompactRow = CompactRow
+
+function CompactRow:init()
+    self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
+    self.ges_events = {
+        TapTile = { GestureRange:new{ ges = "tap", range = self.dimen } },
+        HoldTile = { GestureRange:new{ ges = "hold", range = self.dimen } },
+    }
+    self.needs_cover = false
+    local face = M.compactFace()
+    local margin = Size.margin.default + Size.padding.default
+    local pad = Size.padding.large
+    local line = Size.line.thin
+    local inner_h = self.height - line
+    local left, right_text = M.compactText(self.group or self.book, self.group and "groups" or "books",
+        self.series_number, self.author_first)
+    local right = TextWidget:new{ text = right_text or "", face = face, fgcolor = Blitbuffer.COLOR_GRAY_4 }
+    local right_w = right:getSize().w
+    local text_w = self.width - 2 * margin - (right_w > 0 and (pad + right_w) or 0)
+    local row = HorizontalGroup:new{
+        align = "center",
+        HorizontalSpan:new{ width = margin },
+        LeftContainer:new{ dimen = Geom:new{ w = text_w, h = inner_h },
+            -- TextWidget ends a cut line with an ellipsis
+            TextWidget:new{ text = left or "", face = face, max_width = text_w,
+                bold = self.book and self.book.status == "reading" or false } },
+    }
+    if right_w > 0 then
+        table.insert(row, HorizontalSpan:new{ width = pad })
+        table.insert(row, CenterContainer:new{ dimen = Geom:new{ w = right_w, h = inner_h }, right })
+    end
+    table.insert(row, HorizontalSpan:new{ width = margin })
+    self[1] = VerticalGroup:new{
+        align = "left",
+        row,
+        HorizontalGroup:new{
+            HorizontalSpan:new{ width = margin },
+            LineWidget:new{ background = Blitbuffer.COLOR_GRAY_E,
+                dimen = Geom:new{ w = math.max(0, self.width - 2 * margin), h = line } },
+        },
+    }
+end
+
+CompactRow.getSize = Tile.getSize
+CompactRow.paintTo = Tile.paintTo
+CompactRow.onTapTile = Tile.onTapTile
+CompactRow.onHoldTile = Tile.onHoldTile
 
 ----------------------------------------------------------------------------
 -- Chip (status filters, Resume, back): a rounded pill

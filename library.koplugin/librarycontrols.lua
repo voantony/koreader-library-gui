@@ -19,7 +19,7 @@ local C = Blitbuffer
 -- (a fallback font of "cfont", so plain TextWidgets render them).
 local GLYPH = {
     brightness = "\u{EC98}", warmth = "\u{ECA5}", wifi = "\u{ECA8}", wifi_off = "\u{ECA9}",
-    night = "\u{EC0D}", cover_sleep = "\u{E9E8}", rotate = "\u{EB74}", sleep = "\u{23FE}",
+    night = "\u{EC0D}", cover_sleep = "\u{E9E8}", rotate = "\u{EB74}", refresh = "\u{21BB}",
 }
 
 local Controls = InputContainer:extend{
@@ -98,12 +98,19 @@ function Controls:makeToggles()
                 self:refresh()
             end,
         },
+        light = {
+            label = _("Light"), glyph = GLYPH.brightness,
+            on = function() return self.powerd:isFrontlightOn() and true or false end,
+            sub = function(on) return on and _("On") or _("Off") end,
+            run = function() self:toggleLight() end,
+        },
         night = {
             label = _("Night mode"), glyph = GLYPH.night,
             on = function() return G_reader_settings:isTrue("night_mode") end,
             sub = function(on) return on and _("On") or _("Off") end,
             run = function()
                 plugin:sendUIEvent(Event:new("ToggleNightMode"))
+                self:freeBackground()
                 self:refresh("full")
             end,
         },
@@ -122,23 +129,21 @@ function Controls:makeToggles()
                 UIManager:nextTick(function() plugin:rotateLibrary() end)
             end,
         },
-        sleep = {
-            label = _("Sleep"), glyph = GLYPH.sleep,
+        refresh = {
+            label = _("Refresh"), glyph = GLYPH.refresh,
             on = function() return false end,
-            sub = function() return _("Now") end,
-            run = function()
-                self:close()
-                UIManager:scheduleIn(0.3, function() UIManager:suspend() end)
-            end,
+            sub = function() return _("Clear ghosting") end,
+            -- one full flash of the whole screen; the panel stays open
+            run = function() self:refresh("full") end,
         },
     }
     local ids = Core.controlsToggles({
         wifi = NetworkMgr and true or false,
+        light = Device:hasFrontlight() and true or false,
         night = true,
+        refresh = Device:hasEinkScreen() and true or false,
         cover_sleep = true,
         rotate = not Device:isAlwaysPortrait(),
-        bluetooth = false, -- KOReader has no Bluetooth API on any device
-        sleep = Device:canSuspend(),
     })
     local out = {}
     for _, id in ipairs(ids) do
@@ -146,6 +151,20 @@ function Controls:makeToggles()
         out[#out + 1] = t
     end
     return out
+end
+
+--- Front light on/off. KOReader keeps the brightness level while the light
+-- is off, so turning it back on restores it; the slider shows 0 while off.
+function Controls:toggleLight()
+    local p = self.powerd
+    p:toggleFrontlight()
+    if p:isFrontlightOff() and p.fl_intensity and p.fl_intensity <= p.fl_min then
+        -- nothing to restore (the level was 0): come back at a low level
+        p:setIntensity(p.fl_min + math.max(1, math.floor((p.fl_max - p.fl_min) / 4)))
+        if p:isFrontlightOff() then p:turnOnFrontlight() end
+    end
+    p:updateResumeFrontlightState()
+    self:refresh()
 end
 
 ----------------------------------------------------------------------------
@@ -224,9 +243,25 @@ function Controls:paintTo(bb, x, y)
     local W, H, L = self.dimen.w, self.dimen.h, self.L
     -- The Library, dimmed. We paint it ourselves (and claim the whole screen)
     -- so repeated refreshes never darken it twice.
-    local view = self.plugin and self.plugin.shared and self.plugin.shared.view
-    if view then view:paintTo(bb, 0, 0) else bb:paintRect(0, 0, W, H, C.COLOR_WHITE) end
-    bb:darkenRect(0, 0, W, H, 0.45)
+    -- The dimmed Library is drawn once into a buffer and reused: repainting
+    -- every cover on each slider step is what made dragging feel slow.
+    if not self._bg or self._bg_w ~= W or self._bg_h ~= H then
+        self:freeBackground()
+        local view = self.plugin and self.plugin.shared and self.plugin.shared.view
+        local ok, bg = pcall(Blitbuffer.new, W, H, bb:getType())
+        if ok and bg then
+            if view then view:paintTo(bg, 0, 0) else bg:paintRect(0, 0, W, H, C.COLOR_WHITE) end
+            bg:darkenRect(0, 0, W, H, 0.45)
+            self._bg, self._bg_w, self._bg_h = bg, W, H
+        end
+    end
+    if self._bg then
+        bb:blitFrom(self._bg, 0, 0, 0, 0, W, H)
+    else
+        local view = self.plugin and self.plugin.shared and self.plugin.shared.view
+        if view then view:paintTo(bb, 0, 0) else bb:paintRect(0, 0, W, H, C.COLOR_WHITE) end
+        bb:darkenRect(0, 0, W, H, 0.45)
+    end
     local p, r = L.panel, L.radius
     local sh = math.floor(10 * L.u)
     bb:paintRoundedRect(p.x + sh, p.y + sh, p.w, p.h, C.COLOR_GRAY_5, r)
@@ -241,6 +276,11 @@ function Controls:paintTo(bb, x, y)
     for i, t in ipairs(self.toggles) do self:paintToggle(bb, t, L.toggles[i]) end
     local hd = L.handle
     bb:paintRoundedRect(hd.x, hd.y, hd.w, hd.h, C.COLOR_GRAY_B, math.floor(hd.h / 2))
+end
+
+function Controls:freeBackground()
+    if self._bg then self._bg:free() end
+    self._bg = nil
 end
 
 function Controls:panelRect()
@@ -266,8 +306,11 @@ end
 -- Sliders and e-ink refreshes
 --
 -- While a finger moves a slider, only that slider's row is redrawn, with
--- KOReader's quick non-flashing "fast" refresh, so the light follows the
--- finger. Fast refreshes leave ghosting, so when the finger lifts (wherever
+-- the quickest e-ink waveform ("a2"; KOReader uses "fast" where a device
+-- has no A2), so the light follows the finger. Drag events are coalesced:
+-- the first one applies at once, then at most one step every DRAG_TICK
+-- seconds, always with the latest finger position, so the light and the
+-- screen aren't asked to keep up with every raw touch event. Fast refreshes leave ghosting, so when the finger lifts (wherever
 -- it is by then) the whole panel gets one "flashui" refresh: KOReader's
 -- flashing UI refresh, the one it recommends for clearing ghosts from a
 -- region without the cost of a "full" screen refresh. Taps on the track or
@@ -277,6 +320,8 @@ end
 
 Controls.SETTLE_AFTER_TAP = 0.6   -- s of no taps before the cleanup flash
 Controls.SETTLE_WATCHDOG = 1.5    -- s of no drag movement before the cleanup flash
+Controls.DRAG_TICK = 0.06         -- s between coalesced drag steps
+Controls.DRAG_MODE = "a2"         -- refresh while dragging
 
 function Controls:refreshRow(i, mode)
     local rect = self:sliderRowRect(i)
@@ -300,7 +345,12 @@ end
 
 function Controls:settleIn(delay)
     self:cancelSettle()
-    self._settle_fn = function() self._settle_fn = nil; self._drag = nil; self:settle() end
+    self._settle_fn = function()
+        self._settle_fn = nil
+        self:flushDrag(); self:cancelTick()
+        self._drag = nil
+        self:settle()
+    end
     UIManager:scheduleIn(delay, self._settle_fn)
 end
 
@@ -311,12 +361,40 @@ function Controls:setSlider(i, v, how)
     if v == s.get() then return false end
     s.set(v)
     if how == "drag" then
-        self:refreshRow(i, "fast")
+        self:refreshRow(i, self.DRAG_MODE)
     else
         self:refreshRow(i, "ui")
         self:settleIn(self.SETTLE_AFTER_TAP)
     end
     return true
+end
+
+--- A drag step to value v on slider i: applied now if no step ran in the
+-- last DRAG_TICK, else kept (only the latest) for the next tick.
+function Controls:dragValue(i, v)
+    self._drag_pending = { i = i, v = v }
+    if self._tick_fn then return end
+    self:flushDrag()
+    self._tick_fn = function()
+        self._tick_fn = nil
+        local d = self._drag_pending
+        if d and not self.closed then self:dragValue(d.i, d.v) end
+    end
+    UIManager:scheduleIn(self.DRAG_TICK, self._tick_fn)
+end
+
+--- Apply the waiting drag step, if any.
+function Controls:flushDrag()
+    local d = self._drag_pending
+    self._drag_pending = nil
+    if d then self:setSlider(d.i, d.v, "drag") end
+end
+
+function Controls:cancelTick()
+    if self._tick_fn then
+        UIManager:unschedule(self._tick_fn)
+        self._tick_fn = nil
+    end
 end
 
 function Controls:sliderAt(i, x)
@@ -353,7 +431,7 @@ function Controls:dragTo(start_pos, pos)
         if what ~= "slider" then return false end
         self._drag = i
     end
-    self:setSlider(self._drag, self:sliderAt(self._drag, pos.x), "drag")
+    self:dragValue(self._drag, self:sliderAt(self._drag, pos.x))
     self:settleIn(self.SETTLE_WATCHDOG)
     return true
 end
@@ -361,6 +439,8 @@ end
 --- The finger lifted: one cleanup flash if it was dragging a slider.
 function Controls:endDrag()
     if not self._drag then return false end
+    self:flushDrag()
+    self:cancelTick()
     self._drag = nil
     self:settle()
     return true
@@ -374,7 +454,7 @@ function Controls:onSwipe(_, ges)
         i = self._drag or i
         local x = ges.end_pos and ges.end_pos.x or ges.pos.x
         self._drag = i
-        self:setSlider(i, self:sliderAt(i, x), "drag")
+        self:dragValue(i, self:sliderAt(i, x))
         self:endDrag()
     elseif ges.direction == "north" or not what then
         self:close()
@@ -398,7 +478,7 @@ function Controls:onHold(_, ges)
         local what, i = Core.controlsHit(self.L, ges.pos.x, ges.pos.y)
         if what == "slider" then
             self._drag = i
-            self:setSlider(i, self:sliderAt(i, ges.pos.x), "drag")
+            self:dragValue(i, self:sliderAt(i, ges.pos.x))
             self:settleIn(self.SETTLE_WATCHDOG)
         end
     end
@@ -428,6 +508,9 @@ end
 
 function Controls:onCloseWidget()
     self:cancelSettle()
+    self:cancelTick()
+    self._drag_pending = nil
+    self:freeBackground()
     if self.plugin then self.plugin:onControlsClosed(self) end
 end
 

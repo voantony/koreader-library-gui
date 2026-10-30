@@ -14,10 +14,13 @@ end)
 
 describe("Controls toggles", function()
     it("keeps the panel order and leaves out what the device lacks", function()
-        same(Core.controlsToggles({ wifi = true, night = true, cover_sleep = true, rotate = true, bluetooth = false, sleep = true }),
-            { "wifi", "night", "cover_sleep", "rotate", "sleep" })
+        same(Core.controlsToggles({ wifi = true, light = true, night = true, refresh = true, cover_sleep = true, rotate = true }),
+            { "light", "night", "refresh", "wifi", "rotate", "cover_sleep" })
         same(Core.controlsToggles({ night = true, cover_sleep = true }), { "night", "cover_sleep" })
-        same(Core.controlsToggles({ sleep = true, bluetooth = true, wifi = true }), { "wifi", "bluetooth", "sleep" })
+        same(Core.controlsToggles({ rotate = true, light = true, wifi = false }), { "light", "rotate" })
+        same(Core.controlsToggles({ cover_sleep = true, wifi = true, refresh = true }), { "refresh", "wifi", "cover_sleep" })
+        -- Sleep, Bluetooth and Airplane are not panel buttons
+        same(Core.controlsToggles({ sleep = true, bluetooth = true, airplane = true, night = true }), { "night" })
         same(Core.controlsToggles(nil), {})
     end)
 end)
