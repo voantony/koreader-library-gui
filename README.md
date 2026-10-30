@@ -16,6 +16,10 @@ It sits alongside KOReader's file browser, History and Collections. It never mov
 |---|---|---|
 | ![Sort picker opened from the footer label](docs/screenshots/07-sort-picker.png) | ![The ☰ menu with the view picker](docs/screenshots/08-menu-view-picker.png) | ![Compact view sorted by Last read, with dates](docs/screenshots/03-compact.png) |
 
+| Genres (new in 0.3.2) | Inside a genre | Library in the reader menu (new in 0.3.2) |
+|---|---|---|
+| ![Collections tab switched to Genres, with a cover and book count for each genre](docs/screenshots/10-genres.png) | ![The Mystery & Thriller genre opened, showing its books](docs/screenshots/11-genre-books.png) | ![KOReader's reader menu with Library at the top](docs/screenshots/12-reader-menu-library.png) |
+
 The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's screen size (1264×1680), with a library of public-domain books.
 
 ## Features
@@ -24,11 +28,13 @@ The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's sc
 - **Filters**: All, Unread, Reading, Barely started and Finished, each with a count.
 - **Sort** by Author, Title, Date added, Last read or Series. Tap the label in the footer (*202 books · Last read ▾*) to change it.
 - **Views**: Small, Medium or Large covers, List, Compact, and Compact · 2 columns. The view, sort and filter are remembered for each tab and each author, series or collection you open.
-- **Dates**: sorted by Last read or Date added, each book shows its date (*3h ago*, *Yesterday*, *12 Oct*).
+- **Dates**: sorted by Last read or Date added, each book shows its date (*3h ago*, *Yesterday*, *12 Oct*). Under Last read, books you've never opened follow in author order.
 - **Continue reading**: a row of the books you are in the middle of, at the top of the Books tab. Tap one and it opens on the page you were on.
 - **Resume icon** in the top-right corner opens the book you read last in one tap.
 - **Recently opened**: switch the top row to show the last five books you opened instead, finished ones included.
 - **Collections and Series** as tabs. A series lists its books in order, and swiping past its last page opens the next series.
+- **Genres**: a Collections | Genres switch at the top of the Collections tab. Genres are grouped from each book's keywords and Calibre tags, with a count and progress for each.
+- **Library from inside a book**: **Library** is the first item in the reader's ☰ menu. It saves your place, closes the book and opens the Library.
 - **Go to page**: tap the page number in the footer (*1 / 51*) and type a page.
 - **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
 - **Controls panel**: swipe down from the top-right corner for Brightness and Warmth sliders and buttons for Light, Night, Refresh (clears e-ink ghosting), Wi-Fi, Rotate and Cover sleep. Anything your device doesn't have is left out.
@@ -37,11 +43,11 @@ The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's sc
 
 ## Install
 
-1. Download `library-gui-<version>.zip` from [Releases](https://github.com/voantony/koreader-library-gui/releases).
+1. Download **[library-gui-0.3.2.zip](https://github.com/voantony/koreader-library-gui/releases/download/v0.3.2/library-gui-0.3.2.zip)** from the [latest release](https://github.com/voantony/koreader-library-gui/releases/latest).
 2. Unzip it. You get a folder called `library.koplugin`.
 3. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).
-   - On a Mac, newer Kindles such as the Colorsoft connect over MTP and don't show up in Finder. [OpenMTP](https://openmtp.ganeshrvel.com/) works for copying the folder across.
+   - On a Mac, newer Kindles such as the Colorsoft connect over MTP and don't show up in Finder on their own. [Mount Kindle](https://github.com/voantony/kindle-mtp-mount) (a small menu-bar app from the same author) shows the Kindle as a drive in Finder, and [OpenMTP](https://openmtp.ganeshrvel.com/) also works for copying the folder across.
    - Kobo: `/mnt/onboard/.adds/koreader/plugins/`. PocketBook: `/mnt/ext1/applications/koreader/plugins/`. Android: `koreader/plugins/` on internal storage.
 4. Restart KOReader (☰ → Exit → Restart KOReader).
 5. Open ☰ → **Library** → **Open Library**. To open it every time KOReader starts, tick **Open Library at startup** in the same menu.
@@ -52,7 +58,7 @@ If **Library** is missing from the menu, check ☰ → Tools → More tools → 
 
 ### For developers and Mac users
 
-[`tools/kpush/`](tools/kpush/) is an optional command-line tool for macOS that copies the plugin files to a Kindle over MTP in one go, without Calibre. It was written for the Kindle Colorsoft, whose USB connection tends to drop after each libmtp command. See its [README](tools/kpush/README.md) for how to build and use it. You don't need it to install the plugin.
+[`tools/kpush/`](tools/kpush/) is an optional command-line tool for macOS that copies the plugin files to a Kindle over MTP in one go, without Calibre. It was written for the Kindle Colorsoft, whose USB connection tends to drop after each libmtp command. Version 6 can also list (`ls`) and copy files off the Kindle (`pull`). See its [README](tools/kpush/README.md) for how to build and use it. You don't need it to install the plugin.
 
 ## Compatibility
 
