@@ -434,34 +434,34 @@ end
 function Library:openControls()
     if shared.controls or not self:controlsEnabled() then return false end
     local Controls = require("librarycontrols")
-    local panel = Controls:new{ plugin = self }
+    local panel = Controls:new{ plugin = self, probe_line = self:probeAutoLight() }
     shared.controls = panel
     UIManager:show(panel, "ui")
-    self:probeAutoLight()
     return true
 end
 
--- TEMP PROBE (local branch probe/flauto, never pushed): once per session,
--- read (never set) the firmware's auto-brightness props and show them.
-local probe_done = false
+-- TEMP PROBE (local branches probe/flauto*, never pushed): on every panel
+-- open, read (never set) the firmware's auto-brightness props. The result
+-- is drawn as a line inside the panel (librarycontrols), not a popup.
 local function lipcGet(prop)
-    local f = io.popen("lipc-get-prop com.lab126.powerd " .. prop .. " 2>&1; echo \"exit=$?\"")
-    if not f then return "popen failed" end
+    local f, err = io.popen("lipc-get-prop com.lab126.powerd " .. prop .. " 2>&1; echo \"exit=$?\"")
+    if not f then return "popen failed: " .. tostring(err) end
     local out = f:read("*a") or ""
     f:close()
-    return (out:gsub("%s+$", ""):gsub("\n", " "))
+    out = out:gsub("%s+$", ""):gsub("%s*\n%s*", " ")
+    if out == "" then out = "(no output)" end
+    return out
 end
 
 function Library:probeAutoLight()
-    if probe_done or not (Device.isKindle and Device:isKindle()) then return end
-    probe_done = true
     local ok, msg = pcall(function()
-        return "Auto-light check: flAuto = " .. lipcGet("flAuto")
-            .. "; alsLux = " .. lipcGet("alsLux")
+        local kindle = Device.isKindle and Device:isKindle()
+        if not kindle then return "Auto-light: not a Kindle (" .. tostring(Device.model) .. "), not read" end
+        return "Auto-light flAuto: " .. lipcGet("flAuto") .. "\nAuto-light alsLux: " .. lipcGet("alsLux")
     end)
-    if not ok then msg = "Auto-light check failed: " .. tostring(msg) end
+    if not ok then msg = "Auto-light read failed: " .. tostring(msg) end
     logger.info("Library:", msg)
-    UIManager:show(InfoMessage:new{ text = msg })
+    return msg
 end
 
 function Library:onControlsClosed(panel)
