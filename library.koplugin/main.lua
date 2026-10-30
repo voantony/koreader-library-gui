@@ -88,6 +88,7 @@ local shared = {
     reopen = false,       -- a book was opened from the Library
     view = nil,
     controls = nil,       -- the open Controls panel
+    after_book = nil,     -- "show" / "search": open the Library once the book has closed
 }
 Library.shared = shared
 
@@ -106,7 +107,14 @@ function Library:init()
 
     -- In the file browser: show the Library at start-up, or again after reading.
     -- (file_chooser is only created after plugins, so test for the reader instead.)
-    if not self.ui.document and self.settings.start_with_library then
+    if not self.ui.document and shared.after_book then
+        -- Library was asked for from inside a book, which has now closed.
+        local focus_search = shared.after_book == "search"
+        shared.after_book = nil
+        shared.started = true
+        shared.reopen = false
+        UIManager:nextTick(function() self:onShowLibrary(focus_search) end)
+    elseif not self.ui.document and self.settings.start_with_library then
         local first = not shared.started
         local back_from_book = shared.reopen and self.settings.return_to_library
         if first or back_from_book then
@@ -392,6 +400,7 @@ function Library:onShowLibrary(focus_search)
         if focus_search then shared.view:focusSearch() end
         return true
     end
+    if self.ui.document then return self:leaveBook(focus_search) end
     local index = self:getIndex()
     local function show()
         local view = self:newView()
@@ -410,6 +419,25 @@ function Library:onShowLibrary(focus_search)
         self:refreshReadingState()
     end
     show()
+    return true
+end
+
+--- From inside a book: close it the way KOReader's file browser button does
+-- (progress, settings and history saved), then open the Library over the
+-- file browser. The file browser's copy of the plugin picks up `after_book`.
+function Library:leaveBook(focus_search)
+    local ui = self.ui
+    local file = ui.document.file
+    shared.after_book = focus_search and "search" or "show"
+    ui:onClose()
+    ui:showFileManager(file)
+    if shared.after_book then
+        -- the file browser was already there, so no new plugin copy ran init
+        local FileManager = package.loaded["apps/filemanager/filemanager"]
+        local lib = FileManager and FileManager.instance and FileManager.instance.library
+        shared.after_book = nil
+        if lib then UIManager:nextTick(function() lib:onShowLibrary(focus_search) end) end
+    end
     return true
 end
 
@@ -807,6 +835,27 @@ local function placeReaderTab(enabled)
     order[READER_TAB_ID] = enabled and {} or nil
 end
 
+local READER_ITEM_ID = "library_open"
+
+-- Put a "Library" item at the top of the reader's ☰ tab, above History.
+local function placeReaderItem()
+    local ok, order = pcall(require, "ui/elements/reader_menu_order")
+    if not ok or type(order) ~= "table" or type(order.main) ~= "table" then return end
+    Core.placeFirst(order.main, READER_ITEM_ID)
+end
+
+function Library:addReaderItem(menu_items)
+    placeReaderItem()
+    menu_items[READER_ITEM_ID] = {
+        text = _("Library"),
+        help_text = _("Close this book and open the Library. Your page and settings are saved first."),
+        callback = function()
+            if self.ui.menu then self.ui.menu:onTapCloseMenu() end
+            UIManager:nextTick(function() self:onShowLibrary() end)
+        end,
+    }
+end
+
 function Library:addReaderTab(menu_items)
     local enabled = self.settings.reader_tab ~= false
     placeReaderTab(enabled)
@@ -1008,6 +1057,7 @@ function Library:addToMainMenu(menu_items)
         },
     }
     if self.ui.document then
+        self:addReaderItem(menu_items)
         self:addReaderTab(menu_items)
         -- inside a book: Next / Previous in series right under Open Library
         local next_item, prev_item = self:seriesMenuItems()
