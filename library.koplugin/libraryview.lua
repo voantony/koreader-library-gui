@@ -807,7 +807,10 @@ function LibraryView:buildBody()
     end
     self.layout = layout
 
-    local page_items, page, pages = Core.page(data.items, layout.per_page, self.page)
+    -- Books in the strip are pinned on every page, so leave them out of the
+    -- grid below it: each book is on screen once. The footer still counts all.
+    local grid_items = strip and Core.withoutShown(data.items, self.continue_books) or data.items
+    local page_items, page, pages = Core.page(grid_items, layout.per_page, self.page)
     self.page, self.pages = page, pages
     self.current = data
     self.missing_covers = {}

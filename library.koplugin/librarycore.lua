@@ -981,6 +981,19 @@ function Core.recentlyOpened(books, n, exists)
     return out
 end
 
+--- The grid's books minus those already in the top row (matched by path),
+-- so a book is never on screen twice. Order is kept; `items` is not changed.
+function Core.withoutShown(items, shown)
+    if not shown or #shown == 0 then return items end
+    local skip = {}
+    for _, b in ipairs(shown) do if b.path then skip[b.path] = true end end
+    local out = {}
+    for _, it in ipairs(items) do
+        if not (it.path and skip[it.path]) then out[#out + 1] = it end
+    end
+    return out
+end
+
 --- The top row of the Books tab: "continue" (Continue reading, the default)
 -- or "recent" (Recently opened).
 Core.TOP_ROWS = { "continue", "recent" }
