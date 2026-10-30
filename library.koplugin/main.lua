@@ -437,7 +437,31 @@ function Library:openControls()
     local panel = Controls:new{ plugin = self }
     shared.controls = panel
     UIManager:show(panel, "ui")
+    self:probeAutoLight()
     return true
+end
+
+-- TEMP PROBE (local branch probe/flauto, never pushed): once per session,
+-- read (never set) the firmware's auto-brightness props and show them.
+local probe_done = false
+local function lipcGet(prop)
+    local f = io.popen("lipc-get-prop com.lab126.powerd " .. prop .. " 2>&1; echo \"exit=$?\"")
+    if not f then return "popen failed" end
+    local out = f:read("*a") or ""
+    f:close()
+    return (out:gsub("%s+$", ""):gsub("\n", " "))
+end
+
+function Library:probeAutoLight()
+    if probe_done or not (Device.isKindle and Device:isKindle()) then return end
+    probe_done = true
+    local ok, msg = pcall(function()
+        return "Auto-light check: flAuto = " .. lipcGet("flAuto")
+            .. "; alsLux = " .. lipcGet("alsLux")
+    end)
+    if not ok then msg = "Auto-light check failed: " .. tostring(msg) end
+    logger.info("Library:", msg)
+    UIManager:show(InfoMessage:new{ text = msg })
 end
 
 function Library:onControlsClosed(panel)
