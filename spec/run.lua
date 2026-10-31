@@ -59,6 +59,7 @@ for _, spec in ipairs({ "librarycore_spec", "libraryindex_spec", "librarycovers_
     "librarysortdate_spec", "librarykeyboardrows_spec", "librarycontrolstoggles_spec", "libraryfuzzy_spec", "librarypagejump_spec", "librarycontinuedupes_spec", "librarylastreadauthor_spec", "libraryreaderitem_spec", "librarygenres_spec", "librarygenrescalibre_spec", "librarydetails_spec", "libraryheader_spec", "libraryauthorlinks_spec", "libraryreadermenu_spec", "libraryreturnspot_spec", "libraryreadingstage_spec", "libraryreadability_spec" }) do
     require(spec)
 end
+require("libraryscrubber_spec") -- A–Z strip and the wider page controls
 require("librarybezel_spec") -- status bar above the Colorsoft bezel
 require("librarysuggest_spec") -- word suggestions while typing
 require("librarytiming_spec") -- the opt-in timing log
