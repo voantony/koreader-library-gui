@@ -24,17 +24,22 @@ It sits alongside KOReader's file browser, History and Collections. It never mov
 |---|---|---|
 | ![Book details card with cover, progress, Continue, genre chips and the full description](docs/screenshots/13-details-card.png) | ![Book details card for a book with no description](docs/screenshots/14-details-card-none.png) | ![The same card opened from the reader menu](docs/screenshots/15-details-card-reader.png) |
 
-The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's screen size (1264×1680), with a library of public-domain books.
+| Search, clock and footer | Clock and battery off | Settings in the ☰ menu |
+|---|---|---|
+| ![Books tab: search bar and clock on the top row, menu and Resume in the footer](docs/screenshots/16-books-header-footer.png) | ![The same screen with the clock and battery turned off](docs/screenshots/17-books-status-off.png) | ![The ☰ menu with Show clock, Show battery and Use KOReader's keyboard](docs/screenshots/18-menu-settings.png) |
+
+The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's screen size (1264×1680), with a library of public-domain books. Pictures 01–15 still show the old title row. The search bar is now the top row, and the menu and Resume buttons are in the footer (16–18).
 
 ## Features
 
-- **Search** at the top of every tab. It filters as you type and searches whatever the tab shows: books on Books, author names on Authors, series on Series, collection names on Collections, and only that shelf's books inside an author, series or collection. Small typos, missing accents and punctuation are forgiven, so `charlote bronte` finds Charlotte Brontë.
+- **Search** is the top row of every tab, so the old "Library" title row is gone and that space is used for books. It filters as you type and searches whatever the tab shows: books on Books, author names on Authors, series on Series, collection names on Collections, and only that shelf's books inside an author, series or collection. Small typos, missing accents and punctuation are forgiven, so `charlote bronte` finds Charlotte Brontë. **Use KOReader's keyboard** (off unless you turn it on, in the ☰ menu) opens KOReader's own text box for the search instead of the Library keyboard.
 - **Filters**: All, Unread, Reading, Barely started and Finished, each with a count.
 - **Sort** by Author, Title, Date added, Last read or Series. Tap the label in the footer (*202 books · Last read ▾*) to change it.
 - **Views**: Small, Medium or Large covers, List, Compact, and Compact · 2 columns. The view, sort and filter are remembered for each tab and each author, series or collection you open.
 - **Dates**: sorted by Last read or Date added, each book shows its date (*3h ago*, *Yesterday*, *12 Oct*). Under Last read, books you've never opened follow in author order.
 - **Continue reading**: a row of the books you are in the middle of, at the top of the Books tab. Tap one and it opens on the page you were on.
-- **Resume icon** in the top-right corner opens the book you read last in one tap.
+- **Clock and battery** beside the search bar. **Show clock** and **Show battery** are in the ☰ menu, both on unless you turn one off. The clock changes when the Library redraws, and once a minute while it is on screen. If the device does not report a battery percentage, that part is left out.
+- **Menu and Resume** are buttons in the footer, next to the page number and the sort label, instead of small targets in the top corners. Resume opens the book you read last. Swipe down from the top-right corner still opens Controls.
 - **Recently opened**: switch the top row to show the last five books you opened instead, finished ones included.
 - **Collections and Series** as tabs. A series lists its books in order, and swiping past its last page opens the next series.
 - **Genres**: a Collections | Genres switch at the top of the Collections tab. Genres are grouped from each book's keywords and Calibre tags, with a count and progress for each.
@@ -42,7 +47,7 @@ The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's sc
 - **Book details**: long-press a book, or choose **Book details** in the reader's ☰ menu, for its cover, progress, genres and the full Calibre description. Tap the author, series, a genre or a collection to open that shelf. It's read-only.
 - **Go to page**: tap the page number in the footer (*1 / 51*) and type a page.
 - **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
-- **Controls panel**: swipe down from the top-right corner for Brightness and Warmth sliders and buttons for Light, Night, Refresh (clears e-ink ghosting), Wi-Fi, Rotate and Cover sleep. Anything your device doesn't have is left out.
+- **Controls panel**: swipe down from the top-right corner for Brightness and Warmth sliders and buttons for Light, Night, Refresh (clears e-ink ghosting), Wi-Fi, Rotate and Cover sleep. Anything your device doesn't have is left out. That corner stays clear of buttons.
 - **Covers without other plugins.** Library GUI extracts covers itself in the background. If Project: Title or Cover browser is enabled, it reuses their cover cache.
 - **Gestures**: Open Library, Search library, Resume last book, Rescan library, and Next / Previous in series can be assigned under *Taps and gestures*.
 
