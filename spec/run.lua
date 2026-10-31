@@ -56,7 +56,7 @@ _G.same = function(actual, expected, msg)
 end
 
 for _, spec in ipairs({ "librarycore_spec", "libraryindex_spec", "librarycovers_spec", "libraryfeatures_spec", "librarysh_spec", "librarysearchtap_spec", "librarygui_spec", "libraryviewmemory_spec", "librarycontrols_spec", "librarycontrolsrefresh_spec", "libraryclose_spec", "librarysearchscope_spec", "librarylayouts_spec", "librarysortfooter_spec",
-    "librarysortdate_spec", "librarykeyboardrows_spec", "librarycontrolstoggles_spec", "libraryfuzzy_spec", "librarypagejump_spec", "librarycontinuedupes_spec", "librarylastreadauthor_spec", "libraryreaderitem_spec", "librarygenres_spec", "librarygenrescalibre_spec", "librarydetails_spec", "libraryheader_spec" }) do
+    "librarysortdate_spec", "librarykeyboardrows_spec", "librarycontrolstoggles_spec", "libraryfuzzy_spec", "librarypagejump_spec", "librarycontinuedupes_spec", "librarylastreadauthor_spec", "libraryreaderitem_spec", "librarygenres_spec", "librarygenrescalibre_spec", "librarydetails_spec", "libraryheader_spec", "libraryauthorlinks_spec" }) do
     require(spec)
 end
 
