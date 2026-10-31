@@ -82,6 +82,27 @@ local function readerLib(Library, ui, settings)
     return self
 end
 
+describe("opening the next screen after the panel closes", function()
+    it("waits until the panel strip has been repainted", function()
+        local ran = false
+        local ui = {
+            tickAfterNext = function(_, fn) ran = true; fn() end,
+            nextTick = function() error("nextTick paints the next screen in the same frame as the strip") end,
+        }
+        eq(RM.afterPanelClose(ui, function() end), "tickAfterNext")
+        eq(ran, true)
+    end)
+
+    it("uses nextTick only when that is all KOReader offers", function()
+        local ran = false
+        local ui = { nextTick = function(_, fn) ran = true; fn() end }
+        eq(RM.afterPanelClose(ui, function() end), "nextTick")
+        eq(ran, true)
+        eq(RM.afterPanelClose({}, function() end), "now")
+        eq(RM.afterPanelClose(nil, nil), nil)
+    end)
+end)
+
 describe("Simple reader menu: pure parts", function()
     it("lists the buttons in panel order, leaving out what the reader lacks", function()
         same(RM.items({ toc = true, search = true, config = true, light = true, bookmark = true }),
