@@ -606,8 +606,8 @@ function Tile:paintTo(bb, x, y)
     InputContainer.paintTo(self, bb, x, y)
 end
 
-function Tile:onTapTile()
-    if self.on_tap then self.on_tap(self) end
+function Tile:onTapTile(_, ges)
+    if self.on_tap then self.on_tap(self, ges) end
     return true
 end
 

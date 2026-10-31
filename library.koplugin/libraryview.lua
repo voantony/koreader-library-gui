@@ -137,6 +137,8 @@ function LibraryView:init()
     self.width = self.dimen.w
     self.ges_events = {
         Swipe = { GestureRange:new{ ges = "swipe", range = self.dimen } },
+        -- where a finger went down, so a short flick that KOReader reports as a tap still turns the page
+        Touch = { GestureRange:new{ ges = "touch", range = self.dimen } },
         TapOutside = { GestureRange:new{ ges = "tap", range = self.dimen } },
     }
     if Device:hasKeys() then
@@ -833,7 +835,7 @@ function LibraryView:buildGrid(items, kind, layout, height)
                 date_text = kind == "books" and not self:inSeries() and Core.sortDate(item, self.sort, now) or nil,
                 covers = self.covers,
                 cover_cache = self.cover_cache,
-                on_tap = function(t) self:onTileTap(t) end,
+                on_tap = function(t, ges) self:onTileTap(t, ges) end,
                 on_hold = function(t) self:onTileHold(t) end,
             }
             if tile.needs_cover then
@@ -892,7 +894,7 @@ function LibraryView:buildList(items, kind, layout, height)
                 date_text = kind == "books" and not self:inSeries() and Core.sortDate(item, self.sort, now) or nil,
                 covers = self.covers,
                 cover_cache = self.cover_cache,
-                on_tap = function(t) self:onTileTap(t) end,
+                on_tap = function(t, ges) self:onTileTap(t, ges) end,
                 on_hold = function(t) self:onTileHold(t) end,
             }
             if row.needs_cover then
@@ -974,7 +976,7 @@ function LibraryView:buildContinue(books, cl)
             book = books[i],
             covers = self.covers,
             cover_cache = self.cover_cache,
-            on_tap = function(t) self:onTileTap(t) end,
+            on_tap = function(t, ges) self:onTileTap(t, ges) end,
             on_hold = function(t) self:onTileHold(t) end,
         }
         if tile.needs_cover then table.insert(self.missing_covers, books[i]) end
@@ -1442,6 +1444,7 @@ function LibraryView:goToPage(page)
     page = math.max(1, math.min(page, self.pages))
     if page == self.page then return end
     self.page = page
+    self._turned_ms = time.to_ms(time.now())
     self:refreshBody()
 end
 
@@ -1466,7 +1469,26 @@ function LibraryView:onSwipe(_, ges)
     return true
 end
 
-function LibraryView:onTileTap(tile)
+--- Remember where a finger went down. Never consumes the event.
+function LibraryView:onTouch(_, ges)
+    self._touch = ges and ges.pos and { x = ges.pos.x, y = ges.pos.y } or nil
+    return false
+end
+
+--- A "tap" on a cover that was really a short swipe (or the tail of a page
+-- turn) turns the page instead of opening the book. True when handled.
+function LibraryView:tapWasSwipe(ges)
+    local down = self._touch
+    self._touch = nil
+    if Core.tapTooSoon(time.to_ms(time.now()), self._turned_ms) then return true end
+    local dir = Core.shortSwipe(down, ges and ges.pos, Screen:scaleByDPI(20)) -- under KOReader's 35 dp pan threshold
+    if not dir then return false end
+    self:onSwipe(nil, { direction = dir, pos = down })
+    return true
+end
+
+function LibraryView:onTileTap(tile, ges)
+    if self:tapWasSwipe(ges) then return end
     self:keyboardGuard()
     if tile.group then
         self:openGroup(tile.group)
@@ -1580,6 +1602,58 @@ function LibraryView:restorePlace(st)
         self:applySearch(st.query)
     end
     if st.page and st.page > 1 then self:goToPage(st.page) end
+end
+
+--- Everything needed to come back here after reading `book_path`.
+function LibraryView:returnState(book_path)
+    return {
+        tab = self.tab,
+        group = self.group and { kind = self.group.kind, name = self.group.name },
+        parent_page = self.saved_page,
+        parent_query = self.saved_query,
+        page = self.page,
+        query = self.query,
+        filter = self.filter,
+        sort = self.sort,
+        view_mode = self.view_mode,
+        book = book_path,
+    }
+end
+
+--- Back from a book: the same tab, shelf (Back still leads to its parent at
+-- the page it was on), filter, sort, layout and page (clamped if the list
+-- got shorter). Search text only if the book came from search results.
+function LibraryView:restoreReturn(spot)
+    if type(spot) ~= "table" then return false end
+    self.tab, self.group, self.page = spot.tab or "books", nil, 1
+    self.saved_page, self.saved_query = nil, nil
+    self:resetQuery()
+    if spot.group then
+        for _, g in ipairs(self:groupsFor(self.tab)) do
+            if g.name == spot.group.name then
+                self.group = g
+                self.saved_page = spot.parent_page or 1
+                self.saved_query = spot.parent_query
+                break
+            end
+        end
+    end
+    self:applyRemembered()
+    if spot.view_mode then self.view_mode = Core.viewMode(spot.view_mode) end
+    if spot.filter then self.filter = spot.filter end
+    if spot.sort and spot.sort ~= self.sort then
+        self.sort = spot.sort
+        self:reloadData()
+        self:reresolveGroup()
+    end
+    if spot.query then
+        self.query = spot.query
+        if self.search_input then self.search_input:setText(spot.query) end
+    end
+    self.page = spot.page or 1 -- buildBody clamps it to the pages there are
+    self:updateSearchHint()
+    self:refreshBody(true)
+    return true
 end
 
 --- After a book's status or metadata changed.

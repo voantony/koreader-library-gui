@@ -2212,6 +2212,55 @@ function Core.shelfMatch(name, groups, lower_fn)
     return nil
 end
 
+--- Where the Library was when a book was opened from it, cleaned up for
+-- saving: tab, open shelf (and the page/search to go back to above it),
+-- page, filter, sort, layout, and the search text only when the book was
+-- picked from search results. `pid` marks this KOReader run.
+function Core.returnSpot(st, pid)
+    if type(st) ~= "table" or type(st.tab) ~= "string" then return nil end
+    local spot = { tab = st.tab, pid = pid, book = st.book }
+    if type(st.group) == "table" and type(st.group.name) == "string" then
+        spot.group = { kind = st.group.kind, name = st.group.name }
+        spot.parent_page = tonumber(st.parent_page) or 1
+        if type(st.parent_query) == "string" and st.parent_query ~= "" then spot.parent_query = st.parent_query end
+    end
+    spot.page = math.max(1, math.floor(tonumber(st.page) or 1))
+    if type(st.query) == "string" and st.query ~= "" then spot.query = st.query end
+    if type(st.filter) == "string" then spot.filter = st.filter end
+    if type(st.sort) == "string" then spot.sort = st.sort end
+    if type(st.view_mode) == "string" then spot.view_mode = st.view_mode end
+    return spot
+end
+
+--- A saved spot is only for coming back from a book in this same run of
+-- KOReader, never for a fresh start.
+function Core.returnSpotUsable(spot, pid)
+    return type(spot) == "table" and type(spot.tab) == "string"
+        and spot.pid ~= nil and spot.pid == pid
+end
+
+--- KOReader reports a finger that moved less than its pan threshold (35 dp)
+-- as a tap where the finger lifted, so a short flick across the grid used to
+-- open the cover it ended on. Given where the finger went down (`down`, from
+-- the "touch" gesture) and where it lifted (`up`, the tap's pos), return the
+-- swipe direction when it moved `tol` or more, else nil (a real tap).
+function Core.shortSwipe(down, up, tol)
+    if type(down) ~= "table" or type(up) ~= "table" then return nil end
+    if not (down.x and down.y and up.x and up.y) then return nil end
+    local dx, dy = up.x - down.x, up.y - down.y
+    if math.max(math.abs(dx), math.abs(dy)) < (tol or 0) then return nil end
+    if math.abs(dx) >= math.abs(dy) then return dx < 0 and "west" or "east" end
+    return dy < 0 and "north" or "south"
+end
+
+--- A tap this soon (ms) after a page turn is the end of the swipe, not a pick.
+Core.TAP_AFTER_TURN_MS = 300
+function Core.tapTooSoon(now_ms, turned_ms, guard_ms)
+    if not now_ms or not turned_ms then return false end
+    local d = now_ms - turned_ms
+    return d >= 0 and d < (guard_ms or Core.TAP_AFTER_TURN_MS)
+end
+
 --- Pack item widths into rows. A single item wider than `max_w` stays on
 -- its own row. Returns a list of index lists.
 function Core.packRows(widths, max_w, gap)
