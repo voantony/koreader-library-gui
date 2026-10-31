@@ -54,6 +54,7 @@ local Core = require("librarycore")
 local Tiles = require("librarytile")
 local Covers = require("librarycovers")
 local Keyboard = require("librarykeyboard")
+local Suggest = require("librarysuggest")
 local Screen = Device.screen
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -92,6 +93,8 @@ local LibraryView = InputContainer:extend{
     show_clock = true,       -- clock beside the search bar
     show_battery = true,     -- battery percentage beside the search bar
     use_koreader_keyboard = false, -- stock InputDialog instead of the Library keyboard
+    search_suggestions = true, -- "Word suggestions": a row of words above the keyboard
+    timing = nil,            -- the "Timing log" (librarytiming.lua), from the plugin
 }
 
 --- The search bar's text box: KOReader's InputText, with our own keyboard
@@ -124,6 +127,38 @@ function SearchInput:initKeyboard()
         end
     end
     return InputText.initKeyboard(self)
+end
+
+-- Typing: only the text box changes. KOReader's InputText marks its parent
+-- (this whole Library) dirty for each key, which repaints every tile and then
+-- the keyboard above them. When the screen is just as we left it (the
+-- keyboard on top, the Library right under it, nothing else waiting to be
+-- painted), the new text is painted on its own instead, and only the text
+-- box is refreshed. Anything else takes KOReader's usual path.
+local ECHO_PARENT = { name = "library_search_echo" } -- not on screen: setDirty only queues the refresh
+
+function SearchInput:paintTo(bb, x, y)
+    InputText.paintTo(self, bb, x, y)
+    if bb == Screen.bb then self._painted_at = { x = x, y = y } end
+end
+
+function SearchInput:initTextBox(...)
+    local parent = self.parent
+    if not Keyboard.canEchoDirect(UIManager._window_stack, UIManager._dirty, self.keyboard, parent, self._painted_at) then
+        return InputText.initTextBox(self, ...)
+    end
+    self.parent = ECHO_PARENT
+    local ok, err = pcall(InputText.initTextBox, self, ...)
+    self.parent = parent
+    -- later cursor moves inside the box repaint through the Library as usual
+    local tw = self.text_widget
+    if tw then
+        tw.dialog = parent
+        if tw.text_widget then tw.text_widget.dialog = parent end
+    end
+    if not ok then error(err, 0) end
+    self.echo_direct_count = (self.echo_direct_count or 0) + 1
+    UIManager:widgetRepaint(self, self._painted_at.x, self._painted_at.y)
 end
 
 local lfs = require("libs/libkoreader-lfs")
@@ -167,6 +202,27 @@ function LibraryView:init()
     self:buildChrome()
     self:reloadData()
     self:buildBody()
+end
+
+--- Painted: the "Timing log" stops whatever was waiting for this.
+function LibraryView:paintTo(bb, x, y)
+    InputContainer.paintTo(self, bb, x, y)
+    local t = self.timing
+    if t and t.enabled and bb == Screen.bb then
+        t:painted(function(name) return self:timingNote(name) end)
+    end
+end
+
+function LibraryView:timingNote(name)
+    local items = self.current and self.current.items and #self.current.items or 0
+    local books = self.all_books and #self.all_books or 0
+    if name == "page" then return string.format("page=%d/%d books=%d", self.page or 1, self.pages or 1, books) end
+    if name == "search" then return string.format("results=%d books=%d", items, books) end
+    return string.format("items=%d books=%d", items, books)
+end
+
+function LibraryView:timeStart(name, armed)
+    if self.timing then self.timing:start(name, armed) end
 end
 
 ----------------------------------------------------------------------------
@@ -1016,6 +1072,10 @@ function LibraryView:buildBody()
         + tabs:getSize().h + (chips and chips:getSize().h or 0) + sep:getSize().h
         + footer_probe:getSize().h
     local keyboard_h = self:keyboardHeight()
+    -- Word suggestions: a row right above the keyboard, kept while it is up
+    -- (empty when there is nothing to suggest) so the grid does not jump.
+    local suggest_row = keyboard_h > 0 and self.search_suggestions and self:buildSuggestions() or nil
+    if suggest_row then fixed = fixed + suggest_row:getSize().h end
     local grid_h = math.max(self.label_h + 20, self.dimen.h - fixed - keyboard_h)
 
     -- Continue reading: pinned above the books, on every page, so a page
@@ -1080,6 +1140,7 @@ function LibraryView:buildBody()
     end
     table.insert(self.body, grid)
     table.insert(self.body, footer)
+    if suggest_row then table.insert(self.body, suggest_row) end
 
     self[1] = FrameContainer:new{
         padding = 0,
@@ -1098,6 +1159,89 @@ function LibraryView:buildBody()
     self.timings.filter_s = time.to_s(t1 - t0)
     self.timings.build_s = time.to_s(time.now() - t1)
     self:scheduleCoverExtraction()
+end
+
+--- What the search box searches here, for word suggestions: the books (or
+-- shelves) the query narrows. Returns the list and whether it is shelves.
+function LibraryView:suggestionScope()
+    if self.group then return self.group.books, false end
+    if Core.searchScope(self.tab) == "books" then return self.all_books, false end
+    return self:groupsFor(self.tab), true
+end
+
+--- The words to suggest from, built once per scope (and again when the
+-- library changes).
+function LibraryView:suggestionWords()
+    local items, shelves = self:suggestionScope()
+    local c = self._vocab
+    if c and c.items == items then return c.vocab end
+    local t0 = time.now()
+    local vocab = Suggest.vocabulary(items, lower, shelves)
+    self.timings.vocab_s = time.to_s(time.now() - t0)
+    self._vocab = { items = items, vocab = vocab }
+    return vocab
+end
+
+--- The row of suggested words (the space is kept even when it is empty).
+function LibraryView:buildSuggestions()
+    local margin = Size.margin.default + Size.padding.default
+    local gap = Size.padding.default
+    local avail = self.width - 2 * margin
+    local words = {}
+    if self.query ~= "" then
+        words = Suggest.suggest(self:suggestionWords(), self.query, { lower = lower, fuzzy = self.fuzzy_search })
+    end
+    local row = HorizontalGroup:new{ align = "center" }
+    local used = 0
+    for _, w in ipairs(words) do
+        local chip = Tiles.Chip:new{
+            text = w,
+            max_text_w = math.floor(avail * 0.4),
+            callback = function() self:useSuggestion(w) end,
+        }
+        local cw = chip:getSize().w + (used > 0 and gap or 0)
+        if used + cw > avail then break end
+        if used > 0 then table.insert(row, HorizontalSpan:new{ width = gap }) end
+        table.insert(row, chip)
+        used = used + cw
+    end
+    self.suggestions = words
+    local h = self._suggest_h
+    if not h then
+        h = Tiles.Chip:new{ text = "Ag" }:getSize().h
+        self._suggest_h = h
+    end
+    local pad = Size.padding.small
+    return FrameContainer:new{
+        padding = 0,
+        padding_left = margin,
+        padding_top = pad,
+        padding_bottom = pad,
+        bordersize = 0,
+        width = self.width,
+        height = h + 2 * pad,
+        LeftContainer:new{ dimen = Geom:new{ w = avail, h = h }, row },
+    }
+end
+
+--- A suggestion was tapped: it replaces the half-typed word, and the search
+-- runs at once. The keyboard stays up for the next word.
+function LibraryView:useSuggestion(word)
+    local text = Suggest.apply(self.search_input:getText(), word)
+    if self._search_action then UIManager:unschedule(self._search_action); self._search_action = nil end
+    local input = self.search_input
+    input:setText(text, true)
+    if input.goToEnd then input:goToEnd() end -- type on after the word
+    if self._search_action then UIManager:unschedule(self._search_action); self._search_action = nil end
+    self:applySearch(text)
+end
+
+--- Turn "Word suggestions" on or off.
+function LibraryView:setSearchSuggestions(on)
+    on = on and true or false
+    if on == self.search_suggestions then return end
+    self.search_suggestions = on
+    self:refreshBody(true)
 end
 
 --- Region below the header (where results are drawn).
@@ -1122,6 +1266,7 @@ end
 ----------------------------------------------------------------------------
 
 function LibraryView:onSearchEdited()
+    self:timeStart("search") -- from this (last) keystroke until its results are painted
     if self._search_action then UIManager:unschedule(self._search_action) end
     self._search_action = function()
         self._search_action = nil
@@ -1132,9 +1277,13 @@ end
 
 function LibraryView:applySearch(text)
     text = text or ""
-    if text == self.query then return end
+    if text == self.query then
+        if self.timing then self.timing:cancel("search") end
+        return
+    end
     self.query = text
     self.page = 1
+    if self.timing then self.timing:arm("search", "query=" .. #text) end
     self:refreshBody()
 end
 
@@ -1301,6 +1450,7 @@ function LibraryView:setTab(id)
 end
 
 function LibraryView:setFilter(f)
+    self:timeStart("filter", true)
     self:keyboardGuard()
     self.filter, self.page = f, 1
     self:rememberPref("filter", f)
@@ -1443,6 +1593,7 @@ function LibraryView:goToPage(page)
     if not self.pages then return end
     page = math.max(1, math.min(page, self.pages))
     if page == self.page then return end
+    self:timeStart("page", true)
     self.page = page
     self._turned_ms = time.to_ms(time.now())
     self:refreshBody()
@@ -1563,6 +1714,9 @@ end
 
 function LibraryView:onCloseWidget()
     self._closed = true
+    if self.timing then
+        for _, name in ipairs({ "page", "filter", "search" }) do self.timing:cancel(name) end
+    end
     if self._search_action then UIManager:unschedule(self._search_action) end
     if self._status_tick then UIManager:unschedule(self._status_tick); self._status_tick = nil end
     if self._search_dialog then

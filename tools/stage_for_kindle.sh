@@ -6,7 +6,7 @@ set -eu
 STAGE="${1:-$HOME/kindle-stage}"
 case "$STAGE" in *,*) echo "STAGE_DIR must not contain a comma (mtp-connect splits on it)" >&2; exit 1;; esac
 DEST="$STAGE/library.koplugin"
-FILES="_meta.lua main.lua librarycore.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua"
+FILES="_meta.lua main.lua librarycore.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua librarysuggest.lua librarytiming.lua"
 rm -rf "$DEST"
 mkdir -p "$DEST"
 for f in $FILES; do cp "library.koplugin/$f" "$DEST/$f"; done

@@ -1490,6 +1490,8 @@ function Core.reconcile(scanned, cache_entries, calibre_stamp)
                 and c.cal == calibre_stamp and c.src ~= "file" then
             f.title, f.authors, f.series, f.series_index = c.title, c.authors, c.series, c.series_index
             f.keywords, f.src, f.cal = c.keywords, c.src, c.cal
+            -- (only books held in memory carry these; the disk cache does not)
+            f.search_key, f.search_norm, f.search_tokens = c.search_key, c.search_norm, c.search_tokens
             Core.copyState(f, c)
             table.insert(reused, f)
         else

@@ -81,16 +81,35 @@ describe("librarykeyboard.styleKey", function()
         eq(k[1].radius, nil)
         eq(Keyboard.styleKey({}, st, WHITE), false)
     end)
-    it("press feedback fills the rounded key", function()
+    it("press feedback: a fast (A2) black press, then a normal refresh on release", function()
         local k = key(WHITE)
         Keyboard.styleKey(k, st, WHITE)
-        local updated = 0
-        k.update_keyboard = function() updated = updated + 1 end
+        local calls = {}
+        k.update_keyboard = function(_, hold, a2) table.insert(calls, { hold = hold, a2 = a2 }) end
         k:invert(true)
-        eq(k[1].background, st.pressed_bg)
+        eq(k._library_pressed, true)
+        eq(k[1].background, st.key_bg, "the key's own colour stays; the press is painted over it")
         k:invert(false)
-        eq(k[1].background, st.key_bg)
-        eq(updated, 2)
+        eq(k._library_pressed, nil)
+        eq(#calls, 2)
+        eq(calls[1].a2, true)
+        eq(calls[2].a2, false)
+    end)
+    it("paints the press as an inverted area clear of the rounded corners", function()
+        local painted, inverted = 0, {}
+        local k = { { bordersize = 0, background = WHITE, { dimen = { w = 50, h = 60 } },
+            getSize = function() return { w = 50, h = 60 } end,
+            paintTo = function() painted = painted + 1 end } }
+        Keyboard.styleKey(k, st, WHITE)
+        local bb = { invertRect = function(_, x, y, w, h) table.insert(inverted, { x, y, w, h }) end }
+        k[1]:paintTo(bb, 100, 200)
+        eq(painted, 1); eq(#inverted, 0, "not pressed: nothing inverted")
+        k.update_keyboard = function() end
+        k:invert(true)
+        k[1]:paintTo(bb, 100, 200)
+        eq(painted, 2); eq(#inverted, 1)
+        local inset = st.border + math.ceil(st.radius * 0.3)
+        same(inverted[1], { 100 + inset, 200 + inset, 50 - 2 * inset, 60 - 2 * inset })
     end)
 end)
 
@@ -110,5 +129,25 @@ describe("librarykeyboard.restyle", function()
         eq(kb.layout[1][2][1].radius, nil)
         eq(board.background, nil)
         eq(Keyboard.restyle({}, st, WHITE), false)
+    end)
+end)
+
+describe("librarykeyboard.canEchoDirect", function()
+    local kb, view = { "keyboard" }, { "view" }
+    local at = { x = 0, y = 0 }
+    local stack = { { widget = { "fm" } }, { widget = view }, { widget = kb } }
+    it("paints a keystroke on its own when the screen is as the Library left it", function()
+        eq(Keyboard.canEchoDirect(stack, {}, kb, view, at), true)
+    end)
+    it("takes the usual path otherwise", function()
+        eq(Keyboard.canEchoDirect(stack, { [view] = true }, kb, view, at), false, "Library already waiting to repaint")
+        eq(Keyboard.canEchoDirect(stack, { [kb] = true }, kb, view, at), false, "keyboard waiting to repaint")
+        eq(Keyboard.canEchoDirect(stack, {}, kb, view, nil), false, "text box never painted")
+        local over = { { widget = view }, { widget = kb }, { widget = { "menu" } } }
+        eq(Keyboard.canEchoDirect(over, {}, kb, view, at), false, "something over the keyboard")
+        eq(Keyboard.canEchoDirect({ { widget = kb } }, {}, kb, view, at), false)
+        eq(Keyboard.canEchoDirect(nil, {}, kb, view, at), false)
+        eq(Keyboard.canEchoDirect(stack, nil, kb, view, at), false)
+        eq(Keyboard.canEchoDirect(stack, {}, nil, view, at), false)
     end)
 end)

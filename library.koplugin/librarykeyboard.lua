@@ -30,7 +30,8 @@ function M.style(px, colors)
         key_border = colors.GRAY_9,
         key_bg = colors.WHITE,
         active_bg = colors.LIGHT_GRAY, -- Shift/Sym on
-        pressed_bg = colors.GRAY_9,
+        -- pressed: the inside of the key turns black (see styleKey). Black and
+        -- white is what a fast (A2) e-ink refresh shows crisply; grey is not.
         focus_bg = colors.GRAY_D,  -- D-pad focus
         focus_border = colors.BLACK,
         board_bg = colors.GRAY_E,
@@ -64,12 +65,28 @@ function M.styleKey(key, st, white)
     bg = (type(bg) == "nil" or (type(white) ~= "nil" and bg == white)) and st.key_bg or st.active_bg
     frame.background = bg
     key._library_bg = bg
-    -- Feedback that follows the rounded shape (KOReader's own press and focus
-    -- marks are a square inner border). Set on this key only.
+    -- Press feedback: the inside of the key is inverted (black, with a white
+    -- letter), kept clear of the rounded corners, and refreshed with a fast
+    -- A2 refresh. A grey press mark all but vanishes under A2. On release
+    -- the key gets a normal "ui" refresh, which brings its grey border back.
+    -- Set on this key only.
+    local inset = st.border + math.ceil(st.radius * 0.3)
+    local paint = frame.paintTo
+    if type(paint) == "function" then
+        frame.paintTo = function(f, bb, x, y)
+            paint(f, bb, x, y)
+            if key._library_pressed then
+                local size = f:getSize()
+                local w, h = size.w - 2 * inset, size.h - 2 * inset
+                if w > 0 and h > 0 then bb:invertRect(x + inset, y + inset, w, h) end
+            end
+        end
+    end
     key.invert = function(k, invert, hold)
         k[1].inner_bordersize = 0
-        k[1].background = invert and st.pressed_bg or k._library_bg
-        k:update_keyboard(hold, true)
+        k[1].background = k._library_bg
+        k._library_pressed = invert and true or nil
+        k:update_keyboard(hold, invert and true or false)
     end
     key.onFocus = function(k)
         k[1].background, k[1].color = st.focus_bg, st.focus_border
@@ -96,6 +113,22 @@ function M.restyle(kb, st, white)
         board.background = st.board_bg
         board.color = st.board_border
     end
+    return true
+end
+
+--- Can a keystroke's new text be painted on its own (SearchInput:initTextBox
+-- in libraryview.lua)? Only when the screen is exactly as the Library left
+-- it: the keyboard is the top window, the Library right under it, the
+-- Library has nothing else waiting to be painted, and the text box was
+-- already painted somewhere. `stack` and `dirty` are UIManager's window
+-- stack and dirty set; when they are not what we expect, the answer is no.
+function M.canEchoDirect(stack, dirty, keyboard, view, painted_at)
+    if not (keyboard and view and type(painted_at) == "table") then return false end
+    if type(stack) ~= "table" or type(dirty) ~= "table" then return false end
+    local n = #stack
+    if n < 2 or type(stack[n]) ~= "table" or type(stack[n - 1]) ~= "table" then return false end
+    if stack[n].widget ~= keyboard or stack[n - 1].widget ~= view then return false end
+    if dirty[view] or dirty[keyboard] then return false end
     return true
 end
 
