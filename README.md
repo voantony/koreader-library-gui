@@ -20,6 +20,10 @@ It sits alongside KOReader's file browser, History and Collections. It never mov
 |---|---|---|
 | ![Collections tab switched to Genres, with a cover and book count for each genre](docs/screenshots/10-genres.png) | ![The Mystery & Thriller genre opened, showing its books](docs/screenshots/11-genre-books.png) | ![KOReader's reader menu with Library at the top](docs/screenshots/12-reader-menu-library.png) |
 
+| Book details (new in 0.3.3) | A book with no description | Book details from inside a book |
+|---|---|---|
+| ![Book details card with cover, progress, Continue, genre chips and the full description](docs/screenshots/13-details-card.png) | ![Book details card for a book with no description](docs/screenshots/14-details-card-none.png) | ![The same card opened from the reader menu](docs/screenshots/15-details-card-reader.png) |
+
 The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's screen size (1264×1680), with a library of public-domain books.
 
 ## Features
@@ -35,6 +39,7 @@ The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's sc
 - **Collections and Series** as tabs. A series lists its books in order, and swiping past its last page opens the next series.
 - **Genres**: a Collections | Genres switch at the top of the Collections tab. Genres are grouped from each book's keywords and Calibre tags, with a count and progress for each.
 - **Library from inside a book**: **Library** is the first item in the reader's ☰ menu. It saves your place, closes the book and opens the Library.
+- **Book details**: long-press a book, or choose **Book details** in the reader's ☰ menu, for its cover, progress, genres and the full Calibre description. Tap the author, series, a genre or a collection to open that shelf. It's read-only.
 - **Go to page**: tap the page number in the footer (*1 / 51*) and type a page.
 - **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
 - **Controls panel**: swipe down from the top-right corner for Brightness and Warmth sliders and buttons for Light, Night, Refresh (clears e-ink ghosting), Wi-Fi, Rotate and Cover sleep. Anything your device doesn't have is left out.
@@ -43,7 +48,7 @@ The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's sc
 
 ## Install
 
-1. Download **[library-gui-0.3.2.zip](https://github.com/voantony/koreader-library-gui/releases/download/v0.3.2/library-gui-0.3.2.zip)** from the [latest release](https://github.com/voantony/koreader-library-gui/releases/latest).
+1. Download **[library-gui-0.3.3.zip](https://github.com/voantony/koreader-library-gui/releases/download/v0.3.3/library-gui-0.3.3.zip)** from the [latest release](https://github.com/voantony/koreader-library-gui/releases/latest).
 2. Unzip it. You get a folder called `library.koplugin`.
 3. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).
