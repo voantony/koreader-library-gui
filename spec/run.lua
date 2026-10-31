@@ -60,6 +60,8 @@ for _, spec in ipairs({ "librarycore_spec", "libraryindex_spec", "librarycovers_
     require(spec)
 end
 require("librarybezel_spec") -- status bar above the Colorsoft bezel
+require("librarysuggest_spec") -- word suggestions while typing
+require("librarytiming_spec") -- the opt-in timing log
 
 io.write("\n")
 for _, f in ipairs(failures) do print("FAIL: " .. f) end

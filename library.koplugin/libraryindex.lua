@@ -19,9 +19,13 @@ KOReader's reading history.
 
 Cache key per book: path + size + mtime (+ the calibre file's mtime).
 
-Each book's search text (Core.buildSearchKey) is worked out here, once per
-build: the lower-cased key for the plain search, plus the accent-free words
+Each book's search text (Core.buildSearchKey) is worked out here: the
+lower-cased key for the plain search, plus the accent-free words
 "Typo-tolerant search" compares against, so typing never re-normalises a book.
+
+Once built, a refresh (every time the Library opens) uses the books already
+in memory as its cache: no disk-cache read, and unchanged books keep their
+search text.
 --]]
 
 local Core = require("librarycore")
@@ -211,7 +215,16 @@ function Index:build(force)
     })
     local t_scan = self:clock()
 
-    local cache = not force and self:readCache() or nil
+    -- Already built in this run: the books in memory are the cache, so a
+    -- refresh (each time the Library opens) skips reading the disk cache.
+    local cache
+    if not force then
+        if self.built and next(self.by_path) ~= nil then
+            cache = { entries = self.by_path, memory = true }
+        else
+            cache = self:readCache()
+        end
+    end
     local calibre_files, calibre_stamp = self:findCalibreFiles()
     self.calibre_files = calibre_files
 
@@ -235,7 +248,8 @@ function Index:build(force)
     local times = self:historyTimes()
     for _, book in ipairs(scanned) do
         book.last_opened = times[book.path]
-        Core.buildSearchKey(book, o.lower)
+        -- (reused from memory: same title, authors, series and file name)
+        if not book.search_key then Core.buildSearchKey(book, o.lower) end
     end
     local t_meta = self:clock()
 
@@ -243,6 +257,7 @@ function Index:build(force)
     self.by_path = {}
     for _, b in ipairs(scanned) do self.by_path[b.path] = b end
     self.truncated = truncated
+    self.built = true
 
     local dirty = force or not cache or #stale > 0 or sidecar_reads > 0
         or self:countEntries(cache and cache.entries) ~= #scanned
@@ -256,6 +271,7 @@ function Index:build(force)
         sidecar_reads = sidecar_reads,
         calibre_files = #calibre_files,
         from_cache = cache ~= nil,
+        from_memory = cache ~= nil and cache.memory == true,
         scan_s = t_scan - t0,
         calibre_s = t_cal - t_scan,
         meta_s = t_meta - t_cal,

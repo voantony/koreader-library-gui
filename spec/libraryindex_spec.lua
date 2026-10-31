@@ -208,4 +208,50 @@ describe("Index", function()
         eq(#Core.searchIndexed(books, "prometeus", nil, nil, true), 1)
         os.remove(CACHE)
     end)
+    it("refreshes from the books in memory: no disk-cache read, search text kept", function()
+        reset()
+        local idx = newIndex()
+        idx:build()
+        local reads = 0
+        local readCache = idx.readCache
+        idx.readCache = function(...) reads = reads + 1; return readCache(...) end
+        local tokens = byName(idx.books)["Persuasion.mobi"].search_tokens
+        reset()
+        idx:build()
+        eq(reads, 0)
+        eq(idx.stats.from_memory, true)
+        eq(idx.stats.cached, 7)
+        eq(counters.sidecar, 0)
+        eq(counters.calibre, 0)
+        eq(byName(idx.books)["Persuasion.mobi"].search_tokens, tokens) -- not rebuilt
+        eq(#Core.searchIndexed(idx.books, "austen"), 3)
+        -- a book that changed on disk is read again, with fresh search text
+        local node = F.tree["/mnt/test/books/Classics/Emma.EPUB"]
+        node.modification = node.modification + 1
+        idx:build()
+        node.modification = node.modification - 1
+        eq(idx.stats.refreshed, 1)
+        eq(type(byName(idx.books)["Emma.EPUB"].search_key), "string")
+        -- forced: the disk and memory are both ignored
+        idx:build(true)
+        eq(idx.stats.from_cache, false)
+        eq(idx.stats.refreshed, 7)
+        os.remove(CACHE)
+    end)
+
+    it("still sees reading-state changes when refreshing from memory", function()
+        reset()
+        local idx = newIndex()
+        idx:build()
+        sidecar_mtime["/sdr/tm.lua"] = 30
+        sidecar_data["/sdr/tm.lua"].percent_finished = 0.7
+        reset()
+        local books = byName(idx:build())
+        eq(idx.stats.from_memory, true)
+        eq(counters.sidecar, 1)
+        eq(books["The Time Machine.epub"].percent, 0.7)
+        sidecar_data["/sdr/tm.lua"].percent_finished = 0.5
+        sidecar_mtime["/sdr/tm.lua"] = 23
+        os.remove(CACHE)
+    end)
 end)

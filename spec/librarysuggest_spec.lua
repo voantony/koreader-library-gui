@@ -1,0 +1,91 @@
+-- Word suggestions for the search box (librarysuggest.lua): words from the
+-- library's own titles, authors and series, by prefix, then near misses.
+local Core = require("librarycore")
+local Suggest = require("librarysuggest")
+local lower = string.lower
+
+local books = {
+    { title = "The Silent River", authors = { "Ana Ortega" }, series = "Rivers" },
+    { title = "Silent Night", authors = { "Émile Zola" } },
+    { title = "River of Stars", authors = { "Guy Gavriel Kay" } },
+    { title = "Sight Lines", authors = { "Mary O'Connor" } },
+    { title = "Silk 1984", authors = { "Ana Ortega" } },
+}
+
+describe("librarysuggest.vocabulary", function()
+    local v = Suggest.vocabulary(books, lower)
+    it("collects words from titles, authors and series, skipping short, stop and number words", function()
+        eq(v.count.silent, 2)
+        eq(v.count.ortega, 2)
+        eq(v.count.rivers, 1)
+        eq(v.count.the, nil)
+        eq(v.count.of, nil)
+        eq(v.count["1984"], nil)
+        eq(v.count.guy, 1)
+    end)
+    it("counts a word once per book", function()
+        local w = Suggest.vocabulary({ { title = "River River", authors = {} } }, lower)
+        eq(w.count.river, 1)
+    end)
+    it("matches without accents but suggests the word with its accents (in lower case, as typed)", function()
+        eq(v.display[Core.normalizeText("émile", lower)], "Émile")
+    end)
+    it("keeps the apostrophe inside a name", function()
+        eq(v.display[Core.normalizeText("o'connor", lower)], "o'connor")
+    end)
+    it("takes shelf names (and a series' authors) for the shelf tabs", function()
+        local s = Suggest.vocabulary({ { name = "Discworld", authors = { "Terry Pratchett" } }, { name = "Fantasy" } }, lower, true)
+        eq(s.count.discworld, 1); eq(s.count.pratchett, 1); eq(s.count.fantasy, 1)
+    end)
+    it("is happy with nothing", function()
+        eq(#Suggest.vocabulary(nil, lower).words, 0)
+    end)
+end)
+
+describe("librarysuggest.lastWord", function()
+    it("splits off the half-typed last word", function()
+        local w, before = Suggest.lastWord("silent riv", lower)
+        eq(w, "riv"); same(before, { "silent" })
+    end)
+    it("waits for two letters, and for a word after a space", function()
+        eq(Suggest.lastWord("s", lower), nil)
+        eq(Suggest.lastWord("silent ", lower), nil)
+        eq(Suggest.lastWord("", lower), nil)
+    end)
+end)
+
+describe("librarysuggest.suggest", function()
+    local v = Suggest.vocabulary(books, lower)
+    it("suggests words starting with what was typed, commonest first", function()
+        same(Suggest.suggest(v, "sil", { lower = lower }), { "silent", "silk" })
+    end)
+    it("does not suggest a word already in the query", function()
+        same(Suggest.suggest(v, "river riv", { lower = lower }), { "rivers" })
+    end)
+    it("ignores accents", function()
+        same(Suggest.suggest(v, "emi", { lower = lower }), { "Émile" })
+    end)
+    it("forgives a small typo when typo-tolerant search is on", function()
+        same(Suggest.suggest(v, "silemt", { lower = lower }), {})
+        eq(Suggest.suggest(v, "silemt", { lower = lower, fuzzy = true })[1], "silent")
+    end)
+    it("stops at the limit", function()
+        local many = {}
+        for i = 1, 20 do many[i] = { title = "Word" .. string.char(96 + i) .. "xx", authors = {} } end
+        eq(#Suggest.suggest(Suggest.vocabulary(many, lower), "wor", { lower = lower }), Suggest.MAX)
+        eq(#Suggest.suggest(Suggest.vocabulary(many, lower), "wor", { lower = lower, max = 2 }), 2)
+    end)
+    it("suggests nothing for a whole word or nothing typed", function()
+        same(Suggest.suggest(v, "", { lower = lower }), {})
+        same(Suggest.suggest(v, "silent ", { lower = lower }), {})
+        same(Suggest.suggest(nil, "sil", { lower = lower }), {})
+    end)
+end)
+
+describe("librarysuggest.apply", function()
+    it("finishes the half-typed word and leaves room for the next", function()
+        eq(Suggest.apply("silent riv", "River"), "silent River ")
+        eq(Suggest.apply("riv", "River"), "River ")
+        eq(Suggest.apply("", "River"), "River ")
+    end)
+end)

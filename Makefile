@@ -2,7 +2,7 @@
 LUA ?= luajit
 PLUGIN := library.koplugin
 VERSION ?= 0.3.0
-FILES := _meta.lua main.lua librarycore.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua libraryreadability.lua
+FILES := _meta.lua main.lua librarycore.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua libraryreadability.lua librarysuggest.lua librarytiming.lua
 
 .PHONY: test zip stage clean
 

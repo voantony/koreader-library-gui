@@ -28,6 +28,7 @@ local logger = require("logger")
 local util = require("util")
 local Core = require("librarycore")
 local Index = require("libraryindex")
+local Timing = require("librarytiming")
 local _ = require("gettext")
 local T = ffiUtil.template
 
@@ -53,6 +54,8 @@ local DEFAULTS = {
     show_clock = true,          -- clock beside the search bar
     show_battery = true,        -- battery percentage beside the search bar
     fuzzy_search = true,        -- "Typo-tolerant search": accents ignored, small typos forgiven
+    search_suggestions = true,  -- "Word suggestions": words from the library above the search keyboard
+    timing_log = false,         -- "Timing log": how long opening, page turns, filters and search take (librarytiming.lua)
     remember_views = true,      -- each shelf (collection, author, series, tab) remembers its layout, sort, filter
     controls_panel = true,      -- swipe down from the Library's top-right corner: light, warmth, toggles
     simple_reader_menu = true,  -- tapping the top of a page opens our small menu; More… opens KOReader's
@@ -311,7 +314,34 @@ function Library:newView()
         show_clock = Core.showClock(self.settings),
         show_battery = Core.showBattery(self.settings),
         fuzzy_search = Core.fuzzySearch(self.settings),
+        search_suggestions = self.settings.search_suggestions ~= false,
+        timing = self:timer(),
     }
+end
+
+--- The "Timing log" (librarytiming.lua): one per run, remade when it is
+-- turned on or off. Lines go to library_timing.log in KOReader's folder
+-- (on a Kindle, koreader/library_timing.log on the USB drive).
+function Library:timingLogPath()
+    local dir = DataStorage:getDataDir()
+    return (type(dir) == "string" and dir or ".") .. "/library_timing.log"
+end
+
+function Library:timer()
+    local on = self.settings.timing_log == true
+    if shared.timer and shared.timer.enabled == on then return shared.timer end
+    local time = require("ui/time")
+    local path = self:timingLogPath()
+    shared.timer = Timing.new{
+        enabled = on,
+        clock = function() return time.to_s(time.now()) end,
+        write = function(line)
+            logger.info("Library timing:", line)
+            local f = io.open(path, "a")
+            if f then f:write(line, "\n"); f:close() end
+        end,
+    }
+    return shared.timer
 end
 
 ----------------------------------------------------------------------------
@@ -426,7 +456,10 @@ function Library:onShowLibrary(focus_search)
         return true
     end
     if self.ui.document then return self:leaveBook(focus_search) end
+    local timer = self:timer()
+    timer:start("open", true)
     local index = self:getIndex()
+    local first = index.needs_build
     local function show()
         local view = self:newView()
         shared.view = view
@@ -443,6 +476,7 @@ function Library:onShowLibrary(focus_search)
         -- Cheap refresh of reading state and history order.
         self:refreshReadingState()
     end
+    timer:arm("open", first and "first" or nil)
     local shelf = shared.open_shelf
     shared.open_shelf = nil
     -- back from a book: where the Library was (a shelf or search asked for wins)
@@ -1382,6 +1416,16 @@ function Library:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Word suggestions"),
+                help_text = _("While you type in the search bar, a row of words from your library (titles, authors, series) appears above the keyboard. Tap one to finish the word."),
+                checked_func = function() return self.settings.search_suggestions ~= false end,
+                callback = function()
+                    self.settings.search_suggestions = self.settings.search_suggestions == false
+                    self:saveSettings()
+                    if shared.view then shared.view:setSearchSuggestions(self.settings.search_suggestions) end
+                end,
+            },
+            {
                 text = _("Typo-tolerant search"),
                 help_text = _("Search also finds close matches: accents and punctuation are ignored (bronte finds Brontë) and small typos are forgiven (harry poter finds Harry Potter). Exact matches stay at the top."),
                 checked_func = function() return Core.fuzzySearch(self.settings) end,
@@ -1393,6 +1437,16 @@ function Library:addToMainMenu(menu_items)
             },
             self:rememberViewsMenu(),
             self:controlsMenu(),
+            {
+                text = _("Timing log (for testing)"),
+                help_text = T(_("Write how long the Library takes to open, turn a page, switch a filter and show search results to %1, one line each. Off by default; nothing is timed while it is off."), self:timingLogPath()),
+                checked_func = function() return self.settings.timing_log == true end,
+                callback = function()
+                    self.settings.timing_log = self.settings.timing_log ~= true or nil
+                    self:saveSettings()
+                    if shared.view then shared.view.timing = self:timer() end
+                end,
+            },
             self:simpleReaderMenuItem(),
             self:bezelLiftMenuItem(),
             {
