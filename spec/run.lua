@@ -59,6 +59,7 @@ for _, spec in ipairs({ "librarycore_spec", "libraryindex_spec", "librarycovers_
     "librarysortdate_spec", "librarykeyboardrows_spec", "librarycontrolstoggles_spec", "libraryfuzzy_spec", "librarypagejump_spec", "librarycontinuedupes_spec", "librarylastreadauthor_spec", "libraryreaderitem_spec", "librarygenres_spec", "librarygenrescalibre_spec", "librarydetails_spec", "libraryheader_spec", "libraryauthorlinks_spec", "libraryreadermenu_spec", "libraryreturnspot_spec" }) do
     require(spec)
 end
+require("librarybezel_spec") -- status bar above the Colorsoft bezel
 
 io.write("\n")
 for _, f in ipairs(failures) do print("FAIL: " .. f) end

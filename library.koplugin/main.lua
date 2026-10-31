@@ -56,6 +56,8 @@ local DEFAULTS = {
     remember_views = true,      -- each shelf (collection, author, series, tab) remembers its layout, sort, filter
     controls_panel = true,      -- swipe down from the Library's top-right corner: light, warmth, toggles
     simple_reader_menu = true,  -- tapping the top of a page opens our small menu; More… opens KOReader's
+    bezel_lift = true,          -- Colorsoft: lift KOReader's status bar above the bezel (librarybezel.lua)
+    -- bezel_prev: the status bar's bottom margin from before we lifted it
     -- view_memory: { [key] = { view =, sort =, filter =, t = } }, see Core.viewKey
     -- sleep_cover_prev: KOReader's sleep screen settings from before
     -- "Sleep screen: cover of last book" was turned on (restored when turned off)
@@ -1392,6 +1394,7 @@ function Library:addToMainMenu(menu_items)
             self:rememberViewsMenu(),
             self:controlsMenu(),
             self:simpleReaderMenuItem(),
+            self:bezelLiftMenuItem(),
             {
                 text = _("Next in series skips finished books"),
                 help_text = _("Next in series opens the next book you have not finished. Turn this off to always open the very next book."),
@@ -1579,6 +1582,82 @@ function Library:simpleReaderMenuItem()
         callback = function()
             self.settings.simple_reader_menu = self.settings.simple_reader_menu == false
             self:saveSettings()
+        end,
+    }
+end
+
+----------------------------------------------------------------------------
+-- Status bar above the bezel (Kindle Colorsoft), see librarybezel.lua
+----------------------------------------------------------------------------
+
+function Library:readerFooter()
+    local view = self.ui and self.ui.view
+    local footer = view and view.footer
+    if footer and type(footer.settings) == "table" then return footer end
+end
+
+--- Set KOReader's status bar bottom margin the same way its own
+-- "Bottom margin" spinner does, so the change is a normal KOReader setting.
+function Library:setFooterBottomMargin(footer, value)
+    footer.settings.container_bottom_padding = value
+    footer.bottom_padding = Device.screen:scaleBySize(value)
+    if type(footer.refreshFooter) == "function" then
+        pcall(footer.refreshFooter, footer, true, true)
+    end
+end
+
+function Library:liftFooterAboveBezel()
+    local footer = self:readerFooter()
+    if not footer then return end
+    local Bezel = require("librarybezel")
+    local current = footer.settings.container_bottom_padding
+    local value = Bezel.plan{
+        model = Device.model,
+        enabled = self.settings.bezel_lift,
+        current = current,
+        prev = self.settings.bezel_prev,
+    }
+    if not value then return end
+    self.settings.bezel_prev = tonumber(current) or Bezel.DEFAULT
+    self:saveSettings()
+    self:setFooterBottomMargin(footer, value)
+end
+
+function Library:onReaderReady()
+    self:liftFooterAboveBezel()
+end
+
+function Library:bezelLiftMenuItem()
+    local Bezel = require("librarybezel")
+    return {
+        text = _("Keep status bar above the bezel"),
+        help_text = _("On the Kindle Colorsoft the screen runs a few pixels under the frame, so the status bar at the bottom of the page is partly hidden. This raises KOReader's status bar bottom margin a little, once, if you have not changed it yourself. Turning it off puts the old margin back. You can also set it by hand in the reader's settings: Status bar > Configure items > Bottom margin."),
+        enabled_func = function() return Bezel.affected(Device.model) end,
+        checked_func = function() return self.settings.bezel_lift ~= false end,
+        callback = function()
+            local turning_on = self.settings.bezel_lift == false
+            self.settings.bezel_lift = turning_on
+            local footer = self:readerFooter()
+            if turning_on then
+                self:saveSettings()
+                self:liftFooterAboveBezel()
+                return
+            end
+            local current = footer and footer.settings.container_bottom_padding
+            if not footer then
+                local stored = G_reader_settings:readSetting("footer")
+                current = type(stored) == "table" and stored.container_bottom_padding or nil
+            end
+            local back = Bezel.restore(current, self.settings.bezel_prev)
+            self.settings.bezel_prev = nil
+            self:saveSettings()
+            if back then
+                if footer then
+                    self:setFooterBottomMargin(footer, back)
+                else
+                    G_reader_settings:readSetting("footer").container_bottom_padding = back
+                end
+            end
         end,
     }
 end
