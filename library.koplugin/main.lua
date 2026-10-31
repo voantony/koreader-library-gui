@@ -45,7 +45,7 @@ local DEFAULTS = {
     start_with_library = false, -- open the Library instead of the file browser
     return_to_library = true,   -- when the Library is the home screen, come back to it after reading
     debounce_ms = 150,
-    barely_threshold = 0.10,    -- "Barely started" filter: opened and below this fraction
+    barely_threshold = 0.10,    -- "Barely started" when chapters are unknown: below this fraction
     series_skip_finished = true, -- Next in series skips books already finished
     reader_tab = true,          -- a Library tab (book icon) in the reader's top menu bar
     rounded_keyboard = true,    -- "Rounded keyboard in search": softer keys for the search bar only
@@ -1083,7 +1083,7 @@ function Library:barelyMenu()
             return T(_("Barely started: below %1 %"),
                 math.floor(Core.barelyThreshold(self.settings.barely_threshold) * 100 + 0.5))
         end,
-        help_text = _("The Barely started filter shows books you have opened and read less than this much of. Books never opened are not included."),
+        help_text = _("A book you opened but did not start (still on the cover, title page or contents) counts as Unread. Barely started means past the contents but not yet through the first chapter; Reading means at least a chapter in. The Library learns the chapters the next time you open a book. Until then, and for books without a table of contents, Barely started means read less than this much (the first 2 % or 3 pages still count as Unread)."),
         sub_item_table = items,
     }
 end
@@ -1587,7 +1587,33 @@ end
 -- Keep the index fresh
 ----------------------------------------------------------------------------
 
+--- While a book is open: save where its text starts and where its first
+-- chapter ends (from the table of contents) in the book's sidecar, so the
+-- Library can tell Unread / Barely started / Reading without opening books.
+-- Worked out once per book layout. Runs on CloseDocument (the sidecar is
+-- written right after it) and on SaveSettings while the book is still open
+-- (suspend, autosave).
+function Library:saveChapterMarks()
+    local doc, toc, ds = self.ui.document, self.ui.toc, self.ui.doc_settings
+    if not (doc and toc and ds and toc.fillToc) then return end
+    local ok, pages = pcall(doc.getPageCount, doc)
+    if not ok or not pages then return end
+    local key = tostring(doc.file) .. ":" .. tostring(pages)
+    if self._marks_for == key then return end
+    local ok2, marks = pcall(function()
+        toc:fillToc()
+        return Core.tocMarks(toc.toc, pages)
+    end)
+    if not ok2 then logger.warn("Library: chapter marks failed:", marks); return end
+    self._marks_for = key
+    if Core.sameMarks(ds:readSetting("library_marks"), marks) then return end
+    if marks then ds:saveSetting("library_marks", marks) else ds:delSetting("library_marks") end
+end
+
+function Library:onSaveSettings() self:saveChapterMarks() end
+
 function Library:onCloseDocument()
+    self:saveChapterMarks()
     if self.ui.document and shared.index then
         shared.index:refreshBook(self.ui.document.file)
     end

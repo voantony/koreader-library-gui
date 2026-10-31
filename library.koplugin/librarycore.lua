@@ -541,12 +541,6 @@ end
 
 Core.FILTERS = { "all", "unread", "reading", "barely", "finished" }
 
-local FILTER_STATUS = {
-    unread = { new = true },
-    reading = { reading = true },
-    finished = { complete = true },
-}
-
 --- Thresholds offered for "Barely started" (fractions of the book).
 Core.BARELY_THRESHOLDS = { 0.05, 0.10, 0.20, 0.25 }
 Core.BARELY_DEFAULT = 0.10
@@ -560,24 +554,167 @@ function Core.barelyThreshold(v)
     return Core.BARELY_DEFAULT
 end
 
---- Opened, read past 0 % and below `threshold`, and not marked finished.
--- Never-opened books have no percent (no sidecar), so they never count.
-function Core.isBarelyStarted(book, threshold)
-    local p = tonumber(book.percent)
-    if not p or p <= 0 then return false end
-    if book.status == "complete" or book.status == "new" then return false end
-    return p < Core.barelyThreshold(threshold)
+----------------------------------------------------------------------------
+-- Reading stage: Unread / Barely started / Reading
+----------------------------------------------------------------------------
+--
+-- KOReader marks a book "reading" as soon as it is opened, so its status
+-- alone cannot tell a book you only looked at from one you are reading.
+-- The stage also looks at how far in you are:
+--
+--   unread   still at or before where the text starts (cover, title page,
+--            table of contents): you opened it but did not start it
+--   barely   past the start of the text, but not through the first chapter
+--   reading  at least one chapter in
+--
+-- Where the text starts and where the first chapter ends come from the
+-- book's table of contents. KOReader does not keep that in the sidecar, so
+-- the reader part of this plugin saves two page numbers there
+-- (`library_marks`, see Core.tocMarks) while the book is open. Books opened
+-- before that, or without a usable table of contents, use percentages:
+-- unread up to UNREAD_PERCENT or UNREAD_PAGES, barely started below the
+-- "Barely started" threshold (5 / 10 / 20 / 25 %, default 10 %).
+
+Core.UNREAD_PERCENT = 0.02  -- no table of contents: unread up to 2 % ...
+Core.UNREAD_PAGES = 3       -- ... or up to page 3
+Core.CHAPTER_CAP = 0.25     -- a first chapter longer than this counts as read at 25 % past its start
+
+-- Table of contents entries that are front matter, not the text.
+-- Whole titles (lower-cased, trimmed) ...
+local FRONT_EXACT = {}
+for _, t in ipairs({
+    "cover", "front cover", "title", "title page", "half title", "half-title", "halftitle",
+    "copyright", "copyright page", "contents", "table of contents", "toc", "dedication",
+    "epigraph", "frontispiece", "map", "maps", "imprint", "colophon", "front matter",
+    "frontmatter", "also by", "praise", "start", "series page",
+    -- es / fr / de / it / pt
+    "cubierta", "portada", "portadilla", "créditos", "creditos", "índice", "indice",
+    "contenido", "contenidos", "sumario", "dedicatoria", "epígrafe", "epigrafe", "sinopsis",
+    "couverture", "titre", "page de titre", "table des matières", "table des matieres",
+    "sommaire", "dédicace", "dedicace", "titelseite", "titel", "inhalt",
+    "inhaltsverzeichnis", "impressum", "widmung", "copertina", "frontespizio", "indice",
+    "capa", "sumário", "folha de rosto",
+}) do FRONT_EXACT[t] = true end
+-- ... and title beginnings.
+local FRONT_PREFIX = { "also by ", "praise for ", "books by ", "other books by ", "copyright ",
+    "table of contents", "otros títulos", "otros libros", "del mismo autor", "du même auteur" }
+-- A part heading whose chapters follow it in the table of contents.
+local PART_PREFIX = { "part ", "book ", "volume ", "parte ", "libro ", "partie ", "livre ", "teil ", "buch " }
+
+local function startsWithAny(s, list)
+    for _, p in ipairs(list) do
+        if s:sub(1, #p) == p then return true end
+    end
+    return false
 end
 
+local function tocTitle(entry)
+    local t = type(entry.title) == "string" and entry.title or ""
+    -- Upper-case accented letters that matter for the Spanish titles.
+    t = lower(trim(t)):gsub("Í", "í"):gsub("É", "é"):gsub("À", "à"):gsub("Ú", "ú")
+    return (t:gsub("[%s%.:]+$", ""))
+end
+
+function Core.isFrontMatter(title)
+    local t = tocTitle({ title = title })
+    if t == "" then return true end
+    return FRONT_EXACT[t] == true or startsWithAny(t, FRONT_PREFIX)
+end
+
+--- Where the text starts and where its first chapter ends, from a table of
+-- contents (KOReader's: a list of { title, page, depth } in page order).
+-- Leading front matter entries (Cover, Title Page, Contents...) are skipped;
+-- a part heading ("Part One") steps down to its first chapter.
+-- @treturn table|nil { start = page, chapter = page or nil, pages = n }
+--   `chapter` is the page the next chapter starts on (nil: no next chapter).
+function Core.tocMarks(toc, pages)
+    pages = tonumber(pages)
+    if type(toc) ~= "table" or not pages or pages < 2 then return nil end
+    local list = {}
+    for _, e in ipairs(toc) do
+        if type(e) == "table" and tonumber(e.page) then
+            list[#list + 1] = { title = e.title, page = tonumber(e.page), depth = tonumber(e.depth) or 1 }
+        end
+    end
+    local i = 1
+    while list[i] and Core.isFrontMatter(list[i].title) do i = i + 1 end
+    if not list[i] then return nil end
+    while list[i + 1] and list[i + 1].depth > list[i].depth
+            and startsWithAny(tocTitle(list[i]), PART_PREFIX) do
+        i = i + 1
+    end
+    local first = list[i]
+    if first.page > pages * 0.5 then return nil end -- a table of contents we cannot trust
+    local chapter
+    for j = i + 1, #list do
+        if list[j].depth <= first.depth and list[j].page > first.page then
+            chapter = list[j].page
+            break
+        end
+    end
+    return { start = math.max(1, first.page), chapter = chapter, pages = pages }
+end
+
+--- Two marks tables hold the same pages.
+function Core.sameMarks(a, b)
+    if a == nil or b == nil then return a == b end
+    return a.start == b.start and a.chapter == b.chapter and a.pages == b.pages
+end
+
+--- Copy saved marks onto a book as fractions of the book (they survive a
+-- font size change better than page numbers): book.m_start, book.m_chap.
+function Core.applyMarks(book, marks)
+    book.m_start, book.m_chap = nil, nil
+    if type(marks) ~= "table" then return book end
+    local pages, start = tonumber(marks.pages), tonumber(marks.start)
+    if not pages or pages < 2 or not start then return book end
+    book.m_start = start / pages
+    book.m_chap = tonumber(marks.chapter) and tonumber(marks.chapter) / pages or nil
+    return book
+end
+
+--- "unread", "barely", "reading", "finished" or "on_hold" (see above).
+-- `threshold` is the "Barely started" setting, used when the book's
+-- chapters are not known.
+function Core.readingStage(book, threshold)
+    local status = book.status or "new"
+    if status == "complete" then return "finished" end
+    if status == "abandoned" then return "on_hold" end
+    if status == "new" then return "unread" end
+    local p = tonumber(book.percent)
+    if not p or p <= 0 then return "unread" end
+    local start = tonumber(book.m_start)
+    if start then
+        local pages = tonumber(book.pages)
+        local slack = pages and pages > 0 and 0.5 / pages or 0.001
+        if p <= start + slack then return "unread" end
+        local chap = tonumber(book.m_chap)
+        if (chap and p >= chap - slack) or p >= start + Core.CHAPTER_CAP then return "reading" end
+        return "barely"
+    end
+    local pages = tonumber(book.pages)
+    if p <= Core.UNREAD_PERCENT or (pages and pages > 0 and p * pages <= Core.UNREAD_PAGES + 0.01) then
+        return "unread"
+    end
+    if p < Core.barelyThreshold(threshold) then return "barely" end
+    return "reading"
+end
+
+--- Past the start of the text but not a chapter in (see Core.readingStage).
+function Core.isBarelyStarted(book, threshold)
+    return Core.readingStage(book, threshold) == "barely"
+end
+
+local FILTER_STAGE = { unread = "unread", reading = "reading", barely = "barely", finished = "finished" }
+
 local function wants(filter, book, threshold)
-    if filter == "barely" then return Core.isBarelyStarted(book, threshold) end
-    local wanted = FILTER_STATUS[filter]
-    return wanted ~= nil and wanted[book.status or "new"] == true
+    local stage = FILTER_STAGE[filter]
+    return stage ~= nil and Core.readingStage(book, threshold) == stage
 end
 
 --- Books matching a filter chip. `threshold` is for "barely".
 function Core.filterStatus(books, filter, threshold)
-    if filter ~= "barely" and not FILTER_STATUS[filter] then return books end
+    if not FILTER_STAGE[filter] then return books end
     local out = {}
     for _, b in ipairs(books) do
         if wants(filter, b, threshold) then table.insert(out, b) end
@@ -1332,6 +1469,14 @@ end
 
 Core.CACHE_VERSION = 2
 
+--- Reading state kept in the index cache (refreshed when the sidecar changes).
+Core.STATE_FIELDS = { "sc_mtime", "status", "percent", "pages", "m_start", "m_chap" }
+
+function Core.copyState(to, from)
+    for _, k in ipairs(Core.STATE_FIELDS) do to[k] = from[k] end
+    return to
+end
+
 --- Decide which scanned files can reuse cached metadata.
 -- A cached entry is reused when path, size, mtime and the calibre stamp match.
 -- @treturn table list of books (cached metadata copied in where valid)
@@ -1345,11 +1490,11 @@ function Core.reconcile(scanned, cache_entries, calibre_stamp)
                 and c.cal == calibre_stamp and c.src ~= "file" then
             f.title, f.authors, f.series, f.series_index = c.title, c.authors, c.series, c.series_index
             f.keywords, f.src, f.cal = c.keywords, c.src, c.cal
-            f.sc_mtime, f.status, f.percent = c.sc_mtime, c.status, c.percent
+            Core.copyState(f, c)
             table.insert(reused, f)
         else
             -- keep reading state; only metadata is stale
-            if c then f.sc_mtime, f.status, f.percent = c.sc_mtime, c.status, c.percent end
+            if c then Core.copyState(f, c) end
             table.insert(stale, f)
         end
     end
@@ -1358,7 +1503,7 @@ end
 
 local CACHED_FIELDS = {
     "size", "modification", "title", "authors", "series", "series_index",
-    "keywords", "src", "cal", "sc_mtime", "status", "percent",
+    "keywords", "src", "cal", "sc_mtime", "status", "percent", "pages", "m_start", "m_chap",
 }
 
 function Core.toCacheEntries(books)
