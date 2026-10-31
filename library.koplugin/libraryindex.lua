@@ -11,8 +11,10 @@ Metadata comes from, in order:
 3. the book's sidecar (`doc_props` saved by KOReader once the book was opened);
 4. the file name.
 
-Reading state (status, percent read) comes from the sidecar and is only
-re-read when the sidecar's mtime changed. The last-opened time comes from
+Reading state (status, percent read, page count and the Library's own
+chapter marks) comes from the sidecar and is only re-read when the
+sidecar's mtime changed. A book KOReader calls "reading" but that is still
+before the start of its text is kept as "new" (see Core.readingStage). The last-opened time comes from
 KOReader's reading history.
 
 Cache key per book: path + size + mtime (+ the calibre file's mtime).
@@ -162,18 +164,22 @@ function Index:refreshState(book)
     local mtime = sidecar and self.opts.fs.attributes(sidecar, "modification") or false
     if mtime == book.sc_mtime and book.status then return nil end
     book.sc_mtime = mtime
-    if not sidecar then
-        book.status, book.percent = "new", nil
-        return nil
-    end
-    local data = self:readSidecar(sidecar)
+    local data = sidecar and self:readSidecar(sidecar)
     if not data then
-        book.status, book.percent = "new", nil
+        book.status, book.percent, book.pages = "new", nil, nil
+        Core.applyMarks(book, nil)
         return nil
     end
     local summary = type(data.summary) == "table" and data.summary or {}
     book.status = Core.isKnownStatus(summary.status) and summary.status or "reading"
     book.percent = tonumber(data.percent_finished)
+    book.pages = tonumber(data.doc_pages)
+    Core.applyMarks(book, data.library_marks)
+    -- KOReader marks a book "reading" as soon as it opens: one you only
+    -- opened (still on the cover, title page or contents) stays unread.
+    if book.status == "reading" and Core.readingStage(book) == "unread" then
+        book.status = "new"
+    end
     return data
 end
 
