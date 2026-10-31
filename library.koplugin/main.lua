@@ -441,9 +441,13 @@ function Library:onShowLibrary(focus_search)
     end
     local shelf = shared.open_shelf
     shared.open_shelf = nil
+    -- back from a book: where the Library was (a shelf or search asked for wins)
+    local spot = self:takeReturnSpot()
     show()
     if shelf and shared.view and shared.view.openNamedShelf then
         shared.view:openNamedShelf(shelf.kind, shelf.name)
+    elseif spot and not focus_search and shared.view and shared.view.restoreReturn then
+        shared.view:restoreReturn(spot)
     end
     return true
 end
@@ -561,8 +565,47 @@ function Library:refreshReadingState()
     if not ok then logger.warn("Library: refresh failed:", err) end
 end
 
+--- This KOReader run, so a saved return spot is never used after a restart.
+local has_ffi, ffi = pcall(require, "ffi")
+local function runId()
+    if shared.run_id then return shared.run_id end
+    local ok, pid = pcall(function()
+        if not has_ffi then error("no ffi") end
+        pcall(ffi.cdef, "int getpid(void);")
+        return tonumber(ffi.C.getpid())
+    end)
+    shared.run_id = ok and pid or tostring(shared)
+    return shared.run_id
+end
+Library.runId = runId
+
+--- Remember where the Library was, to come back there after the book.
+-- Kept in memory and in the settings (the file browser and this plugin
+-- are re-created when a book closes).
+function Library:saveReturnSpot(view, path)
+    if not (view and view.returnState) then return end
+    local spot = Core.returnSpot(view:returnState(path), runId())
+    shared.return_spot = spot
+    self.settings.return_spot = spot
+    self:saveSettings()
+end
+
+--- The spot to come back to, once. Nil after a fresh start.
+function Library:takeReturnSpot()
+    local spot = shared.return_spot
+    if not Core.returnSpotUsable(spot, runId()) then spot = self.settings.return_spot end
+    shared.return_spot = nil
+    if self.settings.return_spot ~= nil then
+        self.settings.return_spot = nil
+        self:saveSettings()
+    end
+    if Core.returnSpotUsable(spot, runId()) then return spot end
+    return nil
+end
+
 function Library:openBook(path, view)
     shared.reopen = true
+    self:saveReturnSpot(view, path)
     filemanagerutil.openFile(self.ui, path, function()
         if view then UIManager:close(view) end
     end)
