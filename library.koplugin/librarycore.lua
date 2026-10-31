@@ -1797,4 +1797,445 @@ function Core.controlsHit(L, x, y)
     return nil
 end
 
+----------------------------------------------------------------------------
+-- Book details card (read-only; description is loaded when the card opens)
+----------------------------------------------------------------------------
+
+--- Move `id` to sit immediately after `after` (appended when `after` is
+-- missing). Idempotent.
+function Core.placeAfter(list, id, after)
+    for i = #list, 1, -1 do
+        if list[i] == id then table.remove(list, i) end
+    end
+    local at = #list + 1
+    for i, v in ipairs(list) do
+        if v == after then at = i + 1; break end
+    end
+    table.insert(list, at, id)
+    return list
+end
+
+--- Long-press on a library tile. A book opens the details card; a shelf
+-- (collection, author, series, genre) does not. A normal tap is separate.
+function Core.longPressAction(tile)
+    if type(tile) ~= "table" then return nil end
+    if tile.group and not tile.book then return nil end
+    local book = tile.book
+    if type(book) ~= "table" or type(book.path) ~= "string" or book.path == "" then
+        return nil
+    end
+    return "details"
+end
+
+--- "open" when the book is unread, "continue" once it has been started
+-- (reading, on hold, or finished).
+function Core.detailsOpenAction(book)
+    if type(book) == "table" and book.status and book.status ~= "new" then
+        return "continue"
+    end
+    return "open"
+end
+
+--- "mark_unread" when the book is finished, otherwise "mark_finished".
+function Core.detailsStatusAction(book)
+    if type(book) == "table" and book.status == "complete" then
+        return "mark_unread"
+    end
+    return "mark_finished"
+end
+
+--- The primary button only dismisses the card when this book is already
+-- open in the reader. Otherwise it opens the book.
+function Core.detailsPrimaryDismisses(already_open)
+    return already_open and true or false
+end
+
+--- Author names to show, each one tappable on its own.
+function Core.authorNames(book)
+    if type(book) ~= "table" then return {} end
+    local authors = book.authors
+    if type(authors) == "string" then return Core.splitAuthors(authors) end
+    if type(authors) ~= "table" then return {} end
+    local out = {}
+    for _, name in ipairs(authors) do
+        if type(name) == "string" and name ~= "" then out[#out + 1] = name end
+    end
+    return out
+end
+
+--- "Sherlock Holmes #5", or just the series name. Nil when there is none.
+function Core.seriesLine(book)
+    if type(book) ~= "table" or type(book.series) ~= "string" or book.series == "" then
+        return nil
+    end
+    local n = Core.seriesNumber(book.series_index)
+    if n then return book.series .. " #" .. n end
+    return book.series
+end
+
+--- Whole percent for the card: 0.37 -> 37. A finished book with no percent
+-- reads as 100. Unread reads as 0.
+function Core.progressPercent(book)
+    if type(book) ~= "table" then return 0 end
+    local p = tonumber(book.percent)
+    if book.status == "complete" and (not p or p <= 0) then return 100 end
+    if not p or p < 0 then return 0 end
+    if p > 1 then p = 1 end
+    return math.floor(p * 100 + 0.5)
+end
+
+--- A duration already computed elsewhere, as "3h 39m" / "2h" / "12m".
+-- Nil when there is nothing to show (missing, zero, or under half a minute).
+function Core.timeLeftText(seconds)
+    seconds = tonumber(seconds)
+    if not seconds or seconds < 30 then return nil end
+    local minutes = math.floor(seconds / 60)
+    if minutes < 1 then minutes = 1 end
+    local hours = math.floor(minutes / 60)
+    local rem = minutes % 60
+    if hours > 0 and rem > 0 then return string.format("%dh %dm", hours, rem) end
+    if hours > 0 then return string.format("%dh", hours) end
+    return string.format("%dm", minutes)
+end
+
+--- Seconds of time left only when some earlier step already stored them
+-- on the book or in its sidecar (`time_left`, or `stats.time_left`).
+-- This does not estimate a duration from page statistics.
+function Core.knownTimeLeft(book, sidecar)
+    local function positive(v)
+        v = tonumber(v)
+        if v and v > 0 then return v end
+    end
+    if type(book) == "table" then
+        local t = positive(book.time_left)
+        if t then return t end
+    end
+    if type(sidecar) == "table" then
+        local t = positive(sidecar.time_left)
+        if t then return t end
+        local stats = sidecar.stats
+        if type(stats) == "table" then
+            t = positive(stats.time_left)
+            if t then return t end
+        end
+    end
+    return nil
+end
+
+--- Percent, and the time-left text when `book.time_left` is already set.
+function Core.progressParts(book)
+    local left = nil
+    if type(book) == "table" then left = Core.timeLeftText(book.time_left) end
+    return Core.progressPercent(book), left
+end
+
+--- "37%" or "37% · 3h 39m left". `pct` is a whole number, `left` a duration.
+function Core.progressLine(pct, left)
+    local text = string.format("%d%%", tonumber(pct) or 0)
+    if type(left) == "string" and left ~= "" then
+        return text .. " \u{00B7} " .. left .. " left"
+    end
+    return text
+end
+
+local HTML_ENTITIES = {
+    amp = "&", lt = "<", gt = ">", quot = "\"", apos = "'", nbsp = " ",
+    mdash = "\u{2014}", ndash = "\u{2013}", hellip = "\u{2026}",
+    rsquo = "\u{2019}", lsquo = "\u{2018}", rdquo = "\u{201D}", ldquo = "\u{201C}",
+}
+
+local function utf8char(cp)
+    if not cp or cp < 0 or cp > 0x10FFFF or (cp >= 0xD800 and cp <= 0xDFFF) then
+        return ""
+    end
+    if cp < 0x80 then return string.char(cp) end
+    if cp < 0x800 then
+        return string.char(0xC0 + math.floor(cp / 64), 0x80 + (cp % 64))
+    end
+    if cp < 0x10000 then
+        return string.char(
+            0xE0 + math.floor(cp / 4096),
+            0x80 + (math.floor(cp / 64) % 64),
+            0x80 + (cp % 64))
+    end
+    return string.char(
+        0xF0 + math.floor(cp / 262144),
+        0x80 + (math.floor(cp / 4096) % 64),
+        0x80 + (math.floor(cp / 64) % 64),
+        0x80 + (cp % 64))
+end
+
+--- Cut a `<tag ...> ... </tag>` block out, case-insensitively, newlines included.
+local function stripBlock(s, tag)
+    local lower = s:lower()
+    local open, close = "<" .. tag, "</" .. tag
+    local out, i = {}, 1
+    while true do
+        local a, b = lower:find(open, i, true)
+        if not a then
+            out[#out + 1] = s:sub(i)
+            break
+        end
+        -- only a real tag, not "<tagline"
+        local after = lower:sub(b + 1, b + 1)
+        if after ~= "" and after ~= ">" and after ~= " " and after ~= "/" and after ~= "\n" and after ~= "\t" then
+            out[#out + 1] = s:sub(i, b)
+            i = b + 1
+        else
+            out[#out + 1] = s:sub(i, a - 1)
+            local c = lower:find(close, b + 1, true)
+            if not c then break end
+            local gt = s:find(">", c + #close - 1, true)
+            i = gt and (gt + 1) or (c + #close)
+        end
+    end
+    return table.concat(out)
+end
+
+--- Plain text for a blurb. HTML tags are removed, common entities decoded,
+-- and paragraphs kept as blank lines. Nil when nothing is left.
+function Core.plainDescription(raw)
+    if type(raw) ~= "string" then return nil end
+    local s = raw:gsub("\r\n", "\n"):gsub("\r", "\n")
+    local function dropComments(src)
+        local out, i = {}, 1
+        while true do
+            local a = src:find("<!%-%-", i)
+            if not a then
+                out[#out + 1] = src:sub(i)
+                break
+            end
+            out[#out + 1] = src:sub(i, a - 1)
+            local b = src:find("%-%->", a + 4)
+            if not b then break end
+            i = b + 3
+        end
+        return table.concat(out)
+    end
+    s = dropComments(s)
+    s = stripBlock(s, "script")
+    s = stripBlock(s, "style")
+    s = s:gsub("<[Bb][Rr][^>]*>", "\n")
+    s = s:gsub("</[Pp]%s*>", "\n\n")
+    s = s:gsub("</[Dd][Ii][Vv]%s*>", "\n")
+    s = s:gsub("</[Hh][1-6]%s*>", "\n\n")
+    s = s:gsub("</[Ll][Ii]%s*>", "\n")
+    s = s:gsub("</[Tt][Rr]%s*>", "\n")
+    s = s:gsub("<[^>]+>", "")
+    s = s:gsub("&#[Xx](%x+);", function(hex)
+        return utf8char(tonumber(hex, 16))
+    end)
+    s = s:gsub("&#(%d+);", function(n)
+        return utf8char(tonumber(n))
+    end)
+    s = s:gsub("&(%a+);", function(name)
+        return HTML_ENTITIES[name] or HTML_ENTITIES[name:lower()] or ("&" .. name .. ";")
+    end)
+    local lines, blank = {}, 0
+    local out = {}
+    for line in (s .. "\n"):gmatch("(.-)\n") do
+        line = trim(line:gsub("%s+", " "))
+        lines[#lines + 1] = line
+    end
+    for _, line in ipairs(lines) do
+        if line == "" then
+            blank = blank + 1
+            if blank == 1 and #out > 0 then out[#out + 1] = "" end
+        else
+            blank = 0
+            out[#out + 1] = line
+        end
+    end
+    while out[#out] == "" do out[#out] = nil end
+    if #out == 0 then return nil end
+    return table.concat(out, "\n")
+end
+
+--- First non-empty plain description in `list` (already in source order).
+function Core.firstDescription(list)
+    if type(list) ~= "table" then return nil end
+    for i = 1, #list do
+        local plain = Core.plainDescription(list[i])
+        if plain then return plain end
+    end
+    return nil
+end
+
+--- Calibre / doc-settings text first; the book file's own text only fills
+-- a gap. Neither is stored on the library index.
+function Core.descriptionFrom(candidates, file_text)
+    return Core.firstDescription(candidates) or Core.firstDescription({ file_text })
+end
+
+--- `{ [absolute path] = comments }`. Comments stay out of `calibreIndex`
+-- so the grid's cache never carries blurbs.
+function Core.calibreComments(entries, base_dir)
+    local map = {}
+    base_dir = (base_dir or ""):gsub("/+$", "")
+    if type(entries) ~= "table" then return map end
+    for _, e in ipairs(entries) do
+        local lpath = type(e) == "table" and plain(e.lpath)
+        if type(lpath) == "string" and lpath ~= "" then
+            local path = lpath:sub(1, 1) == "/" and lpath or (base_dir .. "/" .. lpath)
+            local text = plain(e.comments)
+            if type(text) ~= "string" or text == "" then text = plain(e.description) end
+            if type(text) == "string" and text ~= "" then map[path] = text end
+        end
+    end
+    return map
+end
+
+--- Collection display names that contain `path`.
+function Core.collectionNames(path, groups)
+    local names = {}
+    if type(path) ~= "string" then return names end
+    for _, g in ipairs(groups or {}) do
+        if type(g) == "table" and type(g.name) == "string" and not g.unsorted then
+            for _, b in ipairs(g.books or {}) do
+                local p = type(b) == "string" and b or (type(b) == "table" and b.path)
+                if p == path then
+                    names[#names + 1] = g.name
+                    break
+                end
+            end
+        end
+    end
+    return names
+end
+
+--- The shelf whose name matches `name` (case-insensitive). Unsorted is never
+-- a match. `lower` defaults to string.lower.
+function Core.shelfMatch(name, groups, lower_fn)
+    lower_fn = lower_fn or string.lower
+    if type(name) ~= "string" or name == "" then return nil end
+    local key = lower_fn(name)
+    for _, g in ipairs(groups or {}) do
+        if type(g) == "table" and not g.unsorted and type(g.name) == "string" and lower_fn(g.name) == key then
+            return g
+        end
+    end
+    return nil
+end
+
+--- Pack item widths into rows. A single item wider than `max_w` stays on
+-- its own row. Returns a list of index lists.
+function Core.packRows(widths, max_w, gap)
+    local rows, row, used = {}, {}, 0
+    gap = gap or 0
+    max_w = max_w or 0
+    for i, w in ipairs(widths or {}) do
+        local need = w + (#row > 0 and gap or 0)
+        if #row > 0 and used + need > max_w then
+            rows[#rows + 1] = row
+            row, used = { i }, w
+        else
+            row[#row + 1] = i
+            used = used + need
+        end
+    end
+    if #row > 0 then rows[#rows + 1] = row end
+    return rows
+end
+
+--- Two columns when a cover and a full description both fit. Narrow
+-- screens, and landscape screens too short for that cover, use one column.
+-- Sizes are the content box inside the card's margin, padding and border.
+function Core.detailsLayout(w, h)
+    w = math.floor(tonumber(w) or 0)
+    h = math.floor(tonumber(h) or 0)
+    if w < 1 then w = 1 end
+    if h < 1 then h = 1 end
+    local margin = math.max(8, math.floor(math.min(w, h) * 0.015))
+    local pad = math.max(8, margin)
+    local gap = math.max(8, math.floor(margin * 0.8))
+    local border = 2
+    local inner_w = w - 2 * margin - 2 * pad - 2 * border
+    local inner_h = h - 2 * margin - 2 * pad - 2 * border
+    if inner_w < 1 then inner_w = 1 end
+    if inner_h < 1 then inner_h = 1 end
+    local button_h = math.min(64, math.max(44, math.floor(h * 0.055)))
+    local body_h = inner_h - button_h - gap
+    if body_h < 1 then body_h = 1 end
+
+    local min_cover_w, min_text_w, min_cover_h = 160, 300, 200
+    local cover_w = math.floor(inner_w * 0.34)
+    local text_w = inner_w - cover_w - gap
+    local cover_h = math.floor(cover_w * 3 / 2)
+    local max_cover_h = math.floor(body_h * 0.72)
+    if max_cover_h < 1 then max_cover_h = 1 end
+    if cover_h > max_cover_h then
+        cover_h = max_cover_h
+        cover_w = math.floor(cover_h * 2 / 3)
+        text_w = inner_w - cover_w - gap
+    end
+    local columns = 1
+    if inner_w >= 880 and cover_w >= min_cover_w and text_w >= min_text_w
+            and cover_h >= min_cover_h and body_h >= cover_h + button_h then
+        columns = 2
+    end
+    if columns == 1 then
+        cover_h = math.max(1, math.floor(body_h * 0.34))
+        cover_w = math.floor(cover_h * 2 / 3)
+        local max_w = math.max(1, math.floor(inner_w * 0.46))
+        if cover_w > max_w then
+            cover_w = max_w
+            cover_h = math.floor(cover_w * 3 / 2)
+        end
+        if cover_w < 1 then cover_w = 1 end
+        if cover_w > inner_w then cover_w = inner_w end
+        text_w = inner_w
+    end
+    return {
+        columns = columns,
+        margin = margin,
+        pad = pad,
+        gap = gap,
+        border = border,
+        button_h = button_h,
+        cover_w = cover_w,
+        cover_h = cover_h,
+        text_w = text_w,
+        body_h = body_h,
+        inner_w = inner_w,
+        inner_h = inner_h,
+    }
+end
+
+--- Which way a tap or swipe turns the description, or nil when it does not.
+-- North / the right half go forward; south / the left half go back.
+-- `area` is `{ x, y, w, h }` in screen coordinates.
+function Core.descriptionPageTurn(gesture, area)
+    if type(gesture) ~= "table" or type(area) ~= "table" then return nil end
+    local ax, ay = area.x or 0, area.y or 0
+    local aw, ah = area.w or 0, area.h or 0
+    local x, y = gesture.x, gesture.y
+    if x == nil or y == nil then return nil end
+    if x < ax or y < ay or x >= ax + aw or y >= ay + ah then return nil end
+    if gesture.kind == "swipe" then
+        if gesture.direction == "north" then return 1 end
+        if gesture.direction == "south" then return -1 end
+        return nil
+    end
+    if gesture.kind == "tap" then
+        if x >= ax + aw / 2 then return 1 end
+        return -1
+    end
+    return nil
+end
+
+--- Clamp a page turn. One page stays put. `dir` is 1 or -1.
+function Core.turnPage(page, pages, dir)
+    page = tonumber(page) or 1
+    pages = tonumber(pages) or 1
+    if pages < 1 then pages = 1 end
+    if page < 1 then page = 1 end
+    if page > pages then page = pages end
+    dir = tonumber(dir) or 0
+    if pages <= 1 or dir == 0 then return page end
+    local n = page + dir
+    if n < 1 then return 1 end
+    if n > pages then return pages end
+    return n
+end
+
 return Core

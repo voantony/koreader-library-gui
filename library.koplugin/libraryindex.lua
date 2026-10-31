@@ -294,4 +294,47 @@ function Index:recordFor(path)
     return book
 end
 
+--- Raw description strings for one book, in the same order the index trusts
+-- for other metadata: Calibre comments, then the sidecar's doc_props, then
+-- BookInfoManager. Nothing is written onto the book or the disk cache.
+function Index:descriptionCandidates(path)
+    local list = {}
+    local files = self.calibre_files
+    if not files or #files == 0 then
+        files = self:findCalibreFiles()
+    end
+    if self.opts.calibre_load then
+        for _, f in ipairs(files or {}) do
+            local ok, entries = pcall(self.opts.calibre_load, f.path)
+            if ok then
+                local comment = Core.calibreComments(entries, f.dir)[path]
+                if comment then
+                    list[#list + 1] = comment
+                    break
+                end
+            end
+        end
+    end
+    local data = self:readSidecar(self:sidecarFile(path))
+    local props = type(data) == "table" and data.doc_props
+    if type(props) == "table" and type(props.description) == "string" then
+        list[#list + 1] = props.description
+    end
+    local bim = self.opts.bim
+    if bim and bim.getBookInfo then
+        local ok, info = pcall(bim.getBookInfo, bim, path, false)
+        if ok and type(info) == "table" and type(info.description) == "string" then
+            list[#list + 1] = info.description
+        end
+    end
+    return list
+end
+
+--- Seconds of time left already stored for this book. Does not estimate one.
+function Index:knownTimeLeft(path, book)
+    local t = Core.knownTimeLeft(book)
+    if t then return t end
+    return Core.knownTimeLeft(nil, self:readSidecar(self:sidecarFile(path)))
+end
+
 return Index
