@@ -7,9 +7,10 @@ Environment:
   GUIPROBE_TAG     optional filename prefix
 
 Scenarios
-  smoke   one shot of the library, to prove the harness
-  footer  page label "3 / 12", the Go to page dialog, and (when the next
-          arrow has a long-press) the last page after that long-press
+  smoke    one shot of the library, to prove the harness
+  footer   page label "3 / 12", the Go to page dialog, and (when the next
+           arrow has a long-press) the last page after that long-press
+  scrubber the A–Z strip at rest, then mid-drag with the letter bubble
 ]]
 
 local Device = require("device")
@@ -316,6 +317,59 @@ scenarios.footer = function()
             local label = view.page_label and findText(view.page_label) or ""
             P("AFTER JUMP", label, "page", view.page, "pages", view.pages)
             shot("footer-jump-last")
+        end)
+    end)
+end
+
+scenarios.scrubber = function()
+    whenLibrary(function()
+        q(0.4, function()
+            dismissNotices()
+            local view = V()
+            view.show_continue = false
+            if view.show_scrubber == false then view.show_scrubber = true end
+            view:resort("title")
+        end)
+        q(0.9, function()
+            dismissNotices()
+            UIManager:forceRePaint()
+            local view = V()
+            local s = view.scrubber
+            if not s or not s.dimen or not s.dimen.w or s.dimen.w < 1 then
+                state.ok = false
+                P("FAIL no scrubber", "sort", view.sort, "mode", view.view_mode)
+                return
+            end
+            P("SCRUBBER", "x", s.dimen.x, "y", s.dimen.y, "w", s.dimen.w, "h", s.dimen.h,
+                "pages", view.pages, "anchor", tostring(s.anchor))
+            if s.dimen.x + s.dimen.w > Screen:getWidth() + 1 then
+                state.ok = false
+                P("FAIL strip past the screen edge")
+            end
+            shot("scrubber-idle")
+        end)
+        q(0.4, function()
+            local view = V()
+            local s = view.scrubber
+            if not s or not s.dimen then
+                state.ok = false
+                P("FAIL scrubber gone before drag")
+                return
+            end
+            UIManager:forceRePaint()
+            -- About halfway down: a letter in the middle of the alphabet.
+            local y = s.dimen.y + math.floor(s.dimen.h * 0.48)
+            local x = s.dimen.x + math.floor(s.dimen.w / 2)
+            s:dragTo({ x = x, y = y })
+            if s.flushDrag then s:flushDrag() end
+            UIManager:forceRePaint()
+            P("BUBBLE", tostring(s.bubble_letter), "page", view.page, "of", view.pages,
+                "bubble", s.bubble and (s.bubble.w .. "x" .. s.bubble.h) or "none")
+            if not s.bubble_letter or s.bubble_letter == "" then
+                state.ok = false
+                P("FAIL no bubble letter")
+            end
+            shot("scrubber-drag")
         end)
     end)
 end

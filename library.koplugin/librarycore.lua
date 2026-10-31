@@ -2584,4 +2584,274 @@ function Core.turnPage(page, pages, dir)
     return n
 end
 
+
+----------------------------------------------------------------------------
+-- A–Z scrubber and the footer's page controls
+----------------------------------------------------------------------------
+
+-- 10 mm, and at least 120 px once the screen is around 300 dpi (a Kindle
+-- Colorsoft). Lower densities keep the same physical size.
+function Core.pageHitPx(dpi)
+    dpi = tonumber(dpi)
+    if not dpi or dpi ~= dpi or dpi < 1 then dpi = 167 end
+    local px = math.floor(10 * dpi / 25.4 + 0.5)
+    if dpi >= 290 then px = math.max(px, 120) end
+    if px < 1 then px = 1 end
+    return px
+end
+
+--- Width of the letter strip. Same 10 mm grab as a page button: the letters
+-- themselves stay a slim column inside it, and the grid gives up this width
+-- so covers never sit under the strip.
+function Core.scrubberWidth(dpi)
+    return Core.pageHitPx(dpi)
+end
+
+--- Grid width once `strip_w` has been reserved on the right. Always leaves
+-- at least half the screen (or 1 px) for the covers.
+function Core.gridContentWidth(width, strip_w)
+    width = math.floor(tonumber(width) or 0)
+    strip_w = math.floor(tonumber(strip_w) or 0)
+    if width < 1 then width = 1 end
+    if strip_w < 1 then return width end
+    local min_grid = math.max(1, math.min(width, math.floor(width * 0.5)))
+    if width - strip_w < min_grid then strip_w = width - min_grid end
+    return width - strip_w
+end
+
+--- The A–Z strip: on unless turned off.
+function Core.showScrubber(settings)
+    return not (settings and settings.show_scrubber == false)
+end
+
+-- "#" then A–Z. Digits and symbols sort before letters, so "#" is the top slot.
+Core.SCRUBBER_LETTERS = {
+    "#", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+    "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+}
+
+-- Accented Latin letters folded onto A–Z, so "Émile" lives under E. Both
+-- cases are listed: Lua's string.lower does not touch UTF-8.
+local SCRUBBER_FOLD = {
+    ["à"]="a", ["á"]="a", ["â"]="a", ["ä"]="a", ["ã"]="a", ["å"]="a", ["ā"]="a", ["ă"]="a", ["ą"]="a", ["æ"]="a",
+    ["À"]="a", ["Á"]="a", ["Â"]="a", ["Ä"]="a", ["Ã"]="a", ["Å"]="a", ["Ā"]="a", ["Ă"]="a", ["Ą"]="a", ["Æ"]="a",
+    ["ç"]="c", ["ć"]="c", ["č"]="c", ["ĉ"]="c", ["Ç"]="c", ["Ć"]="c", ["Č"]="c", ["Ĉ"]="c",
+    ["è"]="e", ["é"]="e", ["ê"]="e", ["ë"]="e", ["ē"]="e", ["ė"]="e", ["ę"]="e", ["ě"]="e",
+    ["È"]="e", ["É"]="e", ["Ê"]="e", ["Ë"]="e", ["Ē"]="e", ["Ė"]="e", ["Ę"]="e", ["Ě"]="e",
+    ["ì"]="i", ["í"]="i", ["î"]="i", ["ï"]="i", ["ī"]="i", ["į"]="i",
+    ["Ì"]="i", ["Í"]="i", ["Î"]="i", ["Ï"]="i", ["Ī"]="i", ["Į"]="i",
+    ["ñ"]="n", ["ń"]="n", ["ň"]="n", ["Ñ"]="n", ["Ń"]="n", ["Ň"]="n",
+    ["ò"]="o", ["ó"]="o", ["ô"]="o", ["ö"]="o", ["õ"]="o", ["ø"]="o", ["ō"]="o", ["ő"]="o", ["œ"]="o",
+    ["Ò"]="o", ["Ó"]="o", ["Ô"]="o", ["Ö"]="o", ["Õ"]="o", ["Ø"]="o", ["Ō"]="o", ["Ő"]="o", ["Œ"]="o",
+    ["ù"]="u", ["ú"]="u", ["û"]="u", ["ü"]="u", ["ū"]="u", ["ů"]="u", ["ű"]="u",
+    ["Ù"]="u", ["Ú"]="u", ["Û"]="u", ["Ü"]="u", ["Ū"]="u", ["Ů"]="u", ["Ű"]="u",
+    ["ý"]="y", ["ÿ"]="y", ["Ý"]="y", ["Ÿ"]="y",
+    ["ś"]="s", ["š"]="s", ["ş"]="s", ["ß"]="s", ["Ś"]="s", ["Š"]="s", ["Ş"]="s",
+    ["ź"]="z", ["ž"]="z", ["ż"]="z", ["Ź"]="z", ["Ž"]="z", ["Ż"]="z",
+    ["ł"]="l", ["Ł"]="l", ["đ"]="d", ["Đ"]="d", ["ğ"]="g", ["Ğ"]="g", ["ř"]="r", ["Ř"]="r",
+}
+
+local function utf8Char(s)
+    local b = s:byte(1)
+    if not b then return "" end
+    local len = 1
+    if b >= 0xF0 then len = 4
+    elseif b >= 0xE0 then len = 3
+    elseif b >= 0xC0 then len = 2
+    end
+    if len > #s then len = #s end
+    return s:sub(1, len)
+end
+
+--- "#" or "A"–"Z" for the first character of a sort key. A leading space is
+-- skipped. Digits, symbols and letters outside A–Z (after accent folding)
+-- are "#".
+function Core.scrubberBucket(key)
+    if key == Core.UNKNOWN or type(key) ~= "string" then return "#" end
+    local s = key:gsub("^%s+", "")
+    if s == "" then return "#" end
+    local c = utf8Char(s)
+    local folded
+    if #c == 1 then
+        local l = c:lower()
+        if l:match("^[a-z]$") then folded = l end
+    else
+        folded = SCRUBBER_FOLD[c]
+    end
+    if type(folded) == "string" and folded:match("^[a-z]$") then return folded:upper() end
+    return "#"
+end
+
+--- The string the strip sorts by: title, the first author, the series name,
+-- or a shelf's own name.
+function Core.scrubberItemKey(item, mode)
+    if type(item) ~= "table" then return "" end
+    if mode == "name" then
+        return type(item.name) == "string" and item.name or ""
+    end
+    if mode == "author" then
+        local authors = item.authors
+        if type(authors) == "table" then
+            local a = authors[1]
+            if type(a) == "string" and a ~= "" then return a end
+        elseif type(authors) == "string" and authors ~= "" then
+            return authors
+        end
+        return Core.UNKNOWN
+    end
+    if mode == "series" then
+        if type(item.series) == "string" and item.series ~= "" then return item.series end
+        return Core.UNKNOWN
+    end
+    if type(item.title) == "string" and item.title ~= "" then return item.title end
+    if type(item.name) == "string" then return item.name end
+    return ""
+end
+
+--- Which strip to show, or nil when the list is not alphabetical.
+-- Title and author use that field. Series (a name sort) uses the series
+-- name. Date, last-read and size stay hidden. Inside a series the books are
+-- in reading order, so the strip hides there too. Author, series, collection
+-- and genre shelves are already A–Z: they use each shelf's name.
+-- `state.enabled == false` forces it off.
+function Core.scrubberMode(state)
+    state = type(state) == "table" and state or {}
+    if state.enabled == false then return nil end
+    if state.in_series then return nil end
+    if state.kind == "groups" then
+        local tab = state.tab
+        if tab == "authors" or tab == "series" or tab == "collections" or tab == "genres" then
+            return "name"
+        end
+        return nil
+    end
+    if state.kind ~= nil and state.kind ~= "books" then return nil end
+    if state.sort == "title" or state.sort == "author" or state.sort == "series" then
+        return state.sort
+    end
+    return nil
+end
+
+--- First page (1-based) whose item falls under each letter.
+-- `items` is already in the order on screen. `per_page` is how many of them
+-- one page holds. Letters with no item are absent from `page` and false in
+-- `active`.
+function Core.scrubberIndex(items, per_page, key_fn)
+    per_page = math.floor(tonumber(per_page) or 1)
+    if per_page < 1 then per_page = 1 end
+    if type(key_fn) ~= "function" then
+        key_fn = function(item) return Core.scrubberItemKey(item, "title") end
+    end
+    local page_of = {}
+    if type(items) == "table" then
+        for i, item in ipairs(items) do
+            local letter = Core.scrubberBucket(key_fn(item))
+            if page_of[letter] == nil then
+                page_of[letter] = math.floor((i - 1) / per_page) + 1
+            end
+        end
+    end
+    local active = {}
+    for _, letter in ipairs(Core.SCRUBBER_LETTERS) do
+        active[letter] = page_of[letter] ~= nil
+    end
+    return { letters = Core.SCRUBBER_LETTERS, page = page_of, active = active }
+end
+
+--- Page to open for `letter`, or nil when that letter has nothing under it.
+function Core.scrubberTargetPage(index, letter)
+    if type(index) ~= "table" or type(letter) ~= "string" then return nil end
+    if not (index.active and index.active[letter]) then return nil end
+    local page = index.page and index.page[letter]
+    if type(page) ~= "number" or page < 1 then return nil end
+    return page
+end
+
+--- Which letter a finger at screen `y` is on. Slots share the strip height
+-- equally. Nil when the point is outside the strip.
+function Core.scrubberLetterAt(y, strip_y, strip_h, letters)
+    letters = letters or Core.SCRUBBER_LETTERS
+    local n = #letters
+    y = tonumber(y)
+    strip_y = tonumber(strip_y) or 0
+    strip_h = tonumber(strip_h) or 0
+    if not y or n < 1 or strip_h < 1 then return nil end
+    local rel = y - strip_y
+    if rel < 0 or rel >= strip_h then return nil end
+    local i = math.floor(rel * n / strip_h) + 1
+    if i < 1 then i = 1 end
+    if i > n then i = n end
+    return letters[i], i
+end
+
+--- The big letter shown while a finger is down, centered on the screen.
+-- About 22 mm, at least 220 px at 300 dpi, and never most of the screen.
+function Core.scrubberBubbleRect(screen_w, screen_h, dpi)
+    screen_w = math.floor(tonumber(screen_w) or 0)
+    screen_h = math.floor(tonumber(screen_h) or 0)
+    if screen_w < 1 then screen_w = 1 end
+    if screen_h < 1 then screen_h = 1 end
+    dpi = tonumber(dpi)
+    if not dpi or dpi ~= dpi or dpi < 1 then dpi = 300 end
+    local side = math.floor(22 * dpi / 25.4 + 0.5)
+    if dpi >= 290 then side = math.max(side, 220) end
+    local cap = math.floor(math.min(screen_w, screen_h) * 0.42)
+    if cap < 1 then cap = 1 end
+    if side > cap then side = cap end
+    if side < 1 then side = 1 end
+    return {
+        x = math.floor((screen_w - side) / 2),
+        y = math.floor((screen_h - side) / 2),
+        w = side,
+        h = side,
+    }
+end
+
+local function scrubRect(r)
+    if type(r) ~= "table" then return nil end
+    local w = math.floor(tonumber(r.w) or 0)
+    local h = math.floor(tonumber(r.h) or 0)
+    if w < 1 or h < 1 then return nil end
+    return {
+        x = math.floor(tonumber(r.x) or 0),
+        y = math.floor(tonumber(r.y) or 0),
+        w = w,
+        h = h,
+    }
+end
+
+local function sameRect(a, b)
+    return a and b and a.x == b.x and a.y == b.y and a.w == b.w and a.h == b.h
+end
+
+--- Rectangles a drag step may push to the panel: the strip, the bubble, and
+-- the previous bubble when it sat somewhere else (so the old one is erased).
+-- Nothing else — not the grid, not the footer.
+function Core.scrubberRefreshRegions(strip, bubble, previous)
+    local out = {}
+    local s = scrubRect(strip)
+    if s then out[#out + 1] = s end
+    local prev = scrubRect(previous)
+    local bub = scrubRect(bubble)
+    if prev and not sameRect(prev, bub) then out[#out + 1] = prev end
+    if bub then out[#out + 1] = bub end
+    return out
+end
+
+--- While the finger is down: a fast refresh of just those rectangles.
+function Core.scrubberDragRefresh(strip, bubble, previous)
+    return { mode = "fast", regions = Core.scrubberRefreshRegions(strip, bubble, previous) }
+end
+
+--- When the finger lifts. A page change repaints the results once ("ui",
+-- the same refresh a page turn already uses). No page change clears the
+-- bubble and the strip only. A full-screen flash is not requested here.
+function Core.scrubberReleaseRefresh(page_changed, body, strip, bubble)
+    if page_changed then
+        local b = scrubRect(body)
+        return { mode = "ui", regions = b and { b } or {} }
+    end
+    return { mode = "ui", regions = Core.scrubberRefreshRegions(strip, nil, bubble) }
+end
+
 return Core
