@@ -1,5 +1,7 @@
 # Library GUI for KOReader
 
+**A Kindle-style home screen for KOReader users: covers, typo-tolerant search, Authors, Series and Genres, installed as a plugin.**
+
 Library GUI (`library.koplugin`) is a KOReader plugin that replaces the file browser with a library screen that looks and works more like the Kindle's own home screen: book covers with reading progress, a search bar with the clock and battery at the top, tabs for Books, Collections, Authors and Series, the menu and Resume buttons in the footer, and a Controls panel you pull down from the top-right corner.
 
 It sits alongside KOReader's file browser, History and Collections. It never moves or renames your books, and closing it takes you back to the normal file browser.
