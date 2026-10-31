@@ -748,12 +748,17 @@ function Library:showBookDetails(book, view, opts)
         time_left = time_left,
         description = self:loadDescription(book),
     }
-    -- An author with only this book is plain text: their shelf would hold just it.
+    -- A name whose shelf would hold only this book is plain text, not a link.
     local all = (view and view.all_books) or (shared.index and shared.index.books)
-    info.author_links = Core.authorLinks(info.authors, all, self.collate,
-        function(x) return util.stringLower and util.stringLower(x) or x:lower() end)
-    local ok_names, names = pcall(self.collectionNames, self, book.path)
-    if ok_names and type(names) == "table" then info.collections = names end
+    local function low(x) return util.stringLower and util.stringLower(x) or x:lower() end
+    info.author_links = Core.authorLinks(info.authors, all, self.collate, low)
+    info.series_link = Core.seriesLink(info.series, all, self.collate, low)
+    info.genre_links = Core.genreLinks(info.genres, all, self.collate, low)
+    local ok_groups, colls = pcall(self.getCollections, self)
+    if ok_groups and type(colls) == "table" then
+        info.collections = Core.collectionNames(book.path, colls)
+        info.collection_links = Core.shelfLinks(info.collections, colls, low)
+    end
     local Details = require("librarydetails")
     local Tiles = require("librarytile")
     local Covers = require("librarycovers")

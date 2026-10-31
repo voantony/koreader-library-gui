@@ -100,6 +100,17 @@ function Link:onTapLink()
     return true
 end
 
+--- A name with nothing to open (its shelf holds only this book): plain
+-- text, the same height as a Link so rows stay aligned.
+local function plainName(text, size, italic, max_width)
+    local f = italic and face("NotoSans-Italic.ttf", size) or face("cfont", size)
+    return VerticalGroup:new{
+        align = "left",
+        TextWidget:new{ text = text, face = f, fgcolor = BLACK, max_width = max_width },
+        VerticalSpan:new{ width = math.max(1, Size.line.thin) },
+    }
+end
+
 ----------------------------------------------------------------------------
 -- Genre or collection chip. No section heading.
 ----------------------------------------------------------------------------
@@ -127,7 +138,7 @@ function Chip:init()
         padding_right = pad_x,
         padding_top = pad_y,
         padding_bottom = pad_y,
-        bordersize = Size.border.thin,
+        bordersize = self.plain and 0 or Size.border.thin, -- plain: only this book, nothing to open
         color = BLACK,
         background = WHITE,
         radius = radius,
@@ -135,12 +146,14 @@ function Chip:init()
     }
     local s = self[1]:getSize()
     self.dimen = Geom:new{ x = 0, y = 0, w = s.w, h = s.h }
+    if self.plain then return end
     self.ges_events = {
         TapChip = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } },
     }
 end
 
 function Chip:onTapChip()
+    if self.plain then return false end
     if self.on_tap then self.on_tap(self.kind, self.name) end
     return true
 end
@@ -458,14 +471,15 @@ end
 
 function Details:buildChips(max_w, max_h)
     local items = {}
-    for _, name in ipairs(self.info.genres or {}) do
+    local gl, cl = self.info.genre_links or {}, self.info.collection_links or {}
+    for i, name in ipairs(self.info.genres or {}) do
         if type(name) == "string" and name ~= "" then
-            items[#items + 1] = { kind = "genres", name = name }
+            items[#items + 1] = { kind = "genres", name = name, plain = gl[i] == false }
         end
     end
-    for _, name in ipairs(self.info.collections or {}) do
+    for i, name in ipairs(self.info.collections or {}) do
         if type(name) == "string" and name ~= "" then
-            items[#items + 1] = { kind = "collections", name = name }
+            items[#items + 1] = { kind = "collections", name = name, plain = cl[i] == false }
         end
     end
     if #items == 0 then return nil end
@@ -476,7 +490,8 @@ function Details:buildChips(max_w, max_h)
             kind = item.kind,
             name = item.name,
             max_width = max_w,
-            on_tap = self.on_shelf,
+            plain = item.plain,
+            on_tap = not item.plain and self.on_shelf or nil,
         }
         widgets[i] = chip
         widths[i] = chip:getSize().w
@@ -510,17 +525,7 @@ function Details:buildAuthors(max_w)
     for i, name in ipairs(names) do
         local link
         if links and links[i] == false then
-            -- only this book by them: plain text, nothing to tap
-            link = VerticalGroup:new{
-                align = "left",
-                TextWidget:new{
-                    text = name,
-                    face = face("NotoSans-Italic.ttf", 18),
-                    fgcolor = BLACK,
-                    max_width = math.max(1, max_w - 16),
-                },
-                vgap(math.max(1, Size.line.thin)), -- same height as a link's underline
-            }
+            link = plainName(name, 18, true, math.max(1, max_w - 16))
         else
             link = Link:new{
                 text = name,
@@ -562,6 +567,7 @@ function Details:buildSeries(max_w)
     local line = self.info.series_line
     if type(line) ~= "string" or line == "" then return nil end
     local series = self.info.series
+    if self.info.series_link == false then return plainName(line, 16, false, max_w) end
     return Link:new{
         text = line,
         size = 16,

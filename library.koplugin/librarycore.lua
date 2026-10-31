@@ -1911,27 +1911,51 @@ function Core.authorNames(book)
     return out
 end
 
---- Which of `names` get a tappable link on the details card: an author
--- only links when the Authors tab would show them with 2+ books. Uses the
--- same grouping as the Authors tab and the same name match as the tap
--- (`Core.shelfMatch`), so the counts agree. With no books known yet (the
--- index is not built), every name stays tappable.
-function Core.authorLinks(names, books, collate, lower_fn)
+--- Which of `names` get a tappable link on the details card: a name only
+-- links when its shelf in `groups` holds 2+ books, so a tap never opens a
+-- list of just this book. Names are found the way a tap finds them
+-- (`Core.shelfMatch`). With no groups known yet (index not built), every
+-- name stays tappable.
+function Core.shelfLinks(names, groups, lower_fn)
     local out = {}
     if type(names) ~= "table" then return out end
-    if type(books) ~= "table" or #books == 0 then
-        for i = 1, #names do out[i] = true end
-        return out
-    end
-    local groups = {}
-    for _, g in ipairs(Core.group(books, "author", collate)) do
-        if g.key ~= Core.UNKNOWN then groups[#groups + 1] = { name = g.key, books = g.books } end
-    end
     for i, name in ipairs(names) do
-        local g = Core.shelfMatch(name, groups, lower_fn)
-        out[i] = g ~= nil and #g.books >= 2
+        if type(groups) ~= "table" then
+            out[i] = true
+        else
+            local g = Core.shelfMatch(name, groups, lower_fn)
+            out[i] = g ~= nil and type(g.books) == "table" and #g.books >= 2
+        end
     end
     return out
+end
+
+--- Author or series shelves the way the Authors / Series tabs build them.
+-- Nil when no books are known yet.
+function Core.tabShelves(books, grouping, collate)
+    if type(books) ~= "table" or #books == 0 then return nil end
+    local groups = {}
+    for _, g in ipairs(Core.group(books, grouping, collate)) do
+        if g.key ~= Core.UNKNOWN then groups[#groups + 1] = { name = g.key, books = g.books } end
+    end
+    return groups
+end
+
+--- Author links on the details card: counted like the Authors tab.
+function Core.authorLinks(names, books, collate, lower_fn)
+    return Core.shelfLinks(names, Core.tabShelves(books, "author", collate), lower_fn)
+end
+
+--- Is the series line a link? Counted like the Series tab.
+function Core.seriesLink(series, books, collate, lower_fn)
+    if type(series) ~= "string" or series == "" then return false end
+    return Core.shelfLinks({ series }, Core.tabShelves(books, "series", collate), lower_fn)[1]
+end
+
+--- Genre chips: counted like the Genres view (same spelling merge).
+function Core.genreLinks(names, books, collate, lower_fn)
+    if type(books) ~= "table" or #books == 0 then return Core.shelfLinks(names, nil) end
+    return Core.shelfLinks(names, Core.genreGroups(books, collate, lower_fn), lower_fn)
 end
 
 --- "Sherlock Holmes #5", or just the series name. Nil when there is none.
