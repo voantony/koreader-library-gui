@@ -24,7 +24,7 @@ It sits alongside KOReader's file browser, History and Collections. It never mov
 |---|---|---|
 | ![Book details card with cover, progress, Continue, genre chips and the full description](docs/screenshots/13-details-card.png) | ![Book details card for a book with no description](docs/screenshots/14-details-card-none.png) | ![The same card opened from the reader menu](docs/screenshots/15-details-card-reader.png) |
 
-| Search, clock and footer | Clock and battery off | Settings in the ☰ menu |
+| Search, clock and footer (new in 0.3.4) | Clock and battery off | Settings in the ☰ menu |
 |---|---|---|
 | ![Books tab: search bar and clock on the top row, menu and Resume in the footer](docs/screenshots/16-books-header-footer.png) | ![The same screen with the clock and battery turned off](docs/screenshots/17-books-status-off.png) | ![The ☰ menu with Show clock, Show battery and Use KOReader's keyboard](docs/screenshots/18-menu-settings.png) |
 
@@ -53,7 +53,7 @@ The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's sc
 
 ## Install
 
-1. Download **[library-gui-0.3.3.zip](https://github.com/voantony/koreader-library-gui/releases/download/v0.3.3/library-gui-0.3.3.zip)** from the [latest release](https://github.com/voantony/koreader-library-gui/releases/latest).
+1. Download **[library-gui-0.3.4.zip](https://github.com/voantony/koreader-library-gui/releases/download/v0.3.4/library-gui-0.3.4.zip)** from the [latest release](https://github.com/voantony/koreader-library-gui/releases/latest).
 2. Unzip it. You get a folder called `library.koplugin`.
 3. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).
