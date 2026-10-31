@@ -1551,6 +1551,10 @@ function Library:simpleMenuActions()
         search = { label = _("Search"), icon = "appbar.search", run = send("ShowFulltextSearchInput") },
         -- KOReader's own bottom panel: font, size, margins, spacing
         font = { label = _("Font & size"), glyph = "Aa", bold_glyph = true, run = send("ShowConfigMenu") },
+        -- one tap: darker, bolder, roomier text; tap again to undo (libraryreadability.lua)
+        readability = { label = _("Readability"), label_on = _("Undo"), glyph = "A+", bold_glyph = true,
+            on = function() return self:readabilityIsOn() end,
+            run = function() self:toggleReadability() end },
         light = { label = _("Light"), glyph = "\u{EC98}",
             run = function()
                 if not self:openControls() then
@@ -1570,6 +1574,7 @@ function Library:simpleMenuActions()
         toc = ui.toc ~= nil,
         search = ui.search ~= nil,
         config = ui.config ~= nil,
+        readability = self:readabilityAvailable(),
         light = Device:hasFrontlight() and true or false,
         bookmark = ui.bookmark ~= nil,
     })
@@ -1631,13 +1636,118 @@ end
 function Library:simpleReaderMenuItem()
     return {
         text = _("Simple reader menu"),
-        help_text = _("Tapping the top of the page while reading opens a small menu: Library, Contents, Go to page, Search, Font & size, Light, Bookmark and Book details. More… in that menu opens KOReader's full reader menu. Turn this off to get KOReader's full menu straight away. Swiping down from the top always opens the full menu."),
+        help_text = _("Tapping the top of the page while reading opens a small menu: Library, Contents, Go to page, Search, Font & size, Readability, Light, Bookmark and Book details. More… in that menu opens KOReader's full reader menu. Turn this off to get KOReader's full menu straight away. Swiping down from the top always opens the full menu."),
         checked_func = function() return self.settings.simple_reader_menu ~= false end,
         callback = function()
             self.settings.simple_reader_menu = self.settings.simple_reader_menu == false
             self:saveSettings()
         end,
     }
+end
+
+----------------------------------------------------------------------------
+-- Readability (simple reader menu), see libraryreadability.lua
+----------------------------------------------------------------------------
+
+--- Only for reflowable books (EPUB, FB2, HTML…): their font, spacing and
+-- margins are KOReader's "configurable" options. PDFs and comics have none.
+function Library:readabilityAvailable()
+    local ui = self.ui
+    local doc = ui and ui.document
+    return (doc and ui.rolling and ui.font and ui.typeset and type(doc.configurable) == "table") and true or false
+end
+
+function Library:readabilityState()
+    local ds = self.ui and self.ui.doc_settings
+    return ds and ds:readSetting("library_readability")
+end
+
+function Library:readabilityIsOn()
+    return require("libraryreadability").isOn(self:readabilityState())
+end
+
+--- The book's current values, read from KOReader.
+function Library:readabilitySnapshot()
+    local ui = self.ui
+    local c = ui.document.configurable
+    local s = {
+        font_gamma = c.font_gamma,
+        font_base_weight = c.font_base_weight,
+        line_spacing = c.line_spacing,
+        t_page_margin = c.t_page_margin,
+        b_page_margin = c.b_page_margin,
+        sync_t_b_page_margins = c.sync_t_b_page_margins,
+    }
+    if type(c.h_page_margins) == "table" then s.h_page_margins = { c.h_page_margins[1], c.h_page_margins[2] } end
+    if ui.typography and ui.typography.hyphenation ~= nil then s.hyphenation = ui.typography.hyphenation and true or false end
+    if type(UIManager.getRefreshRate) == "function" then
+        local ok, rate = pcall(UIManager.getRefreshRate, UIManager)
+        if ok and tonumber(rate) then s.full_refresh_count = tonumber(rate) end
+    end
+    return s
+end
+
+--- Set values the way KOReader's own bottom menu does: its events (which
+-- also update the book's saved options), wrapped in BatchedUpdate so the
+-- book is laid out again once, not once per setting.
+function Library:applyReadabilityValues(ch)
+    local ui = self.ui
+    local c = ui.document.configurable
+    local function send(name, ...) ui:handleEvent(Event:new(name, ...)) end
+    send("BatchedUpdate")
+    if ch.font_gamma ~= nil then send("SetFontGamma", ch.font_gamma) end
+    if ch.font_base_weight ~= nil then send("SetFontBaseWeight", ch.font_base_weight) end
+    if ch.line_spacing ~= nil then send("SetLineSpace", ch.line_spacing) end
+    if ch.h_page_margins ~= nil or ch.t_page_margin ~= nil or ch.b_page_margin ~= nil then
+        local h = ch.h_page_margins or c.h_page_margins or { 10, 10 }
+        local t = ch.t_page_margin ~= nil and ch.t_page_margin or c.t_page_margin
+        local b = ch.b_page_margin ~= nil and ch.b_page_margin or c.b_page_margin
+        -- the bottom menu stores these itself; events alone do not
+        c.h_page_margins = { h[1], h[2] }
+        c.t_page_margin, c.b_page_margin = t, b
+        send("SetPageHorizMargins", { h[1], h[2] })
+        send("SetPageTopAndBottomMargin", { t, b })
+    end
+    if ch.sync_t_b_page_margins ~= nil then
+        c.sync_t_b_page_margins = ch.sync_t_b_page_margins
+        if ui.typeset then ui.typeset.sync_t_b_page_margins = ch.sync_t_b_page_margins == 1 end
+    end
+    if ch.hyphenation ~= nil and ui.typography then
+        -- no event for this one: same two calls as KOReader's Hyphenation menu
+        ui.typography.hyphenation = ch.hyphenation
+        pcall(ui.document.setTextHyphenation, ui.document, ch.hyphenation)
+        send("UpdatePos")
+    end
+    send("BatchedUpdateDone")
+    if ch.full_refresh_count ~= nil and type(UIManager.setRefreshRate) == "function" then
+        UIManager:setRefreshRate(ch.full_refresh_count)
+    end
+end
+
+--- One tap: apply the preset (remembering this book's values), or undo it.
+function Library:toggleReadability()
+    if not self:readabilityAvailable() then return end
+    local R = require("libraryreadability")
+    local ds = self.ui.doc_settings
+    local cur = self:readabilitySnapshot()
+    local state = self:readabilityState()
+    local msg
+    if R.isOn(state) then
+        local ch = R.restore(state, cur)
+        ds:delSetting("library_readability")
+        self:applyReadabilityValues(ch)
+        msg = _("Readability off: this book's own settings are back.")
+    else
+        local ch, new_state = R.apply(cur)
+        if not ch then
+            msg = _("This book already reads that way.")
+        else
+            ds:saveSetting("library_readability", new_state)
+            self:applyReadabilityValues(ch)
+            msg = _("Readability on: darker, bolder text with more space. Tap Readability again to undo.")
+        end
+    end
+    UIManager:show(InfoMessage:new{ text = msg, timeout = 2 })
 end
 
 ----------------------------------------------------------------------------

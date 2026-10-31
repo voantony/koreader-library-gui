@@ -14,13 +14,14 @@ M.ITEMS = {
     { id = "goto",     needs = nil },
     { id = "search",   needs = "search" },
     { id = "font",     needs = "config" },
+    { id = "readability", needs = "readability" },
     { id = "light",    needs = "light" },
     { id = "bookmark", needs = "bookmark" },
     { id = "details",  needs = nil },
 }
 
 --- The ids of the buttons to show, given what this reader can do.
--- caps: { toc =, search =, config =, light =, bookmark = } (booleans).
+-- caps: { toc =, search =, config =, readability =, light =, bookmark = } (booleans).
 function M.items(caps)
     caps = caps or {}
     local out = {}
@@ -72,8 +73,9 @@ function M.layout(w, h, n)
     local y = px(30 + 62 + 56)
     L.divider_y = y
     y = y + px(18)
-    local cols = n <= 4 and math.max(n, 1) or (n <= 6 and 3 or 4)
-    if w > h and n > 4 then cols = math.min(n, 8) end -- landscape: one row
+    -- 7-8 buttons: 4 + 4; 9-10: 5 + 5 (two rows keep the panel short)
+    local cols = n <= 4 and math.max(n, 1) or (n <= 6 and 3 or (n <= 8 and 4 or 5))
+    if w > h and n > 4 then cols = math.min(n, 10) end -- landscape: one row
     local rows = math.ceil(n / cols)
     local cw = (L.right - L.left) / cols
     local th = px(196)
