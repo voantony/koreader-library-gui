@@ -748,6 +748,10 @@ function Library:showBookDetails(book, view, opts)
         time_left = time_left,
         description = self:loadDescription(book),
     }
+    -- An author with only this book is plain text: their shelf would hold just it.
+    local all = (view and view.all_books) or (shared.index and shared.index.books)
+    info.author_links = Core.authorLinks(info.authors, all, self.collate,
+        function(x) return util.stringLower and util.stringLower(x) or x:lower() end)
     local ok_names, names = pcall(self.collectionNames, self, book.path)
     if ok_names and type(names) == "table" then info.collections = names end
     local Details = require("librarydetails")

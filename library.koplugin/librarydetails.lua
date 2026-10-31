@@ -506,16 +506,32 @@ function Details:buildAuthors(max_w)
     if #names == 0 then return nil end
     local gap = Size.padding.default
     local pieces, widths = {}, {}
+    local links = self.info.author_links
     for i, name in ipairs(names) do
-        local link = Link:new{
-            text = name,
-            italic = true,
-            size = 18,
-            max_width = math.max(1, max_w - 16),
-            on_tap = function()
-                if self.on_shelf then self.on_shelf("authors", name) end
-            end,
-        }
+        local link
+        if links and links[i] == false then
+            -- only this book by them: plain text, nothing to tap
+            link = VerticalGroup:new{
+                align = "left",
+                TextWidget:new{
+                    text = name,
+                    face = face("NotoSans-Italic.ttf", 18),
+                    fgcolor = BLACK,
+                    max_width = math.max(1, max_w - 16),
+                },
+                vgap(math.max(1, Size.line.thin)), -- same height as a link's underline
+            }
+        else
+            link = Link:new{
+                text = name,
+                italic = true,
+                size = 18,
+                max_width = math.max(1, max_w - 16),
+                on_tap = function()
+                    if self.on_shelf then self.on_shelf("authors", name) end
+                end,
+            }
+        end
         local piece = link
         if i < #names then
             local comma = TextWidget:new{

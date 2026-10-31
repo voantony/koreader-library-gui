@@ -1911,6 +1911,29 @@ function Core.authorNames(book)
     return out
 end
 
+--- Which of `names` get a tappable link on the details card: an author
+-- only links when the Authors tab would show them with 2+ books. Uses the
+-- same grouping as the Authors tab and the same name match as the tap
+-- (`Core.shelfMatch`), so the counts agree. With no books known yet (the
+-- index is not built), every name stays tappable.
+function Core.authorLinks(names, books, collate, lower_fn)
+    local out = {}
+    if type(names) ~= "table" then return out end
+    if type(books) ~= "table" or #books == 0 then
+        for i = 1, #names do out[i] = true end
+        return out
+    end
+    local groups = {}
+    for _, g in ipairs(Core.group(books, "author", collate)) do
+        if g.key ~= Core.UNKNOWN then groups[#groups + 1] = { name = g.key, books = g.books } end
+    end
+    for i, name in ipairs(names) do
+        local g = Core.shelfMatch(name, groups, lower_fn)
+        out[i] = g ~= nil and #g.books >= 2
+    end
+    return out
+end
+
 --- "Sherlock Holmes #5", or just the series name. Nil when there is none.
 function Core.seriesLine(book)
     if type(book) ~= "table" or type(book.series) ~= "string" or book.series == "" then
