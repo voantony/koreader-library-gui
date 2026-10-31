@@ -141,9 +141,12 @@ function Panel:close()
 end
 
 --- Close, then run `fn` once the page underneath has repainted.
+-- The close only refreshes the panel strip. Opening the next screen in the
+-- same frame paints it, then that strip refresh is the one that hits the
+-- display, so a full-screen card shows only its top.
 function Panel:closeThen(fn)
     self:close()
-    if fn then UIManager:nextTick(fn) end
+    if fn then RM.afterPanelClose(UIManager, fn) end
 end
 
 function Panel:onTap(_, ges)

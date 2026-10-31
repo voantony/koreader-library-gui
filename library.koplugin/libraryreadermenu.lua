@@ -149,6 +149,25 @@ function M.layout(w, h, n)
     return L
 end
 
+--- Run `fn` only after the panel's own refresh has been painted.
+-- `nextTick` runs at the start of the next frame, before that refresh is
+-- consumed, so anything opened there is painted underneath a refresh that
+-- only covers the panel. `tickAfterNext` waits one frame more, for the
+-- repaint. Older KOReader builds only have `nextTick`.
+function M.afterPanelClose(ui, fn)
+    if type(fn) ~= "function" then return end
+    if type(ui) == "table" and type(ui.tickAfterNext) == "function" then
+        ui:tickAfterNext(fn)
+        return "tickAfterNext"
+    end
+    if type(ui) == "table" and type(ui.nextTick) == "function" then
+        ui:nextTick(fn)
+        return "nextTick"
+    end
+    fn()
+    return "now"
+end
+
 --- What a point hits: "tile", i / "more" / "exit" / "panel" / nil (outside: close).
 function M.hit(L, x, y)
     local function inRect(r) return x >= r.x and x < r.x + r.w and y >= r.y and y < r.y + r.h end

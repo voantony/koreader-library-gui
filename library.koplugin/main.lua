@@ -882,7 +882,10 @@ function Library:showBookDetails(book, view, opts)
             UIManager:nextTick(function() self:openShelf(kind, name, view) end)
         end,
     }
-    UIManager:show(card)
+    -- "ui" with no region covers the whole screen. The reader menu (and the
+    -- top bar) close with a refresh of only their own strip; without this,
+    -- that strip is the only update, and the card's buttons never appear.
+    UIManager:show(card, Core.detailsShowMode())
     return card
 end
 
@@ -1205,7 +1208,8 @@ function Library:addBookDetailsItem(menu_items)
         help_text = _("Title, author, description and progress for this book. Continue returns to the page."),
         callback = function()
             if self.ui.menu then self.ui.menu:onTapCloseMenu() end
-            UIManager:nextTick(function()
+            -- After the menu's own refresh, not in the same frame as it.
+            require("libraryreadermenu").afterPanelClose(UIManager, function()
                 local book = self:currentBook()
                 if book then self:showBookDetails(book, nil, { already_open = true }) end
             end)
