@@ -3,14 +3,15 @@ Full-screen Library view.
 
 Layout, top to bottom:
 
-    title bar        (menu, title, Resume icon; "Close Library" lives in the menu)
-    search bar       (always visible InputText; filters as you type)
+    header           search bar, and beside it the clock and battery when those
+                     are on. No "Library" title: that row is the books'.
     tabs             Books | Collections | Authors | Series
     status chips     All | Unread | Reading | Barely started | Finished
     continue reading (Books tab, no search or filter:
                      the books in progress, with percent and last-read time)
     cover grid or list
-    footer           page x of y, sort (in a series: "2 of 5 read")
+    footer           menu, Resume, page x of y, sort
+                     (in a series: "2 of 5 read")
 
 Inside a series the books are in series order and numbered ("3 · Title").
 Paging past the last page (swipe or page key) opens the next series, and
@@ -18,9 +19,10 @@ before the first page the previous one, so a whole shelf of series can be
 flipped through without going back to the list.
 
 The search bar is a real InputText embedded in this widget, not a popup:
-tapping it shows the on-screen keyboard and every keystroke re-filters the
-in-memory index (debounced). Only the region below the search bar is
-refreshed, so the keyboard and the text field are not redrawn.
+tapping it shows the Library keyboard and every keystroke re-filters the
+in-memory index (debounced). Only the region below the header is refreshed,
+so the keyboard and the text field are not redrawn. "Use KOReader's keyboard"
+opens KOReader's InputDialog instead, and leaves this keyboard unused.
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -34,12 +36,13 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconButton = require("ui/widget/iconbutton")
 local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local InputDialog = require("ui/widget/inputdialog")
 local InputText = require("ui/widget/inputtext")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
+local RightContainer = require("ui/widget/container/rightcontainer")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
-local TitleBar = require("ui/widget/titlebar")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -86,15 +89,28 @@ local LibraryView = InputContainer:extend{
     barely_threshold = 0.10, -- "Barely started": opened, below this fraction
     rounded_keyboard = true, -- "Rounded keyboard in search"
     fuzzy_search = true,     -- "Typo-tolerant search"
+    show_clock = true,       -- clock beside the search bar
+    show_battery = true,     -- battery percentage beside the search bar
+    use_koreader_keyboard = false, -- stock InputDialog instead of the Library keyboard
 }
 
 --- The search bar's text box: KOReader's InputText, with our own keyboard
 -- (see librarykeyboard.lua) when "Rounded keyboard in search" is on. Only
 -- this text box gets it; every other one in KOReader keeps the stock keyboard.
-local SearchInput = InputText:extend{ rounded_keyboard = true, hide_number_row = false }
+local SearchInput = InputText:extend{
+    rounded_keyboard = true,
+    hide_number_row = false,
+    use_koreader_keyboard = false,
+}
 LibraryView.SearchInput = SearchInput
 
 function SearchInput:initKeyboard()
+    -- KOReader's own dialog brings the stock keyboard. This field only displays the query.
+    if self.use_koreader_keyboard then
+        self.key_events = {}
+        self.keyboard = nil
+        return
+    end
     if self.rounded_keyboard and (Device:isTouchDevice() or Device:hasDPad()) then
         local RoundedKeyboard = Keyboard.class()
         if RoundedKeyboard then
@@ -152,37 +168,15 @@ function LibraryView:init()
 end
 
 ----------------------------------------------------------------------------
--- Static parts: title bar and search bar
+-- Header: search bar, with the clock and battery beside it
 ----------------------------------------------------------------------------
 
 function LibraryView:buildChrome()
-    self:buildTitleBar()
     self:buildSearchRow()
+    self:scheduleStatusRefresh()
 end
 
---- ☰ on the left, the title, and on the right a Resume icon that opens the
--- last book being read (hidden when there is none). No X: "Close Library"
--- is the last item of the ☰ menu. Swipes pass through the icon, so the
--- corner swipe-down for Controls still starts here.
-function LibraryView:buildTitleBar()
-    local book = self.last_book
-    self.title_bar = TitleBar:new{
-        width = self.width,
-        fullscreen = true,
-        align = "center",
-        title = self._title or _("Library"),
-        left_icon = "appbar.menu",
-        left_icon_tap_callback = function() self:onLeftIcon() end,
-        left_icon_hold_callback = function() self.plugin:showLibraryMenu(self) end,
-        right_icon = book and "book.opened" or nil,
-        right_icon_tap_callback = book and function() self:onResume() end or nil,
-        right_icon_hold_callback = book and function() self:showResumeHint() end or nil,
-        show_parent = self,
-    }
-    self._title_bar_resume = book and true or false
-end
-
---- Long-press on the Resume icon: which book it opens.
+--- Long-press on the Resume button: which book it opens.
 function LibraryView:showResumeHint()
     local book = self.last_book
     if not book then return end
@@ -194,13 +188,20 @@ function LibraryView:showResumeHint()
 end
 
 --- The search bar: a rounded field with a magnifier, the text box and a
--- clear button inside it, the full width of the screen.
+-- clear button. It fills the header except for the clock and battery.
 function LibraryView:buildSearchRow(text)
     local margin = Size.margin.default + Size.padding.default
     local icon_size = Screen:scaleBySize(22)
     local hpad = Size.padding.large
     local border = Size.border.button
     local face = Font:getFace("smallinfofont")
+    self._status_face = Font:getFace("cfont", 20)
+    self._header_margin = margin
+    local gap = Size.padding.large
+    local status_w = self:measureStatusSlot()
+    self._status_slot_w = status_w
+    local field_w = self.width - 2 * margin - status_w - (status_w > 0 and gap or 0)
+    if field_w < Screen:scaleBySize(140) then field_w = Screen:scaleBySize(140) end
     local magnifier = IconButton:new{
         icon = "appbar.search",
         width = icon_size,
@@ -217,7 +218,6 @@ function LibraryView:buildSearchRow(text)
         callback = function() self:clearSearch() end,
         show_parent = self,
     }
-    local field_w = self.width - 2 * margin
     local input_w = field_w - 2 * border - 2 * hpad - magnifier:getSize().w - clear:getSize().w - 2 * Size.padding.default
     if self.search_input then
         text = text or self.search_input:getText()
@@ -235,7 +235,8 @@ function LibraryView:buildSearchRow(text)
         bordersize = 0,
         margin = 0,
         padding = Size.padding.small,
-        rounded_keyboard = self.rounded_keyboard,
+        rounded_keyboard = self.rounded_keyboard and not self.use_koreader_keyboard,
+        use_koreader_keyboard = self.use_koreader_keyboard,
         edit_callback = function(edited)
             if edited then self:onSearchEdited() end
         end,
@@ -262,14 +263,163 @@ function LibraryView:buildSearchRow(text)
             },
         },
     }
-    self.search_row = FrameContainer:new{
+    self:assembleHeader()
+end
+
+--- Width reserved for the clock and battery, from a wide sample so "9:59"
+-- becoming "10:00" does not move the search bar.
+function LibraryView:measureStatusSlot()
+    if not (self.show_clock or self.show_battery) then return 0 end
+    -- Wide digits, so the field does not jump at 10:00. Battery width is reserved
+    -- only when this device actually reports a percentage.
+    local clock = self.show_clock and (self:twelveHour() and "88:88 PM" or "88:88") or nil
+    local battery = (self.show_battery and self:readBattery()) and "100%" or nil
+    local sample = Core.statusLabel(clock, battery)
+    if not sample then return 0 end
+    local face = self._status_face or Font:getFace("cfont", 20)
+    local t = TextWidget:new{ text = sample, face = face, bold = true }
+    local w = t:getSize().w
+    if t.free then t:free() end
+    return w
+end
+
+function LibraryView:twelveHour()
+    local gs = rawget(_G, "G_reader_settings")
+    if type(gs) ~= "table" or type(gs.isTrue) ~= "function" then return false end
+    local ok, on = pcall(gs.isTrue, gs, "twelve_hour_clock")
+    return ok and on and true or false
+end
+
+function LibraryView:readClock()
+    if not self.show_clock then return nil end
+    local twelve = self:twelveHour()
+    local ok, datetime = pcall(require, "datetime")
+    if ok and type(datetime) == "table" and type(datetime.secondsToHour) == "function" then
+        local ok2, text = pcall(datetime.secondsToHour, os.time(), twelve)
+        if ok2 and type(text) == "string" and text ~= "" then return text end
+    end
+    if twelve then return (os.date("%I:%M %p"):gsub("^0", "")) end
+    return os.date("%H:%M")
+end
+
+function LibraryView:readBattery()
+    if not self.show_battery then return nil end
+    if type(Device) ~= "table" or type(Device.hasBattery) ~= "function" then return nil end
+    local ok, has = pcall(Device.hasBattery, Device)
+    if not ok or not has or type(Device.getPowerDevice) ~= "function" then return nil end
+    local okd, powerd = pcall(Device.getPowerDevice, Device)
+    if not okd or type(powerd) ~= "table" or type(powerd.getCapacity) ~= "function" then return nil end
+    local okc, cap = pcall(powerd.getCapacity, powerd)
+    if not okc then return nil end
+    return Core.batteryLabel(cap)
+end
+
+function LibraryView:buildStatusWidget()
+    self.status_label = nil
+    self.status_box = nil
+    if not (self.show_clock or self.show_battery) then
+        self._status_text = nil
+        return nil
+    end
+    local face = self._status_face or Font:getFace("cfont", 20)
+    local battery = self:readBattery()
+    self._status_has_battery = battery ~= nil
+    local text = Core.statusLabel(self:readClock(), battery) or ""
+    self._status_text = text
+    local label = TextWidget:new{ text = text, face = face, bold = true }
+    local slot_w = self._status_slot_w or label:getSize().w
+    local slot_h = self.search_field and self.search_field:getSize().h or label:getSize().h
+    self.status_label = label
+    self.status_box = RightContainer:new{
+        dimen = Geom:new{ w = slot_w, h = slot_h },
+        label,
+    }
+    return self.status_box
+end
+
+--- Swap the clock and battery text. Does not repaint.
+function LibraryView:updateStatusText()
+    if not self.status_label or type(self.status_label.setText) ~= "function" then return false end
+    local text = Core.statusLabel(self:readClock(), self:readBattery()) or ""
+    if text == self._status_text then return false end
+    self._status_text = text
+    self.status_label:setText(text)
+    return true
+end
+
+function LibraryView:assembleHeader()
+    local margin = self._header_margin or (Size.margin.default + Size.padding.default)
+    local row = { align = "center", self.search_field }
+    local status = self:buildStatusWidget()
+    if status then
+        row[#row + 1] = HorizontalSpan:new{ width = Size.padding.large }
+        row[#row + 1] = status
+    end
+    self.header = FrameContainer:new{
         padding = 0,
         padding_left = margin,
         padding_right = margin,
+        padding_top = Size.padding.default,
         padding_bottom = Size.padding.small,
         bordersize = 0,
-        self.search_field,
+        HorizontalGroup:new(row),
     }
+end
+
+function LibraryView:headerRegion()
+    local h = 0
+    if self.header and self.header.getSize then h = self.header:getSize().h or 0 end
+    return Geom:new{ x = 0, y = 0, w = self.dimen and self.dimen.w or self.width or 0, h = h }
+end
+
+--- One refresh at the next minute, and only while the clock or battery is shown.
+-- Unscheduled when the Library closes or both are turned off.
+function LibraryView:scheduleStatusRefresh()
+    if self._status_tick then UIManager:unschedule(self._status_tick); self._status_tick = nil end
+    if self._closed or not (self.show_clock or self.show_battery) then return end
+    local delay = Core.nextMinuteDelay(os.time())
+    self._status_tick = function()
+        self._status_tick = nil
+        if self._closed then return end
+        self:onStatusTick()
+        self:scheduleStatusRefresh()
+    end
+    UIManager:scheduleIn(delay, self._status_tick)
+end
+
+function LibraryView:onStatusTick()
+    -- A battery that appears or disappears changes the search bar's width.
+    local has_battery = (self.show_battery and self:readBattery() ~= nil) and true or false
+    if self.search_field and has_battery ~= (self._status_has_battery and true or false)
+            and not (self.search_input and self.search_input.isKeyboardVisible
+                and self.search_input:isKeyboardVisible()) then
+        self:buildSearchRow()
+        self:refreshBody(true)
+        return
+    end
+    if not self:updateStatusText() then return end
+    if not UIManager.setDirty then return end
+    UIManager:setDirty(self, function()
+        return "ui", self:headerRegion(), true
+    end)
+end
+
+function LibraryView:setShowClock(on)
+    on = on and true or false
+    if on == (self.show_clock and true or false) then return end
+    self.show_clock = on
+    self:buildSearchRow()
+    self:scheduleStatusRefresh()
+    self:refreshBody(true)
+end
+
+function LibraryView:setShowBattery(on)
+    on = on and true or false
+    if on == (self.show_battery and true or false) then return end
+    self.show_battery = on
+    self:buildSearchRow()
+    self:scheduleStatusRefresh()
+    self:refreshBody(true)
 end
 
 --- The field's border follows the keyboard: dark while typing.
@@ -310,11 +460,8 @@ function LibraryView:reloadData()
     self.last_query, self.last_results = nil, nil
     self.groups_cache = {}
     -- The book the Resume icon opens; show or hide the icon to match.
+    -- The book the footer Resume button opens. The footer is rebuilt with the body.
     self.last_book = Core.resumeBook(self.all_books)
-    if self.title_bar and self._title_bar_resume ~= (self.last_book ~= nil) then
-        self:buildTitleBar()
-        self._title_changed = true -- repaint the whole view, title bar included
-    end
 end
 
 function LibraryView:groupsFor(tab)
@@ -592,26 +739,71 @@ function LibraryView:buildFooter(page, pages, total, kind)
         page_label,
         arrow("chevron.right", 1, page < pages or more),
     }
+    -- Menu and Resume live here, not in the top corners: those are hard to hit on e-ink.
+    -- Same thumb-sized target as the page arrows. Resume stays put, dimmed, with no book.
+    local chrome_icon = Screen:scaleBySize(22)
+    local chrome_pad = math.max(0, math.floor((touch - chrome_icon) / 2))
+    local function chromeButton(item)
+        local enabled = item.enabled ~= false
+        local callback, hold
+        if item.id == "menu" then
+            callback = function() self:onLeftIcon() end
+            hold = callback
+        else
+            callback = function() if self.last_book then self:onResume() end end
+            hold = function() if self.last_book then self:showResumeHint() end end
+        end
+        local btn = IconButton:new{
+            icon = item.icon,
+            width = chrome_icon, height = chrome_icon,
+            padding = chrome_pad,
+            enabled = enabled,
+            allow_flash = false,
+            callback = callback,
+            hold_callback = hold,
+            show_parent = self,
+        }
+        if not enabled and btn.image then btn.image.dim = true end
+        return btn
+    end
+    local menu_btn, resume_btn
+    for _, item in ipairs(Core.footerChrome(self.last_book ~= nil)) do
+        local btn = chromeButton(item)
+        if item.id == "menu" then menu_btn = btn else resume_btn = btn end
+    end
+    self.footer_menu, self.footer_resume = menu_btn, resume_btn
+    local button_gap = Size.padding.small
+    local buttons_w = menu_btn:getSize().w + button_gap + resume_btn:getSize().w + Size.padding.default
     -- "202 books · Last read ▾": tap it to pick the sort (books only; a
     -- series keeps its reading order).
     local sortable = kind == "books" and not self:inSeries()
     if sortable then left = left .. " \u{25BE}" end
-    local text = TextWidget:new{ text = left, face = f, fgcolor = Blitbuffer.COLOR_GRAY_4,
-        max_width = self.width - 2 * margin - pager:getSize().w - Size.padding.default }
+    local max_text = math.max(Screen:scaleBySize(72),
+        self.width - 2 * margin - buttons_w - pager:getSize().w - Size.padding.default)
+    local text = TextWidget:new{ text = left, face = f, fgcolor = Blitbuffer.COLOR_GRAY_4, max_width = max_text }
     self.sort_label = nil
     if sortable then
         text = TapArea:new{ min_h = touch, callback = function() self:showSortPicker() end, text }
         self.sort_label = text
     end
-    local h = math.max(text:getSize().h, pager:getSize().h)
-    local spacer = self.width - 2 * margin - text:getSize().w - pager:getSize().w + math.floor((touch - icon) / 2)
+    local h = math.max(text:getSize().h, pager:getSize().h, menu_btn:getSize().h)
+    local spacer = self.width - 2 * margin - buttons_w - text:getSize().w - pager:getSize().w
     return FrameContainer:new{
         padding = 0,
         padding_left = margin,
         bordersize = 0,
         width = self.width,
         height = h,
-        HorizontalGroup:new{ align = "center", text, HorizontalSpan:new{ width = math.max(0, spacer) }, pager },
+        HorizontalGroup:new{
+            align = "center",
+            menu_btn,
+            HorizontalSpan:new{ width = button_gap },
+            resume_btn,
+            HorizontalSpan:new{ width = Size.padding.default },
+            text,
+            HorizontalSpan:new{ width = math.max(Size.padding.small, spacer) },
+            pager,
+        },
     }
 end
 
@@ -752,7 +944,7 @@ function LibraryView:resumeCaption(book, now)
 end
 
 --- The strip's heading: "Continue reading" or "Recently opened". (Resume
--- is the icon in the title bar.)
+-- is the button in the footer.)
 function LibraryView:buildContinueHeader()
     local f = Font:getFace("cfont", 17)
     local heading = Core.topRow(self.top_row) == "recent" and _("Recently opened") or _("Continue reading")
@@ -817,7 +1009,8 @@ function LibraryView:buildBody()
     if not chips and self.tab == "collections" and not self.group then chips = self:buildCollectionsSwitch() end
     local sep = VerticalSpan:new{ width = Size.padding.small }
     local footer_probe = self:buildFooter(1, 1, 0, data.kind)
-    local fixed = self.title_bar:getHeight() + self.search_row:getSize().h + Size.padding.small
+    local header_h = self.header and self.header:getSize().h or 0
+    local fixed = header_h + Size.padding.small
         + tabs:getSize().h + (chips and chips:getSize().h or 0) + sep:getSize().h
         + footer_probe:getSize().h
     local keyboard_h = self:keyboardHeight()
@@ -894,36 +1087,26 @@ function LibraryView:buildBody()
         height = self.dimen.h,
         VerticalGroup:new{
             align = "left",
-            self.title_bar,
-            self.search_row,
+            self.header,
             VerticalSpan:new{ width = Size.padding.small },
             self.body,
         },
     }
-    self.body_y = self.title_bar:getHeight() + self.search_row:getSize().h + Size.padding.small
-    self:updateTitle()
+    self.body_y = (self.header and self.header:getSize().h or 0) + Size.padding.small
     self.timings.filter_s = time.to_s(t1 - t0)
     self.timings.build_s = time.to_s(time.now() - t1)
     self:scheduleCoverExtraction()
 end
 
-function LibraryView:updateTitle()
-    local title = self.group and self.group.name or _("Library")
-    -- TitleBar:setTitle() does not update title_bar.title: track it ourselves.
-    if (self._title or _("Library")) ~= title then
-        self._title = title
-        self.title_bar:setTitle(title, true)
-        self._title_changed = true
-    end
-end
-
---- Region below the search bar (where results are drawn).
+--- Region below the header (where results are drawn).
 function LibraryView:bodyRegion()
     return Geom:new{ x = 0, y = self.body_y, w = self.dimen.w, h = self.dimen.h - self.body_y }
 end
 
 --- Rebuild and refresh only the results region (fast path used while typing).
 function LibraryView:refreshBody(full)
+    -- A full repaint already covers the header, so the clock can move with it.
+    if full or self._title_changed then self:updateStatusText() end
     self:buildBody()
     local region = (full or self._title_changed) and self.dimen or self:bodyRegion()
     self._title_changed = nil
@@ -970,6 +1153,10 @@ function LibraryView:moveFocusTo() return false end
 
 -- Called by InputText when its box is tapped.
 function LibraryView:onSwitchFocus(inputbox)
+    if self.use_koreader_keyboard then
+        self:openKoreaderSearch()
+        return
+    end
     if not inputbox.focused then inputbox:focus() end
     if not inputbox:isKeyboardVisible() then
         self:openKeyboard()
@@ -993,6 +1180,7 @@ function LibraryView:matchKeyboard()
 end
 
 function LibraryView:openKeyboard()
+    if self.use_koreader_keyboard then return self:openKoreaderSearch() end
     self:matchKeyboard()
     self.search_input:focus()
     self.search_input:onShowKeyboard()
@@ -1000,6 +1188,59 @@ function LibraryView:openKeyboard()
     -- While the (modal) keyboard is up, taps outside it must still reach the grid.
     self.is_always_active = true
     self:refreshBody()
+end
+
+--- KOReader's stock text box and keyboard. What is typed still filters the
+-- Library; Cancel puts the previous query back.
+function LibraryView:openKoreaderSearch()
+    if self._search_dialog then return end
+    local original = self.search_input and self.search_input:getText() or self.query or ""
+    local dialog
+    local done = false
+    local function finish(keep)
+        if done then return end
+        done = true
+        local text = keep and (dialog:getInputText() or "") or original
+        self._search_dialog = nil
+        UIManager:close(dialog)
+        if self._search_action then UIManager:unschedule(self._search_action); self._search_action = nil end
+        if self.search_input then self.search_input:setText(text) end
+        self:applySearch(text)
+    end
+    dialog = InputDialog:new{
+        title = _("Search"),
+        input = original,
+        input_hint = self:searchHint(),
+        -- Each keystroke, once the text has actually changed. InputDialog passes
+        -- this through to its text box; `edited` is false while the box is first drawn.
+        edited_callback = function(edited)
+            if not edited or done or not dialog.getInputText then return end
+            local text = dialog:getInputText() or ""
+            if self.search_input then self.search_input:setText(text) end
+            self:onSearchEdited()
+        end,
+        buttons = { {
+            { text = _("Cancel"), id = "close", callback = function() finish(false) end },
+            { text = _("Search"), is_enter_default = true, callback = function() finish(true) end },
+        } },
+    }
+    self._search_dialog = dialog
+    UIManager:show(dialog)
+    if dialog.onShowKeyboard then dialog:onShowKeyboard() end
+end
+
+function LibraryView:setUseKoreaderKeyboard(on)
+    on = on and true or false
+    if on == (self.use_koreader_keyboard and true or false) then return end
+    self:keyboardGuard()
+    if self._search_dialog then
+        local dialog = self._search_dialog
+        self._search_dialog = nil
+        UIManager:close(dialog)
+    end
+    self.use_koreader_keyboard = on
+    self:buildSearchRow()
+    self:refreshBody(true)
 end
 
 function LibraryView:closeKeyboard()
@@ -1299,7 +1540,14 @@ function LibraryView:onClose()
 end
 
 function LibraryView:onCloseWidget()
+    self._closed = true
     if self._search_action then UIManager:unschedule(self._search_action) end
+    if self._status_tick then UIManager:unschedule(self._status_tick); self._status_tick = nil end
+    if self._search_dialog then
+        local dialog = self._search_dialog
+        self._search_dialog = nil
+        UIManager:close(dialog)
+    end
     if self._cover_poll then UIManager:unschedule(self._cover_poll) end
     if self._cover_submit then UIManager:unschedule(self._cover_submit) end
     if not self.covers.bim then Covers.cancel() end

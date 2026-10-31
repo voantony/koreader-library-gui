@@ -49,6 +49,9 @@ local DEFAULTS = {
     series_skip_finished = true, -- Next in series skips books already finished
     reader_tab = true,          -- a Library tab (book icon) in the reader's top menu bar
     rounded_keyboard = true,    -- "Rounded keyboard in search": softer keys for the search bar only
+    use_koreader_keyboard = false, -- "Use KOReader's keyboard": stock InputDialog for the search bar
+    show_clock = true,          -- clock beside the search bar
+    show_battery = true,        -- battery percentage beside the search bar
     fuzzy_search = true,        -- "Typo-tolerant search": accents ignored, small typos forgiven
     remember_views = true,      -- each shelf (collection, author, series, tab) remembers its layout, sort, filter
     controls_panel = true,      -- swipe down from the Library's top-right corner: light, warmth, toggles
@@ -300,6 +303,9 @@ function Library:newView()
         debounce_s = (self.settings.debounce_ms or 150) / 1000,
         barely_threshold = Core.barelyThreshold(self.settings.barely_threshold),
         rounded_keyboard = Core.roundedKeyboard(self.settings),
+        use_koreader_keyboard = Core.useKoreaderKeyboard(self.settings),
+        show_clock = Core.showClock(self.settings),
+        show_battery = Core.showBattery(self.settings),
         fuzzy_search = Core.fuzzySearch(self.settings),
     }
 end
@@ -919,7 +925,40 @@ function Library:showLibraryMenu(view)
             end,
         },
     })
-    -- Last item: leave the Library for the file browser (the title bar has no X).
+    table.insert(buttons, {
+        {
+            text = (Core.showClock(self.settings) and "✓ " or "") .. _("Show clock"),
+            callback = function()
+                close()
+                self.settings.show_clock = not Core.showClock(self.settings)
+                self:saveSettings()
+                if view.setShowClock then view:setShowClock(Core.showClock(self.settings)) end
+            end,
+        },
+        {
+            text = (Core.showBattery(self.settings) and "✓ " or "") .. _("Show battery"),
+            callback = function()
+                close()
+                self.settings.show_battery = not Core.showBattery(self.settings)
+                self:saveSettings()
+                if view.setShowBattery then view:setShowBattery(Core.showBattery(self.settings)) end
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
+            text = (Core.useKoreaderKeyboard(self.settings) and "✓ " or "") .. _("Use KOReader's keyboard"),
+            callback = function()
+                close()
+                self.settings.use_koreader_keyboard = not Core.useKoreaderKeyboard(self.settings)
+                self:saveSettings()
+                if view.setUseKoreaderKeyboard then
+                    view:setUseKoreaderKeyboard(Core.useKoreaderKeyboard(self.settings))
+                end
+            end,
+        },
+    })
+    -- Last item: leave the Library for the file browser (there is no X).
     table.insert(buttons, {
         {
             text = "\u{2715} " .. _("Close Library"),
@@ -1012,7 +1051,7 @@ function Library:topRowMenu()
         text_func = function()
             return T(_("Top row: %1"), TOP_ROW_NAMES[Core.topRow(self.settings.top_row)])
         end,
-        help_text = _("The row of large covers at the top of the Books tab. Continue reading shows the books you are reading. Recently opened shows every book you have opened, newest first, including finished and on-hold ones. The Resume icon (top right) always opens the most recent book you are still reading."),
+        help_text = _("The row of large covers at the top of the Books tab. Continue reading shows the books you are reading. Recently opened shows every book you have opened, newest first, including finished and on-hold ones. The Resume button in the footer always opens the most recent book you are still reading."),
         sub_item_table = items,
     }
 end
@@ -1242,12 +1281,42 @@ function Library:addToMainMenu(menu_items)
             },
             {
                 text = _("Rounded keyboard in search"),
-                help_text = _("Give the Library's search bar a softer on-screen keyboard: rounded keys with gaps between them on a light background, like the Kindle or a phone. Only the Library's search uses it; every other keyboard in KOReader stays as it is."),
+                help_text = _("Give the Library's search bar a softer on-screen keyboard: rounded keys with gaps between them on a light background, like the Kindle or a phone. Only the Library's search uses it; every other keyboard in KOReader stays as it is. This does nothing while Use KOReader's keyboard is on."),
                 checked_func = function() return Core.roundedKeyboard(self.settings) end,
                 callback = function()
                     self.settings.rounded_keyboard = not Core.roundedKeyboard(self.settings)
                     self:saveSettings()
                     if shared.view then shared.view:setRoundedKeyboard(self.settings.rounded_keyboard) end
+                end,
+            },
+            {
+                text = _("Use KOReader's keyboard"),
+                help_text = _("Search opens KOReader's own text box and keyboard instead of the Library's. Leave this off to keep the Library keyboard."),
+                checked_func = function() return Core.useKoreaderKeyboard(self.settings) end,
+                callback = function()
+                    self.settings.use_koreader_keyboard = not Core.useKoreaderKeyboard(self.settings)
+                    self:saveSettings()
+                    if shared.view then shared.view:setUseKoreaderKeyboard(self.settings.use_koreader_keyboard) end
+                end,
+            },
+            {
+                text = _("Show clock"),
+                help_text = _("Show the time beside the search bar. It updates when the Library repaints, and once a minute while it is on screen."),
+                checked_func = function() return Core.showClock(self.settings) end,
+                callback = function()
+                    self.settings.show_clock = not Core.showClock(self.settings)
+                    self:saveSettings()
+                    if shared.view then shared.view:setShowClock(self.settings.show_clock) end
+                end,
+            },
+            {
+                text = _("Show battery"),
+                help_text = _("Show the battery percentage beside the search bar. It updates with the clock, not on its own timer."),
+                checked_func = function() return Core.showBattery(self.settings) end,
+                callback = function()
+                    self.settings.show_battery = not Core.showBattery(self.settings)
+                    self:saveSettings()
+                    if shared.view then shared.view:setShowBattery(self.settings.show_battery) end
                 end,
             },
             {

@@ -1539,6 +1539,54 @@ function Core.roundedKeyboard(settings)
     return not (settings and settings.rounded_keyboard == false)
 end
 
+--- Clock beside the search bar: on unless turned off.
+function Core.showClock(settings)
+    return not (settings and settings.show_clock == false)
+end
+
+--- Battery percentage beside the search bar: on unless turned off.
+function Core.showBattery(settings)
+    return not (settings and settings.show_battery == false)
+end
+
+--- "Use KOReader's keyboard": off unless turned on, so the Library keyboard stays.
+function Core.useKoreaderKeyboard(settings)
+    return settings ~= nil and settings.use_koreader_keyboard == true
+end
+
+--- "12:34  ·  87%", or just the part that is turned on. Nil when both are missing.
+function Core.statusLabel(clock_text, battery_text)
+    local clock = (type(clock_text) == "string" and clock_text ~= "") and clock_text or nil
+    local battery = (type(battery_text) == "string" and battery_text ~= "") and battery_text or nil
+    if clock and battery then return clock .. "  ·  " .. battery end
+    return clock or battery
+end
+
+--- "87%" for a capacity in 0..100. Anything else (no battery, a bad reading) is nil.
+function Core.batteryLabel(capacity)
+    if type(capacity) ~= "number" or capacity ~= capacity then return nil end
+    local n = math.floor(capacity + 0.5)
+    if n < 0 or n > 100 then return nil end
+    return string.format("%d%%", n)
+end
+
+--- Seconds until the next minute, so the clock can refresh once then and not before.
+-- At least 1, at most 60.
+function Core.nextMinuteDelay(now)
+    now = math.floor(tonumber(now) or 0)
+    local delay = 60 - (now % 60)
+    if delay < 1 then return 60 end
+    return delay
+end
+
+--- Footer buttons: the menu, and Resume (drawn, but not tappable, when there is no book).
+function Core.footerChrome(has_book)
+    return {
+        { id = "menu", icon = "appbar.menu", enabled = true },
+        { id = "resume", icon = "book.opened", enabled = has_book and true or false },
+    }
+end
+
 
 ----------------------------------------------------------------------------
 -- Per-view memory: layout, sort and filter for each shelf

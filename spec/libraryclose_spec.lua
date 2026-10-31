@@ -1,5 +1,6 @@
--- Closing the Library: no X in the title bar; "Close Library" is the last
--- item of the three-bar menu. The Back key still closes (or leaves a shelf).
+-- Closing the Library: no X; "Close Library" is the last item of the
+-- three-bar menu. The menu and Resume buttons are in the footer.
+-- The Back key still closes (or leaves a shelf).
 local function stub()
     return setmetatable({}, {
         __index = function() return stub() end,
@@ -91,79 +92,68 @@ describe("Close Library", function()
     end)
 end)
 
-describe("Library title bar", function()
+describe("Library footer buttons", function()
+    local Core = require("librarycore")
     local shown
-    local function titleBarArgs(last_book)
-        local args
+    local function viewWith(extra)
         shown = {}
-        local TitleBar = { new = function(_, o) args = o; return o end }
         local View = load("libraryview.lua", {
-            ["ui/widget/titlebar"] = TitleBar,
             ["ui/widget/container/inputcontainer"] = cls(),
-            ["ui/uimanager"] = { show = function(_, w) shown[#shown + 1] = w end },
+            ["ui/uimanager"] = { show = function(_, w) shown[#shown + 1] = w end, close = function() end },
             ["ui/widget/infomessage"] = { new = function(_, o) return o end },
         })
-        local v = setmetatable({ width = 1264, last_book = last_book }, { __index = View })
-        v.buildSearchRow = function() end
-        v:buildChrome()
-        return args, v
+        return setmetatable(extra or {}, { __index = View })
     end
 
-    it("has the menu button and no X", function()
-        local a = titleBarArgs()
-        eq(a.left_icon, "appbar.menu")
-        eq(a.close_callback, nil)
-        eq(a.right_icon, nil, "no last book: no Resume icon")
+    it("is the menu button and a Resume button that needs a book", function()
+        local off = Core.footerChrome(false)
+        eq(off[1].icon, "appbar.menu")
+        eq(off[1].enabled, true)
+        eq(off[2].icon, "book.opened")
+        eq(off[2].enabled, false, "no last book: Resume is not tappable")
+        eq(Core.footerChrome(true)[2].enabled, true)
+        eq(#Core.footerChrome(true), 2)
     end)
 
-    it("shows a Resume icon that opens the last book", function()
+    it("Resume opens the last book, including from inside a shelf", function()
         local book = { path = "/b/emma.epub", title = "Emma", percent = 0.62 }
-        local a, v = titleBarArgs(book)
-        eq(a.right_icon, "book.opened")
-        eq(a.close_callback, nil)
+        local v = viewWith({ last_book = book })
         local opened
         v.keyboardGuard = function() end
         v.plugin = { openBook = function(_, path, view) opened = path; eq(view, v) end }
-        a.right_icon_tap_callback()
+        v:onResume()
         eq(opened, "/b/emma.epub")
-        -- works inside a shelf too: nothing depends on the tab or group
         v.group = { kind = "series", name = "Oz" }; v.tab = "series"; opened = nil
-        a.right_icon_tap_callback()
+        v:onResume()
         eq(opened, "/b/emma.epub")
-        -- long-press: the book's title as a hint
-        a.right_icon_hold_callback()
+        v:showResumeHint()
         eq(shown[1].text, "Resume: Emma  ·  62 %")
     end)
 
-    it("shows or hides the icon when the books change", function()
-        local args = {}
-        local TitleBar = { new = function(_, o) args[#args + 1] = o; return o end }
-        local books
+    it("tracks the last book as the library changes", function()
+        local books = {}
         local View = load("libraryview.lua", {
-            ["ui/widget/titlebar"] = TitleBar,
             ["ui/widget/container/inputcontainer"] = cls(),
         })
         local v = setmetatable({ width = 1264, sort = "recent" }, { __index = View })
-        v.plugin = { getBooks = function() return books end }
-        v:buildTitleBar()
-        eq(args[1].right_icon, nil)
+        v.plugin = { getBooks = function() return books end, collate = function(a, b) return a < b end }
+        v:reloadData()
+        eq(v.last_book, nil)
+        eq(Core.footerChrome(v.last_book ~= nil)[2].enabled, false)
         books = { { path = "/a.epub", title = "A", status = "reading", percent = 0.3, last_opened = 100 } }
         v:reloadData()
-        eq(#args, 2, "rebuilt once")
-        eq(args[2].right_icon, "book.opened")
-        eq(v._title_changed, true, "whole view repainted")
-        v:reloadData()
-        eq(#args, 2, "no rebuild when nothing changed")
+        eq(v.last_book.path, "/a.epub")
+        eq(Core.footerChrome(true)[2].enabled, true)
         books = {}
         v:reloadData()
-        eq(args[3].right_icon, nil)
+        eq(v.last_book, nil)
     end)
 
     it("the menu button opens the Library menu", function()
-        local a, v = titleBarArgs()
+        local v = viewWith()
         local opened
         v.plugin = { showLibraryMenu = function(_, view) opened = view end }
-        a.left_icon_tap_callback()
+        v:onLeftIcon()
         eq(opened, v)
     end)
 end)
