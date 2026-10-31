@@ -1,53 +1,57 @@
 # Library GUI for KOReader
 
-Library GUI (`library.koplugin`) is a KOReader plugin that replaces the file browser with a library screen that looks and works more like the Kindle's own home screen: book covers with reading progress, a search bar at the top, tabs for Books, Collections, Authors and Series, and a quick settings panel you pull down from the corner.
+Library GUI (`library.koplugin`) is a KOReader plugin that replaces the file browser with a library screen that looks and works more like the Kindle's own home screen: book covers with reading progress, a search bar with the clock and battery at the top, tabs for Books, Collections, Authors and Series, the menu and Resume buttons in the footer, and a Controls panel you pull down from the top-right corner.
 
 It sits alongside KOReader's file browser, History and Collections. It never moves or renames your books, and closing it takes you back to the normal file browser.
 
-| Books, covers | Compact · 2 columns | Controls panel |
+<p align="center"><img src="docs/screenshots/16-books-header-footer.png" width="420" alt="Books tab: search bar, clock and battery on the top row, Continue reading row of covers, and the menu, Resume, sort label and page number in the footer"></p>
+
+## Screenshots
+
+| Compact · 2 columns | Compact with dates | Recently opened |
 |---|---|---|
-| ![Books tab with covers and the Continue reading row](docs/screenshots/01-books-covers.png) | ![Compact view in two columns](docs/screenshots/02-compact-2-columns.png) | ![Controls panel with brightness and warmth sliders](docs/screenshots/09-controls-panel.png) |
+| ![Compact view in two columns, sorted by Last read](docs/screenshots/02-compact-2-columns.png) | ![Compact view sorted by Last read, with dates](docs/screenshots/03-compact.png) | ![The top row switched to Recently opened](docs/screenshots/20-recently-opened.png) |
 
 | Authors | Series | Search with typos |
 |---|---|---|
-| ![Authors tab as a list](docs/screenshots/04-authors.png) | ![Series tab with covers](docs/screenshots/05-series.png) | !["wutherng hieghts" still finds Wuthering Heights](docs/screenshots/06-search-typos.png) |
+| ![Authors tab as a list with a book count for each author](docs/screenshots/04-authors.png) | ![Series tab with covers and progress for each series](docs/screenshots/05-series.png) | !["wutherng hieghts" still finds Wuthering Heights](docs/screenshots/06-search-typos.png) |
 
-| Sort from the footer | View picker in the ☰ menu | Compact with dates |
+| Sort from the footer | The ☰ menu | Controls panel |
 |---|---|---|
-| ![Sort picker opened from the footer label](docs/screenshots/07-sort-picker.png) | ![The ☰ menu with the view picker](docs/screenshots/08-menu-view-picker.png) | ![Compact view sorted by Last read, with dates](docs/screenshots/03-compact.png) |
+| ![Sort picker opened from the footer label](docs/screenshots/07-sort-picker.png) | ![The ☰ menu: sort, view, Barely started, Start with Library, Show clock, Show battery and Use KOReader's keyboard](docs/screenshots/18-menu-settings.png) | ![Controls panel with brightness and warmth sliders and Light, Night mode, Refresh, Wi-Fi, Rotate and Cover sleep buttons](docs/screenshots/09-controls-panel.png) |
 
-| Genres (new in 0.3.2) | Inside a genre | Library in the reader menu (new in 0.3.2) |
+| Genres | Inside a genre | Go to page |
 |---|---|---|
-| ![Collections tab switched to Genres, with a cover and book count for each genre](docs/screenshots/10-genres.png) | ![The Mystery & Thriller genre opened, showing its books](docs/screenshots/11-genre-books.png) | ![KOReader's reader menu with Library at the top](docs/screenshots/12-reader-menu-library.png) |
+| ![Collections tab switched to Genres, with a cover and book count for each genre](docs/screenshots/10-genres.png) | ![The Mystery & Thriller genre opened, showing its books](docs/screenshots/11-genre-books.png) | ![Go to page dialog opened from the page number in the footer](docs/screenshots/19-go-to-page.png) |
 
-| Book details (new in 0.3.3) | A book with no description | Book details from inside a book |
+| Book details | A book with no description | Library in the reader menu |
 |---|---|---|
-| ![Book details card with cover, progress, Continue, genre chips and the full description](docs/screenshots/13-details-card.png) | ![Book details card for a book with no description](docs/screenshots/14-details-card-none.png) | ![The same card opened from the reader menu](docs/screenshots/15-details-card-reader.png) |
+| ![Book details card with cover, progress, Continue, genre chips and the Calibre description](docs/screenshots/13-details-card.png) | ![Book details card for a book with no description](docs/screenshots/14-details-card-none.png) | ![KOReader's reader menu with Library and Book details at the top, and the Library tab icon on the left](docs/screenshots/12-reader-menu-library.png) |
 
-| Search, clock and footer (new in 0.3.4) | Clock and battery off | Settings in the ☰ menu |
-|---|---|---|
-| ![Books tab: search bar and clock on the top row, menu and Resume in the footer](docs/screenshots/16-books-header-footer.png) | ![The same screen with the clock and battery turned off](docs/screenshots/17-books-status-off.png) | ![The ☰ menu with Show clock, Show battery and Use KOReader's keyboard](docs/screenshots/18-menu-settings.png) |
+| Clock and battery off |
+|---|
+| <img src="docs/screenshots/17-books-status-off.png" width="300" alt="The Books tab with the clock and battery turned off"> |
 
-The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's screen size (1264×1680), with a library of public-domain books. Pictures 01–15 still show the old title row. The search bar is now the top row, and the menu and Resume buttons are in the footer (16–18).
+The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's screen size (1264×1680), with a library of public-domain books and generated covers, on v0.3.4.
 
 ## Features
 
-- **Search** is the top row of every tab, so the old "Library" title row is gone and that space is used for books. It filters as you type and searches whatever the tab shows: books on Books, author names on Authors, series on Series, collection names on Collections, and only that shelf's books inside an author, series or collection. Small typos, missing accents and punctuation are forgiven, so `charlote bronte` finds Charlotte Brontë. **Use KOReader's keyboard** (off unless you turn it on, in the ☰ menu) opens KOReader's own text box for the search instead of the Library keyboard.
-- **Filters**: All, Unread, Reading, Barely started and Finished, each with a count.
-- **Sort** by Author, Title, Date added, Last read or Series. Tap the label in the footer (*202 books · Last read ▾*) to change it.
-- **Views**: Small, Medium or Large covers, List, Compact, and Compact · 2 columns. The view, sort and filter are remembered for each tab and each author, series or collection you open.
-- **Dates**: sorted by Last read or Date added, each book shows its date (*3h ago*, *Yesterday*, *12 Oct*). Under Last read, books you've never opened follow in author order.
-- **Continue reading**: a row of the books you are in the middle of, at the top of the Books tab. Tap one and it opens on the page you were on.
+- **Search** is the top row of every tab. It filters as you type and searches whatever the tab shows: books on Books, author names on Authors, series on Series, collection names on Collections, and only that shelf's books inside an author, series or collection. Small typos, missing accents and punctuation are forgiven, so `charlote bronte` finds Charlotte Brontë (**Typo-tolerant search**, on by default). **Use KOReader's keyboard** (off unless you turn it on, in the ☰ menu) opens KOReader's own text box for the search instead of the Library keyboard.
 - **Clock and battery** beside the search bar. **Show clock** and **Show battery** are in the ☰ menu, both on unless you turn one off. The clock changes when the Library redraws, and once a minute while it is on screen. If the device does not report a battery percentage, that part is left out.
-- **Menu and Resume** are buttons in the footer, next to the page number and the sort label, instead of small targets in the top corners. Resume opens the book you read last. Swipe down from the top-right corner still opens Controls.
-- **Recently opened**: switch the top row to show the last five books you opened instead, finished ones included.
+- **Footer**: the ☰ menu and Resume buttons, the book count and sort (*201 books · Last read ▾*), and the page number with arrows. Resume opens the book you read last; long-press it to see which book that is.
+- **Filters**: All, Unread, Reading, Barely started and Finished, each with a count. Barely started means opened but under 5, 10, 20 or 25 % read; pick the cut-off in the ☰ menu.
+- **Sort** by Author, Title, Date added, Last read or Series. Tap the label in the footer to change it, or use the ☰ menu.
+- **Views**: Small, Medium or Large covers, List, Compact, and Compact · 2 columns. The view, sort and filter are remembered for each tab and each author, series or collection you open (**Reset default layout** in the ☰ menu forgets them).
+- **Dates**: sorted by Last read or Date added, each book shows its date (*3h ago*, *Yesterday*, *12 Oct*). Under Last read, books you've never opened follow in author order.
+- **Continue reading**: a row of the books you are in the middle of, at the top of the Books tab. Tap one and it opens on the page you were on. **Show Recently opened** switches the row to the last five books you opened instead, finished ones included.
 - **Collections and Series** as tabs. A series lists its books in order, and swiping past its last page opens the next series.
 - **Genres**: a Collections | Genres switch at the top of the Collections tab. Genres are grouped from each book's keywords and Calibre tags, with a count and progress for each.
-- **Library from inside a book**: **Library** is the first item in the reader's ☰ menu. It saves your place, closes the book and opens the Library.
-- **Book details**: long-press a book, or choose **Book details** in the reader's ☰ menu, for its cover, progress, genres and the full Calibre description. Tap the author, series, a genre or a collection to open that shelf. It's read-only.
-- **Go to page**: tap the page number in the footer (*1 / 51*) and type a page.
+- **Book details**: long-press a book, or choose **Book details** in the reader's ☰ menu, for its cover, progress, series, genres, collections and the Calibre description. Tap the author, series, a genre or a collection to open that shelf. Along the bottom: **Mark finished** (or **Mark unread**), **More** for KOReader's usual book menu, and **Close**.
+- **Library from inside a book**: **Library** is the first item in the reader's ☰ menu, and there is a Library tab (book icon) in the reader's top menu bar. Both save your place, close the book and open the Library.
+- **Go to page**: tap the page number in the footer (*1 / 50*) and type a page.
 - **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
-- **Controls panel**: swipe down from the top-right corner for Brightness and Warmth sliders and buttons for Light, Night, Refresh (clears e-ink ghosting), Wi-Fi, Rotate and Cover sleep. Anything your device doesn't have is left out. That corner stays clear of buttons.
+- **Controls panel**: swipe down from the top-right corner for Brightness and Warmth sliders and buttons for Light, Night mode, Refresh (clears e-ink ghosting), Wi-Fi, Rotate and Cover sleep. Anything your device doesn't have is left out.
+- **Start with Library**: open the Library instead of the file browser when KOReader starts, and come back to it after closing a book.
 - **Covers without other plugins.** Library GUI extracts covers itself in the background. If Project: Title or Cover browser is enabled, it reuses their cover cache.
 - **Gestures**: Open Library, Search library, Resume last book, Rescan library, and Next / Previous in series can be assigned under *Taps and gestures*.
 
