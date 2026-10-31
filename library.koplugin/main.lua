@@ -178,6 +178,14 @@ local function loadCalibre(path)
     return load(path)
 end
 
+-- load_calibre keeps the fields the grid needs and drops comments. The
+-- details card wants the blurb, so it reads the whole file, and only then.
+local function loadCalibreFull(path)
+    local rapidjson = require("rapidjson")
+    if rapidjson.load then return rapidjson.load(path) end
+    return loadCalibre(path)
+end
+
 --- KOReader's own folders, never scanned for books.
 function Library:getSkipDirs()
     local dirs = {}
@@ -213,6 +221,7 @@ function Library:getIndex()
         docsettings = DocSettings,
         history = ReadHistory,
         calibre_load = loadCalibre,
+        calibre_load_full = loadCalibreFull,
         extra_calibre_dirs = { G_reader_settings:readSetting("inbox_dir") },
         clock = function() return require("ui/time").to_s(require("ui/time").now()) end,
     }
@@ -397,7 +406,13 @@ end
 
 function Library:onShowLibrary(focus_search)
     if shared.view then
-        if focus_search then shared.view:focusSearch() end
+        local shelf = shared.open_shelf
+        shared.open_shelf = nil
+        if shelf and shared.view.openNamedShelf then
+            shared.view:openNamedShelf(shelf.kind, shelf.name)
+        elseif focus_search then
+            shared.view:focusSearch()
+        end
         return true
     end
     if self.ui.document then return self:leaveBook(focus_search) end
@@ -418,7 +433,12 @@ function Library:onShowLibrary(focus_search)
         -- Cheap refresh of reading state and history order.
         self:refreshReadingState()
     end
+    local shelf = shared.open_shelf
+    shared.open_shelf = nil
     show()
+    if shelf and shared.view and shared.view.openNamedShelf then
+        shared.view:openNamedShelf(shelf.kind, shelf.name)
+    end
     return true
 end
 
@@ -542,6 +562,8 @@ function Library:openBook(path, view)
     end)
 end
 
+--- The dialog a long-press used to open: reading status, Show folder,
+-- Book information and Open. The details card keeps it on More.
 function Library:showBookDialog(book, view)
     local BookList = require("ui/widget/booklist")
     local file = book.path
@@ -583,6 +605,180 @@ function Library:showBookDialog(book, view)
         buttons = buttons,
     }
     UIManager:show(dialog)
+end
+
+--- Plain blurb for the details card. Calibre, the sidecar and book info come
+-- first; the file itself is opened only when those have nothing. Not called
+-- while the grid is built.
+function Library:fileDescription(path)
+    local doc = self.ui and self.ui.document
+    if doc and doc.file == path then
+        -- The book is already open: read its props, don't open it a second time.
+        if doc.getProps then
+            local ok, props = pcall(doc.getProps, doc)
+            if ok and type(props) == "table" then return props.description end
+        end
+        return nil
+    end
+    if not DocumentRegistry.openDocument then return nil end
+    local ok, opened = pcall(DocumentRegistry.openDocument, DocumentRegistry, path)
+    if not ok or not opened then return nil end
+    local props
+    pcall(function() props = opened:getProps() end)
+    pcall(function() opened:close() end)
+    if type(props) == "table" then return props.description end
+    return nil
+end
+
+function Library:loadDescription(book)
+    if not book or type(book.path) ~= "string" then return nil end
+    local candidates = {}
+    local index = shared.index
+    if index and index.descriptionCandidates then
+        local ok, list = pcall(index.descriptionCandidates, index, book.path)
+        if ok and type(list) == "table" then candidates = list end
+    end
+    local file_text
+    if not Core.firstDescription(candidates) then
+        local ok, raw = pcall(self.fileDescription, self, book.path)
+        if ok then file_text = raw end
+    end
+    return Core.descriptionFrom(candidates, file_text)
+end
+
+function Library:collectionNames(path)
+    local ok, groups = pcall(self.getCollections, self)
+    if not ok or type(groups) ~= "table" then return {} end
+    return Core.collectionNames(path, groups)
+end
+
+--- The open book, from the index when we have it.
+function Library:currentBook()
+    local doc = self.ui and self.ui.document
+    if not doc or type(doc.file) ~= "string" then return nil end
+    local index = shared.index
+    if not index then
+        local ok, idx = pcall(self.ensureIndex, self)
+        if ok then index = idx end
+    end
+    if index then
+        local book = index.by_path and index.by_path[doc.file]
+        if not book and index.recordFor then
+            local ok, rec = pcall(index.recordFor, index, doc.file)
+            if ok then book = rec end
+        end
+        if book then return book end
+    end
+    local name = doc.file:match("[^/]+$") or doc.file
+    return { path = doc.file, name = name, title = Core.stem(name), status = "reading" }
+end
+
+--- Write status the way the file browser's status buttons do, then refresh.
+function Library:setReadingStatus(book, status, view)
+    if not book or type(book.path) ~= "string" then return end
+    local file = book.path
+    local BookList = require("ui/widget/booklist")
+    local handle = file
+    local summary = { status = status }
+    if BookList.hasBookBeenOpened and BookList.hasBookBeenOpened(file) and BookList.getDocSettings then
+        handle = BookList.getDocSettings(file)
+        if handle.readSetting then
+            local existing = handle:readSetting("summary")
+            if type(existing) == "table" then
+                existing.status = status
+                summary = existing
+            end
+        end
+    end
+    filemanagerutil.saveSummary(handle, summary)
+    if BookList.setBookInfoCacheProperty then
+        BookList.setBookInfoCacheProperty(file, "status", status)
+    end
+    if BookList.resetBookInfoCache then BookList.resetBookInfoCache(file) end
+    book.status = status
+    if shared.index and shared.index.refreshBook then
+        pcall(shared.index.refreshBook, shared.index, file)
+    end
+    if view and view.refreshData then view:refreshData() end
+end
+
+--- Open a Genres, Collections, Series or Authors shelf. From inside a book
+-- this closes it and opens the Library on that shelf.
+function Library:openShelf(kind, name, view)
+    if view and view.openNamedShelf then
+        view:openNamedShelf(kind, name)
+        return
+    end
+    if shared.view and shared.view.openNamedShelf then
+        shared.view:openNamedShelf(kind, name)
+        return
+    end
+    shared.open_shelf = { kind = kind, name = name }
+    self:onShowLibrary()
+end
+
+--- The read-only details card. `view` is the Library when opened from a
+-- long-press; from the reader menu it is nil and Continue only closes.
+function Library:showBookDetails(book, view, opts)
+    if not book or type(book.path) ~= "string" then return end
+    opts = opts or {}
+    local already_open = opts.already_open and true or false
+    if not already_open and not view and self.ui and self.ui.document
+            and self.ui.document.file == book.path then
+        already_open = true
+    end
+    local time_left = Core.knownTimeLeft(book)
+    if shared.index and shared.index.knownTimeLeft then
+        local ok, t = pcall(shared.index.knownTimeLeft, shared.index, book.path, book)
+        if ok and t then time_left = t end
+    end
+    local info = {
+        title = book.title or book.name or "",
+        authors = Core.authorNames(book),
+        series = book.series,
+        series_line = Core.seriesLine(book),
+        genres = Core.splitKeywords(book.keywords),
+        collections = {},
+        time_left = time_left,
+        description = self:loadDescription(book),
+    }
+    local ok_names, names = pcall(self.collectionNames, self, book.path)
+    if ok_names and type(names) == "table" then info.collections = names end
+    local Details = require("librarydetails")
+    local Tiles = require("librarytile")
+    local Covers = require("librarycovers")
+    local card
+    card = Details:new{
+        book = book,
+        info = info,
+        already_open = already_open,
+        covers = (view and view.covers) or { store = Covers.getStore(), bim = self:getBIM() },
+        cover_cache = (view and view.cover_cache) or Tiles.newCoverCache(4),
+        on_continue = function()
+            UIManager:close(card)
+            if Core.detailsPrimaryDismisses(already_open) then return end
+            UIManager:nextTick(function() self:openBook(book.path, view) end)
+        end,
+        on_status = function()
+            local action = Core.detailsStatusAction(book)
+            self:setReadingStatus(book, action == "mark_unread" and "new" or "complete", view)
+            if card.setStatusLabel then card:setStatusLabel() end
+            if card.setProgress then card:setProgress() end
+        end,
+        on_close = function()
+            UIManager:close(card)
+        end,
+        on_more = function()
+            UIManager:close(card)
+            UIManager:nextTick(function() self:showBookDialog(book, view) end)
+        end,
+        on_shelf = function(kind, name)
+            UIManager:close(card)
+            UIManager:nextTick(function() self:openShelf(kind, name, view) end)
+        end,
+    }
+    UIManager:show(card)
+    return card
 end
 
 --- The sort picker from the Library's footer label ("202 books · Last read ▾").
@@ -856,6 +1052,27 @@ function Library:addReaderItem(menu_items)
     }
 end
 
+--- "Book details" directly under the reader's Library item. Same card as a
+-- long-press. Continue closes it and returns to the open page.
+local READER_DETAILS_ID = "library_details"
+function Library:addBookDetailsItem(menu_items)
+    local ok, order = pcall(require, "ui/elements/reader_menu_order")
+    if ok and type(order) == "table" and type(order.main) == "table" then
+        Core.placeAfter(order.main, READER_DETAILS_ID, READER_ITEM_ID)
+    end
+    menu_items[READER_DETAILS_ID] = {
+        text = _("Book details"),
+        help_text = _("Title, author, description and progress for this book. Continue returns to the page."),
+        callback = function()
+            if self.ui.menu then self.ui.menu:onTapCloseMenu() end
+            UIManager:nextTick(function()
+                local book = self:currentBook()
+                if book then self:showBookDetails(book, nil, { already_open = true }) end
+            end)
+        end,
+    }
+end
+
 function Library:addReaderTab(menu_items)
     local enabled = self.settings.reader_tab ~= false
     placeReaderTab(enabled)
@@ -1058,6 +1275,7 @@ function Library:addToMainMenu(menu_items)
     }
     if self.ui.document then
         self:addReaderItem(menu_items)
+        self:addBookDetailsItem(menu_items)
         self:addReaderTab(menu_items)
         -- inside a book: Next / Previous in series right under Open Library
         local next_item, prev_item = self:seriesMenuItems()

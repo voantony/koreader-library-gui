@@ -1247,10 +1247,46 @@ function LibraryView:setBarelyThreshold(t)
 end
 
 function LibraryView:onTileHold(tile)
-    if tile.book then
-        self:keyboardGuard()
-        self.plugin:showBookDialog(tile.book, self)
+    if Core.longPressAction(tile) ~= "details" then return end
+    self:keyboardGuard()
+    self.plugin:showBookDetails(tile.book, self)
+end
+
+--- Close the card's destination: the Genres, Collections, Series or Authors
+-- shelf named `name`. One refresh. Returns true when that shelf exists.
+function LibraryView:openNamedShelf(kind, name)
+    if kind ~= "genres" and kind ~= "collections" and kind ~= "series" and kind ~= "authors" then
+        return false
     end
+    self:keyboardGuard()
+    self:resetQuery()
+    local s = self.plugin.settings
+    if kind == "genres" or kind == "collections" then
+        self.tab = "collections"
+        if s then
+            local want = kind == "genres" and "genres" or nil
+            if s.collections_view ~= want then
+                s.collections_view = want
+                if self.plugin.saveSettings then self.plugin:saveSettings() end
+            end
+        end
+    else
+        self.tab = kind
+    end
+    self.group, self.page = nil, 1
+    self.groups_cache = {}
+    if not self.sorted and self.reloadData then self:reloadData() end
+    local groups = self:groupsFor(kind == "genres" and "genres" or self.tab)
+    local g = Core.shelfMatch(name, groups, lower)
+    if g then
+        self.saved_page = 1
+        self.group = g
+        self.page = 1
+    end
+    self:updateSearchHint()
+    self:applyRemembered()
+    self:refreshBody(true)
+    return g ~= nil
 end
 
 function LibraryView:onClose()

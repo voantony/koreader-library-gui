@@ -82,8 +82,10 @@ describe("Library item in the reader menu", function()
         local items = {}
         Library.addToMainMenu(readerSelf(Library, {}), items)
         eq(items.library_open.text, "Library")
+        eq(items.library_details.text, "Book details")
         eq(order.main[1], "library_open")
-        eq(order.main[2], "history")
+        eq(order.main[2], "library_details")
+        eq(order.main[3], "history")
         -- the book-icon Library tab is still there too
         assert(items.library_tab, "Library tab kept")
         -- the file browser gets no such item
@@ -91,6 +93,7 @@ describe("Library item in the reader menu", function()
         local fm = readerSelf(Library, {}); fm.ui.document = nil
         Library.addToMainMenu(fm, fm_items)
         eq(fm_items.library_open, nil)
+        eq(fm_items.library_details, nil)
         package.loaded["ui/elements/reader_menu_order"] = nil
     end)
 
@@ -136,5 +139,27 @@ describe("Library item in the reader menu", function()
         runTicks()
         eq(table.concat(log, "; "), "close book; file browser /books/Emma.epub; library shown")
         package.loaded["apps/filemanager/filemanager"] = nil
+    end)
+
+    it("Book details shows the card for the open book and does not close it", function()
+        local Library = mainLib()
+        local order = { main = { "history" } }
+        package.loaded["ui/elements/reader_menu_order"] = order
+        local items = {}
+        local self = readerSelf(Library, {})
+        local shown
+        self.currentBook = function()
+            return { path = "/books/Emma.epub", title = "Emma", status = "reading" }
+        end
+        self.showBookDetails = function(_, book, view, opts)
+            shown = { path = book.path, view = view, already_open = opts and opts.already_open }
+        end
+        Library.addToMainMenu(self, items)
+        items.library_details.callback()
+        runTicks()
+        eq(shown.path, "/books/Emma.epub")
+        eq(shown.view, nil)
+        eq(shown.already_open, true)
+        package.loaded["ui/elements/reader_menu_order"] = nil
     end)
 end)
