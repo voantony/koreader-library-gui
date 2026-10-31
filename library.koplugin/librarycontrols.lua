@@ -7,6 +7,7 @@ local Event = require("ui/event")
 local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
+local IconWidget = require("ui/widget/iconwidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
@@ -129,6 +130,15 @@ function Controls:makeToggles()
                 UIManager:nextTick(function() plugin:rotateLibrary() end)
             end,
         },
+        exit = {
+            label = _("Exit"), icon = "exit",
+            on = function() return false end,
+            sub = function() return _("Quit KOReader") end,
+            run = function()
+                self:close()
+                UIManager:nextTick(function() plugin:confirmExit() end)
+            end,
+        },
         refresh = {
             label = _("Refresh"), glyph = GLYPH.refresh,
             on = function() return false end,
@@ -144,6 +154,7 @@ function Controls:makeToggles()
         refresh = Device:hasEinkScreen() and true or false,
         cover_sleep = true,
         rotate = not Device:isAlwaysPortrait(),
+        exit = true,
     })
     local out = {}
     for _, id in ipairs(ids) do
@@ -233,10 +244,31 @@ function Controls:paintToggle(bb, t, pos)
     local bg = on and C.COLOR_GRAY_2 or C.COLOR_GRAY_E
     bb:paintCircle(pos.cx, pos.cy, pos.r, bg)
     if not on then bb:paintCircle(pos.cx, pos.cy, pos.r, C.COLOR_GRAY_7, math.max(2, math.floor(3 * self.L.u))) end
-    text(bb, glyph, pos.cx, pos.cy, 30, { align = "center", valign = "center",
-        color = on and C.COLOR_WHITE or C.COLOR_BLACK, bg = bg })
+    if t.icon then
+        -- one of KOReader's own icons (resources/icons), e.g. "exit"
+        local s = math.floor(pos.r * 1.05)
+        local ok, icon = pcall(IconWidget.new, IconWidget, { icon = t.icon, width = s, height = s, alpha = true })
+        if ok and icon then
+            icon:paintTo(bb, pos.cx - math.floor(s / 2), pos.cy - math.floor(s / 2))
+            icon:free()
+        end
+    else
+        text(bb, glyph, pos.cx, pos.cy, 30, { align = "center", valign = "center",
+            color = on and C.COLOR_WHITE or C.COLOR_BLACK, bg = bg })
+    end
     text(bb, t.label, pos.cx, pos.label_y, 15, { align = "center", bold = true })
     text(bb, t.sub(on), pos.cx, pos.sub_y, 12, { align = "center", color = C.COLOR_GRAY_5 })
+end
+
+--- What the panel is drawn over: the Library, or the open book when the
+-- panel was opened from the simple reader menu.
+function Controls:underneath()
+    local plugin = self.plugin
+    local view = plugin and plugin.shared and plugin.shared.view
+    if view then return view end
+    local ui = plugin and plugin.ui
+    if ui and ui.document and ui.view then return ui.view end
+    return nil
 end
 
 function Controls:paintTo(bb, x, y)
@@ -247,7 +279,7 @@ function Controls:paintTo(bb, x, y)
     -- every cover on each slider step is what made dragging feel slow.
     if not self._bg or self._bg_w ~= W or self._bg_h ~= H then
         self:freeBackground()
-        local view = self.plugin and self.plugin.shared and self.plugin.shared.view
+        local view = self:underneath()
         local ok, bg = pcall(Blitbuffer.new, W, H, bb:getType())
         if ok and bg then
             if view then view:paintTo(bg, 0, 0) else bg:paintRect(0, 0, W, H, C.COLOR_WHITE) end
@@ -258,7 +290,7 @@ function Controls:paintTo(bb, x, y)
     if self._bg then
         bb:blitFrom(self._bg, 0, 0, 0, 0, W, H)
     else
-        local view = self.plugin and self.plugin.shared and self.plugin.shared.view
+        local view = self:underneath()
         if view then view:paintTo(bb, 0, 0) else bb:paintRect(0, 0, W, H, C.COLOR_WHITE) end
         bb:darkenRect(0, 0, W, H, 0.45)
     end

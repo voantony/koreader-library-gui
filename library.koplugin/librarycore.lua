@@ -1736,7 +1736,7 @@ function Core.inControlsCorner(x, y, w, h)
 end
 
 -- Row 1 is the screen (Light, Night, Refresh), row 2 the device (Wi-Fi, Rotate, Cover sleep).
-Core.CONTROL_TOGGLES = { "light", "night", "refresh", "wifi", "rotate", "cover_sleep" }
+Core.CONTROL_TOGGLES = { "light", "night", "refresh", "wifi", "rotate", "cover_sleep", "exit" }
 
 --- The toggles this device can use, in panel order. `caps[id]` is true when
 -- the device supports it (light: has a front light; refresh: e-ink screen).

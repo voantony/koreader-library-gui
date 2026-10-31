@@ -55,6 +55,7 @@ local DEFAULTS = {
     fuzzy_search = true,        -- "Typo-tolerant search": accents ignored, small typos forgiven
     remember_views = true,      -- each shelf (collection, author, series, tab) remembers its layout, sort, filter
     controls_panel = true,      -- swipe down from the Library's top-right corner: light, warmth, toggles
+    simple_reader_menu = true,  -- tapping the top of a page opens our small menu; More… opens KOReader's
     -- view_memory: { [key] = { view =, sort =, filter =, t = } }, see Core.viewKey
     -- sleep_cover_prev: KOReader's sleep screen settings from before
     -- "Sleep screen: cover of last book" was turned on (restored when turned off)
@@ -107,6 +108,7 @@ function Library:init()
     end
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
+    if self.ui.document then self:hookReaderMenuTap() end
 
     -- In the file browser: show the Library at start-up, or again after reading.
     -- (file_chooser is only created after plugins, so test for the reader instead.)
@@ -532,6 +534,12 @@ end
 --- Rotate 90° clockwise and bring the Library back where it was: it is laid
 -- out for one screen size, so it is rebuilt.
 function Library:rotateLibrary()
+    if self.ui and self.ui.document then
+        -- in a book (Controls opened from the simple reader menu): just turn
+        -- the page; the Library is not on screen
+        self:sendUIEvent(Event:new("IterateRotation"))
+        return
+    end
     local view = shared.view
     local state = view and view:placeState()
     if view then UIManager:close(view) end
@@ -1383,6 +1391,7 @@ function Library:addToMainMenu(menu_items)
             },
             self:rememberViewsMenu(),
             self:controlsMenu(),
+            self:simpleReaderMenuItem(),
             {
                 text = _("Next in series skips finished books"),
                 help_text = _("Next in series opens the next book you have not finished. Turn this off to always open the very next book."),
@@ -1403,6 +1412,175 @@ function Library:addToMainMenu(menu_items)
         table.insert(menu_items.library.sub_item_table, 2, next_item)
         table.insert(menu_items.library.sub_item_table, 3, prev_item)
     end
+end
+
+----------------------------------------------------------------------------
+-- Simple reader menu (libraryreaderpanel.lua, loaded on first use)
+----------------------------------------------------------------------------
+
+--- Tapping the top of a page opens our small menu instead of KOReader's full
+-- one. KOReader's top tap zones ("readermenu_tap", "readermenu_ext_tap") call
+-- `ReaderMenu:onTapShowMenu(ges)` through a method lookup, so we shadow that
+-- one method on this book's ReaderMenu instance. Nothing else changes: zone
+-- order and sizes, corner taps and Gesture manager actions, the swipe down
+-- from the top, the Menu key and the "Show menu" action all keep KOReader's
+-- behaviour, and the hook goes away with the book. With the setting off (or
+-- KOReader's "Activate menu" set to swipe only) the tap goes straight through.
+function Library:hookReaderMenuTap()
+    local menu = self.ui and self.ui.menu
+    if not menu or rawget(menu, "_library_tap_hook") then return end
+    local original = menu.onTapShowMenu
+    if type(original) ~= "function" then return end
+    local plugin = self
+    menu._library_tap_hook = original
+    menu.onTapShowMenu = function(m, ges)
+        local RM = require("libraryreadermenu")
+        if RM.shouldIntercept(plugin.settings.simple_reader_menu, m.activation_menu)
+                and plugin:showSimpleMenu(function() return original(m, ges) end) then
+            return true
+        end
+        return original(m, ges)
+    end
+end
+
+--- Title of the open book, without building the index on a tap.
+function Library:openBookTitle()
+    local ui = self.ui
+    local doc = ui and ui.document
+    if not doc then return "" end
+    local props = ui.doc_props
+    if type(props) == "table" then
+        local t = props.display_title or props.title
+        if type(t) == "string" and t ~= "" then return t end
+    end
+    local index = shared.index
+    local book = index and index.by_path and index.by_path[doc.file]
+    if book and book.title then return book.title end
+    local name = type(doc.file) == "string" and (doc.file:match("[^/]+$") or doc.file) or ""
+    return Core.stem(name)
+end
+
+function Library:openBookProgress()
+    local ui = self.ui
+    local ok, page = pcall(function() return ui:getCurrentPage() end)
+    local ok2, total = pcall(function() return ui.document:getPageCount() end)
+    page = ok and tonumber(page) or nil
+    total = ok2 and tonumber(total) or nil
+    local pct = (page and total and total > 0) and page / total or nil
+    local RM = require("libraryreadermenu")
+    return RM.progressText(page, total, pct, { page_of = _("Page %d of %d") })
+end
+
+function Library:isPageBookmarked()
+    local bm = self.ui and self.ui.bookmark
+    if not bm or not bm.isPageBookmarked then return false end
+    local ok, on = pcall(bm.isPageBookmarked, bm)
+    return ok and on or false
+end
+
+--- The panel's buttons, in panel order, leaving out what this reader lacks.
+function Library:simpleMenuActions()
+    local ui = self.ui
+    local RM = require("libraryreadermenu")
+    local function send(name, ...)
+        local args = { ... }
+        return function() ui:handleEvent(Event:new(name, unpack(args))) end
+    end
+    local defs = {
+        library = { label = _("Library"), icon = "book.opened",
+            run = function() self:onShowLibrary() end },
+        toc = { label = _("Contents"), icon = "appbar.navigation", run = send("ShowToc") },
+        ["goto"] = { label = _("Go to page"), icon = "appbar.pageview", run = send("ShowGotoDialog") },
+        search = { label = _("Search"), icon = "appbar.search", run = send("ShowFulltextSearchInput") },
+        -- KOReader's own bottom panel: font, size, margins, spacing
+        font = { label = _("Font & size"), glyph = "Aa", bold_glyph = true, run = send("ShowConfigMenu") },
+        light = { label = _("Light"), glyph = "\u{EC98}",
+            run = function()
+                if not self:openControls() then
+                    -- Controls panel turned off: KOReader's light dialog
+                    ui:handleEvent(Event:new("ShowFlDialog"))
+                end
+            end },
+        bookmark = { label = _("Bookmark"), label_on = _("Bookmarked"), icon = "bookmark",
+            on = function() return self:isPageBookmarked() end, run = send("ToggleBookmark") },
+        details = { label = _("Book details"), icon = "info",
+            run = function()
+                local book = self:currentBook()
+                if book then self:showBookDetails(book, nil, { already_open = true }) end
+            end },
+    }
+    local ids = RM.items({
+        toc = ui.toc ~= nil,
+        search = ui.search ~= nil,
+        config = ui.config ~= nil,
+        light = Device:hasFrontlight() and true or false,
+        bookmark = ui.bookmark ~= nil,
+    })
+    local out = {}
+    for _, id in ipairs(ids) do
+        local a = defs[id]; a.id = id
+        out[#out + 1] = a
+    end
+    return out
+end
+
+--- Open the simple reader menu. `on_more` opens KOReader's full menu the way
+-- the top tap always did. Returns true when the panel is (already) open.
+function Library:showSimpleMenu(on_more)
+    if shared.reader_panel then return true end
+    if not (self.ui and self.ui.document) then return false end
+    local ok, Panel = pcall(require, "libraryreaderpanel")
+    if not ok then
+        logger.warn("Library: simple reader menu unavailable", Panel)
+        return false
+    end
+    local panel = Panel:new{
+        title = self:openBookTitle(),
+        subtitle = self:openBookProgress(),
+        actions = self:simpleMenuActions(),
+        on_more = on_more,
+        on_exit = function() self:confirmExit() end,
+        on_close = function(p) if shared.reader_panel == p then shared.reader_panel = nil end end,
+    }
+    shared.reader_panel = panel
+    panel:show()
+    return true
+end
+
+--- Exit KOReader, after a quick "are you sure". Same path as KOReader's own
+-- ☰ → Exit: the "Exit" event (DeviceListener → menu:exitOrRestart), which
+-- saves and closes the book or file browser. Our own windows are closed
+-- first so nothing is left on screen to keep KOReader running.
+function Library:confirmExit()
+    local ConfirmBox = require("ui/widget/confirmbox")
+    UIManager:show(ConfirmBox:new{
+        text = _("Exit KOReader?"),
+        ok_text = _("Exit"),
+        ok_callback = function() self:exitKOReader() end,
+    })
+end
+
+function Library:exitKOReader()
+    if shared.controls then UIManager:close(shared.controls); shared.controls = nil end
+    if shared.reader_panel then UIManager:close(shared.reader_panel); shared.reader_panel = nil end
+    local view = shared.view
+    if view then
+        UIManager:close(view)
+        shared.view = nil
+    end
+    self:sendUIEvent(Event:new("Exit"))
+end
+
+function Library:simpleReaderMenuItem()
+    return {
+        text = _("Simple reader menu"),
+        help_text = _("Tapping the top of the page while reading opens a small menu: Library, Contents, Go to page, Search, Font & size, Light, Bookmark and Book details. More… in that menu opens KOReader's full reader menu. Turn this off to get KOReader's full menu straight away. Swiping down from the top always opens the full menu."),
+        checked_func = function() return self.settings.simple_reader_menu ~= false end,
+        callback = function()
+            self.settings.simple_reader_menu = self.settings.simple_reader_menu == false
+            self:saveSettings()
+        end,
+    }
 end
 
 ----------------------------------------------------------------------------
