@@ -303,9 +303,12 @@ function Index:descriptionCandidates(path)
     if not files or #files == 0 then
         files = self:findCalibreFiles()
     end
-    if self.opts.calibre_load then
+    -- Prefer the full metadata read. KOReader's load_calibre omits comments,
+    -- which is the blurb, and this function is only called when a card opens.
+    local load = self.opts.calibre_load_full or self.opts.calibre_load
+    if load then
         for _, f in ipairs(files or {}) do
-            local ok, entries = pcall(self.opts.calibre_load, f.path)
+            local ok, entries = pcall(load, f.path)
             if ok then
                 local comment = Core.calibreComments(entries, f.dir)[path]
                 if comment then

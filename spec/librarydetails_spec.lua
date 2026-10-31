@@ -221,6 +221,34 @@ describe("description is not part of the grid index", function()
         eq(idx:knownTimeLeft("/mnt/us/Emma.epub", { time_left = 10 }), 10)
         eq(calls >= 1, true)
     end)
+
+    it("uses the full calibre read when the slim loader has no comments", function()
+        local slim, full = 0, 0
+        local idx = Index.new{
+            root = "/mnt/us",
+            fs = {
+                attributes = function(path, field)
+                    local a = path == "/mnt/us/metadata.calibre" and { mode = "file", size = 10, modification = 1 } or nil
+                    if field then return a and a[field] end
+                    return a
+                end,
+            },
+            calibre_load = function()
+                slim = slim + 1
+                return { { lpath = "Emma.epub", title = "Emma" } }
+            end,
+            calibre_load_full = function()
+                full = full + 1
+                return { { lpath = "Emma.epub", comments = "<p>From the full file.</p>" } }
+            end,
+            docsettings = { findSidecarFile = function() return nil end },
+        }
+        local list = idx:descriptionCandidates("/mnt/us/Emma.epub")
+        eq(list[1], "<p>From the full file.</p>")
+        eq(Core.firstDescription(list), "From the full file.")
+        eq(full, 1)
+        eq(slim, 0)
+    end)
 end)
 
 describe("reader menu order", function()

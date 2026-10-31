@@ -178,6 +178,14 @@ local function loadCalibre(path)
     return load(path)
 end
 
+-- load_calibre keeps the fields the grid needs and drops comments. The
+-- details card wants the blurb, so it reads the whole file, and only then.
+local function loadCalibreFull(path)
+    local rapidjson = require("rapidjson")
+    if rapidjson.load then return rapidjson.load(path) end
+    return loadCalibre(path)
+end
+
 --- KOReader's own folders, never scanned for books.
 function Library:getSkipDirs()
     local dirs = {}
@@ -213,6 +221,7 @@ function Library:getIndex()
         docsettings = DocSettings,
         history = ReadHistory,
         calibre_load = loadCalibre,
+        calibre_load_full = loadCalibreFull,
         extra_calibre_dirs = { G_reader_settings:readSetting("inbox_dir") },
         clock = function() return require("ui/time").to_s(require("ui/time").now()) end,
     }
