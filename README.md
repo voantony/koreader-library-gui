@@ -4,6 +4,8 @@ Library GUI (`library.koplugin`) is a KOReader plugin that replaces the file bro
 
 It sits alongside KOReader's file browser, History and Collections. It never moves or renames your books, and closing it takes you back to the normal file browser.
 
+The latest release is **[v0.3.10](https://github.com/voantony/koreader-library-gui/releases/latest)**.
+
 <p align="center"><img src="docs/screenshots/16-books-header-footer.png" width="420" alt="Books tab: search bar, clock and battery on the top row, Continue reading row of covers, and the menu, Resume, sort label and page number in the footer"></p>
 
 ## Screenshots
@@ -28,37 +30,78 @@ It sits alongside KOReader's file browser, History and Collections. It never mov
 |---|---|---|
 | ![Book details card with cover, progress, Continue, genre chips and the Calibre description](docs/screenshots/13-details-card.png) | ![Book details card for a book with no description](docs/screenshots/14-details-card-none.png) | ![KOReader's reader menu with Library and Book details at the top, and the Library tab icon on the left](docs/screenshots/12-reader-menu-library.png) |
 
-| Clock and battery off |
-|---|
-| <img src="docs/screenshots/17-books-status-off.png" width="300" alt="The Books tab with the clock and battery turned off"> |
+| Page label | Long-press jumps to the last page | Clock and battery off |
+|---|---|---|
+| ![Footer page label reading 3 / 12, between the previous and next arrows](docs/screenshots/footer-page-label.png) | ![The same library on page 12 of 12 after a long-press on the next arrow](docs/screenshots/footer-jump-last.png) | <img src="docs/screenshots/17-books-status-off.png" width="300" alt="The Books tab with the clock and battery turned off"> |
 
-The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's screen size (1264×1680), with a library of public-domain books and generated covers, on v0.3.4.
+The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's screen size (1264×1680), with a library of public-domain books and generated covers. The numbered shots are from v0.3.4. `footer-page-label.png` and `footer-jump-last.png` were added with the page-arrow long-press that shipped in v0.3.9.
 
 ## Features
 
-- **Search** is the top row of every tab. It filters as you type and searches whatever the tab shows: books on Books, author names on Authors, series on Series, collection names on Collections, and only that shelf's books inside an author, series or collection. Small typos, missing accents and punctuation are forgiven, so `charlote bronte` finds Charlotte Brontë (**Typo-tolerant search**, on by default). **Use KOReader's keyboard** (off unless you turn it on, in the ☰ menu) opens KOReader's own text box for the search instead of the Library keyboard.
+- **Search** is the top row of every tab. It filters as you type and searches whatever the tab shows: books on Books, author names on Authors, series on Series, collection names on Collections, and only that shelf's books inside an author, series or collection. Small typos, missing accents and punctuation are forgiven, so `charlote bronte` finds Charlotte Brontë (**Typo-tolerant search**, on by default). **Word suggestions** (on by default) puts a row of words from your titles, authors and series above the keyboard; tap one to finish the word. On the Authors list the Library keyboard is letters only. **Use KOReader's keyboard** (off unless you turn it on) opens KOReader's own text box for the search instead of the Library keyboard. On the Library keyboard, typing repaints the text box, and the key you press is inverted with a fast refresh.
 - **Clock and battery** beside the search bar. **Show clock** and **Show battery** are in the ☰ menu, both on unless you turn one off. The clock changes when the Library redraws, and once a minute while it is on screen. If the device does not report a battery percentage, that part is left out.
-- **Footer**: the ☰ menu and Resume buttons, the book count and sort (*201 books · Last read ▾*), and the page number with arrows. Resume opens the book you read last; long-press it to see which book that is.
-- **Filters**: All, Unread, Reading, Barely started and Finished, each with a count. A book you opened but did not start (still on the cover, title page or contents) stays **Unread**. **Barely started** means past the contents but not through the first chapter; **Reading** means at least a chapter in. The Library learns a book's chapters from its table of contents the next time you open it. Until then, or without a table of contents, it goes by percentage: the first 2 % or 3 pages are Unread, then Barely started below 5, 10, 20 or 25 % (pick the cut-off in the ☰ menu).
+- **Footer**: the ☰ menu and Resume buttons, the book count and sort (*201 books · Last read ▾*), and the page number with arrows. Resume opens the most recent book you are still reading; long-press it to see which book that is. A tap on an arrow moves one page. Hold the next arrow to jump to the last page, and hold the previous arrow to jump to the first. Already on that page, nothing happens.
+- **Go to page**: tap the page number in the footer (*3 / 12*) and KOReader's number box opens, titled Go to page. With only one page, the number is not tappable.
+- **Filters**: All, Unread, Reading, Barely started and Finished, each with a count. A book you opened but did not start (still on the cover, title page or contents) stays **Unread** and keeps its NEW badge. **Barely started** means past the contents but not through the first chapter; **Reading** means at least a chapter in (or 25 % past the start of the text when the first chapter is very long). The Library learns a book's chapters from its table of contents the next time you open it. Until then, or without a table of contents, it goes by percentage: the first 2 % or 3 pages are Unread, then Barely started below 5, 10, 20 or 25 % (pick the cut-off in the ☰ menu; the default is 10 %). Unread, Barely started, Reading and Finished do not overlap.
 - **Sort** by Author, Title, Date added, Last read or Series. Tap the label in the footer to change it, or use the ☰ menu.
-- **Views**: Small, Medium or Large covers, List, Compact, and Compact · 2 columns. The view, sort and filter are remembered for each tab and each author, series or collection you open (**Reset default layout** in the ☰ menu forgets them).
-- **Dates**: sorted by Last read or Date added, each book shows its date (*3h ago*, *Yesterday*, *12 Oct*). Under Last read, books you've never opened follow in author order.
-- **Continue reading**: a row of the books you are in the middle of, at the top of the Books tab. Tap one and it opens on the page you were on. **Show Recently opened** switches the row to the last five books you opened instead, finished ones included.
-- **Collections and Series** as tabs. A series lists its books in order, and swiping past its last page opens the next series.
+- **Views**: Small, Medium or Large covers, List, Compact, and Compact · 2 columns. The view, sort and filter are remembered for each tab and each author, series or collection you open (**Remember layout for each shelf**, on by default; **Reset default layout** in the Library's ☰ menu forgets the place you are in). Authors opens as a text list until you change it.
+- **Dates**: sorted by Last read or Date added, each book shows its date (*3h ago*, *Yesterday*, *12 Oct*). Under Last read, books you've never opened follow in author order, then title.
+- **Continue reading**: up to five books KOReader marks as reading, most recently opened first, at the top of the Books tab. Tap one and it opens on the page you were on. The row hides while you are searching, filtering, or inside a shelf. **Top row** (☰ → Library) switches it to **Recently opened**: the last five books you opened, finished and on-hold ones included. The grid underneath leaves the books in that row out, so a book is not on screen twice. The in-library ☰ item **Show Continue reading** (or **Show Recently opened**, matching the top row) hides the row.
+- **Collections and Series** as tabs. A series lists its books in order, and swiping past its last page opens the next series. **Next in series** and **Previous in series** are in the reader's Library menu. **Next in series skips finished books** is on unless you turn it off.
 - **Genres**: a Collections | Genres switch at the top of the Collections tab. Genres are grouped from each book's keywords and Calibre tags, with a count and progress for each.
-- **Book details**: long-press a book, or choose **Book details** in the reader's ☰ menu, for its cover, progress, series, genres, collections and the Calibre description. Tap the author, series, a genre or a collection to open that shelf. Along the bottom: **Mark finished** (or **Mark unread**), **More** for KOReader's usual book menu, and **Close**.
+- **Book details**: long-press a book, or choose **Book details** in the reader's ☰ menu, for its cover, progress, series, genres, collections and the Calibre description. Tap the author, series, a genre or a collection to open that shelf. An author, series, genre or collection that contains only this book is plain text, not a link. Along the bottom: **Mark finished** (or **Mark unread**), **More** for KOReader's usual book menu, and **Close**. From inside a book, **Continue** closes the card and returns to the page.
 - **Library from inside a book**: **Library** is the first item in the reader's ☰ menu, and there is a Library tab (book icon) in the reader's top menu bar. Both save your place, close the book and open the Library.
-- **Go to page**: tap the page number in the footer (*1 / 50*) and type a page.
-- **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
-- **Controls panel**: swipe down from the top-right corner for Brightness and Warmth sliders and buttons for Light, Night mode, Refresh (clears e-ink ghosting), Wi-Fi, Rotate, Cover sleep and Exit (asks first, then quits KOReader). Anything your device doesn't have is left out.
-- **Top tap while reading** (☰ → Library → **Top tap opens**): **Library GUI bar** (the default) opens a small menu: Library, Contents, Go to page, Search, Font & size, Light, Bookmark, Book details, Exit, and **More…** for KOReader's full reader menu. **KOReader menu** opens KOReader's own reader menu with that same tap. A swipe down from the top opens KOReader's menu with either choice. The Library screen stays as it is, and the search keyboard stays on **Use KOReader's keyboard**.
-- **Start with Library**: open the Library instead of the file browser when KOReader starts, and come back to it after closing a book.
+- **Back where you were**: opening a book from the Library remembers the tab, the shelf, the filter, the sort, the list or grid, the page, and the search text when the book came from search results. Closing the book and opening the Library again in the same run of KOReader puts you back there. Back from a shelf still goes to that shelf's parent list. A fresh start of KOReader does not reuse the spot.
+- **Short flicks turn the page.** A short swipe that starts on a cover turns the page. A plain tap still opens the book.
+- **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen, including from the Library or the file browser. Turning it off puts back the sleep screen you had.
+- **Controls panel**: swipe down from the top-right corner for Brightness and Warmth sliders and buttons for Light, Night mode, Refresh (clears e-ink ghosting), Wi-Fi, Rotate, Cover sleep and Exit (asks first, then quits KOReader). Anything your device doesn't have is left out. Swipe up or tap outside the panel to close it.
+- **Top tap while reading** (☰ → Library → **Top tap opens**): **Library GUI bar** (the default) opens a small menu: Library, Contents, Go to page, Search, Font & size, Readability, Light, Bookmark, Book details, Exit, and **More…** for KOReader's full reader menu. Buttons the open book cannot use are left out. **KOReader menu** opens KOReader's own reader menu with that same tap. A swipe down from the top opens KOReader's menu with either choice. If KOReader's own "Activate menu" is set to swipe only, a tap opens nothing. The Library screen stays as it is, and the search keyboard stays on **Use KOReader's keyboard**.
+- **Readability** (in that bar, for reflowable books such as EPUB): one tap makes the open book easier to read, and never makes a setting weaker than you already had it. Contrast at least index 30, font weight at least +1, line spacing at least 115 %, left/right and top/bottom margins at least 15, hyphenation on, and a full refresh at least every 6 pages when it was off or less often. Tap it again (**Undo**) and that book's previous values come back. PDFs and comics have no Readability button.
+- **Status bar on a Kindle Colorsoft**: **Keep status bar above the bezel** (on unless you turn it off, and only offered on the Colorsoft) raises KOReader's status bar once, and only while its bottom margin is still at KOReader's default. Turning it off puts the old margin back.
+- **Start with Library**: open the Library instead of the file browser when KOReader starts. **Return to Library after closing a book** (on by default, and only available while Start with Library is on) brings the Library back after you close a book.
 - **Covers without other plugins.** Library GUI extracts covers itself in the background. If Project: Title or Cover browser is enabled, it reuses their cover cache.
-- **Gestures**: Open Library, Search library, Resume last book, Rescan library, and Next / Previous in series can be assigned under *Taps and gestures*.
+- **Gestures**, under *Taps and gestures*: Library, Search library, Resume last book (Library), Rescan library, and, while reading, Next in series and Previous in series.
+
+## Settings
+
+Two menus. The button in the Library footer is the layout for the place you are in. The rest live in KOReader's own menu, ☰ → **Library**, and are saved with the other plugin settings (`library_plugin`).
+
+**Library footer ☰** (the dialog in the screenshot above): sort (Author, Title, Date added, Last read, Series), view (Small, Medium or Large covers, List, Compact, Compact · 2 columns), show or hide the top row, the Barely started percentage, reset this place's layout, **Start with Library**, **Rescan**, **Show clock**, **Show battery**, **Use KOReader's keyboard**, and **Close Library**.
+
+**☰ → Library**:
+
+| Setting | Default |
+|---|---|
+| Open Library | — |
+| Next in series / Previous in series | while reading, when the book has one |
+| Rescan library | — |
+| Open Library at startup | off |
+| Return to Library after closing a book | on; only while Open Library at startup is on |
+| Library folder | KOReader's home folder |
+| Clear cover cache | deletes `koreader/cache/library_covers/`; covers are made again in the background |
+| Include hidden folders | off |
+| Barely started | below 10 % (5, 10, 20 or 25) |
+| Top row | Continue reading, or Recently opened |
+| Sleep screen: cover of last book | KOReader's own sleep-screen setting |
+| Library tab in the reader menu | on |
+| Rounded keyboard in search | on; ignored while Use KOReader's keyboard is on |
+| Use KOReader's keyboard | off |
+| Show clock | on |
+| Show battery | on |
+| Word suggestions | on |
+| Typo-tolerant search | on |
+| Remember layout for each shelf | on; long-press forgets every shelf, and the Books tab's default stays |
+| Controls panel (swipe down from top-right corner) | on, on a touch device |
+| Timing log (for testing) | off; one line per open, page turn, filter and search, in `library_timing.log` in the KOReader folder |
+| Top tap opens | Library GUI bar, or KOReader menu |
+| Keep status bar above the bezel | on; the item is enabled on the Kindle Colorsoft |
+| Next in series skips finished books | on |
+
+**Show clock**, **Show battery**, **Use KOReader's keyboard**, **Start with Library** and the Barely started cut-off are in both menus.
 
 ## Install
 
-1. Download **[library-gui-X.Y.Z.zip](https://github.com/voantony/koreader-library-gui/releases/latest)** from the [latest release](https://github.com/voantony/koreader-library-gui/releases/latest). The file is named `library-gui-X.Y.Z.zip`.
+1. Download **[library-gui-0.3.10.zip](https://github.com/voantony/koreader-library-gui/releases/latest)** from the [latest release](https://github.com/voantony/koreader-library-gui/releases/latest). Releases name the zip `library-gui-X.Y.Z.zip`. On the latest release, v0.3.10, that file is `library-gui-0.3.10.zip`, with `library-gui-0.3.10.zip.sha256` beside it. The link above stays on whatever release GitHub marks Latest.
 2. Unzip it. You get a folder called `library.koplugin`.
 3. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).
@@ -94,6 +137,16 @@ Ideas came from [Project: Title](https://github.com/joshuacant/ProjectTitle), [S
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the tests and the emulator. `tools/emulator/shoot.sh smoke` runs the plugin in headless KOReader and writes a PNG to `emulator-out/smoke/`. Benchmarks are in [bench/RESULTS.md](bench/RESULTS.md).
+
+## Roadmap
+
+Not in v0.3.10. Nothing below is in the plugin yet.
+
+| Upcoming | Status |
+|---|---|
+| **A–Z scrubber strip** — a letter strip for jumping through a long list | Planned |
+| **Bigger page buttons** — larger previous and next buttons in the footer | Planned |
+| **Number-only go-to-page keypad** — a keypad that shows only digits. Go to page today opens KOReader's number box | Planned |
 
 ## Support
 
