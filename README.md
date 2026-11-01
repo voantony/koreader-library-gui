@@ -60,7 +60,7 @@ The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's sc
 
 ## Install
 
-1. Download **library-gui-X.Y.Z.zip** from the [latest release](https://gitlab.com/voantony/koreader-library-gui/-/releases) on GitLab. The file is named `library-gui-X.Y.Z.zip`.
+1. Download **[library-gui-0.4.0.zip](https://gitlab.com/voantony/koreader-library-gui/-/releases/v0.4.0/downloads/library-gui-0.4.0.zip)** from the [v0.4.0 release](https://gitlab.com/voantony/koreader-library-gui/-/releases/v0.4.0) on GitLab.
 2. Unzip it. You get a folder called `library.koplugin`.
 3. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).
