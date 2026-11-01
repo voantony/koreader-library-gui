@@ -9,7 +9,7 @@ Layout, top to bottom:
     status chips     All | Unread | Reading | Barely started | Finished
     continue reading (Books tab, no search or filter:
                      the books in progress, with percent and last-read time)
-    cover grid or list
+    cover grid or list   an A–Z strip on the right when sorted by title, author or series
     footer           menu, Resume, page x of y, sort
                      (in a series: "2 of 5 read")
 
@@ -54,6 +54,7 @@ local TopContainer = require("ui/widget/container/topcontainer")
 local time = require("ui/time")
 local util = require("util")
 local Core = require("librarycore")
+local Scrubber = require("libraryscrubber")
 local Tiles = require("librarytile")
 local Covers = require("librarycovers")
 local Keyboard = require("librarykeyboard")
@@ -178,6 +179,11 @@ function LibraryView:init()
         -- where a finger went down, so a short flick that KOReader reports as a tap still turns the page
         Touch = { GestureRange:new{ ges = "touch", range = self.dimen } },
         TapOutside = { GestureRange:new{ ges = "tap", range = self.dimen } },
+        -- A drag that starts on the A–Z strip and slides off it, and the lift.
+        Pan = { GestureRange:new{ ges = "pan", range = self.dimen } },
+        PanRelease = { GestureRange:new{ ges = "pan_release", range = self.dimen } },
+        HoldPan = { GestureRange:new{ ges = "hold_pan", range = self.dimen } },
+        HoldRelease = { GestureRange:new{ ges = "hold_release", range = self.dimen } },
     }
     if Device:hasKeys() then
         self.key_events = {
@@ -676,14 +682,25 @@ function LibraryView:buildTabs()
 end
 
 local FILTER_SHORT = { barely = _("Barely") }
---- A tappable area (at least a thumb's height) around a widget.
-local TapArea = InputContainer:extend{ callback = nil, min_h = 0 }
+--- A tappable area around a widget. `min_w` / `min_h` grow the hit target
+-- without growing the widget inside it. `align = "center"` keeps that
+-- widget in the middle of the larger target.
+local TapArea = InputContainer:extend{ callback = nil, min_h = 0, min_w = 0, align = "left" }
 
 function TapArea:init()
     local size = self[1]:getSize()
-    self.dimen = Geom:new{ x = 0, y = 0, w = size.w, h = math.max(size.h, self.min_h) }
+    self.dimen = Geom:new{
+        x = 0, y = 0,
+        w = math.max(size.w, self.min_w or 0),
+        h = math.max(size.h, self.min_h or 0),
+    }
     self.ges_events = { TapArea = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } } }
-    self[1] = LeftContainer:new{ dimen = Geom:new{ w = self.dimen.w, h = self.dimen.h }, self[1] }
+    local box = Geom:new{ w = self.dimen.w, h = self.dimen.h }
+    if self.align == "center" then
+        self[1] = CenterContainer:new{ dimen = box, self[1] }
+    else
+        self[1] = LeftContainer:new{ dimen = box, self[1] }
+    end
 end
 
 function TapArea:getSize() return self.dimen end
@@ -778,15 +795,25 @@ function LibraryView:buildFooter(page, pages, total, kind)
         local pos, count = self:seriesPosition()
         if pos then left = left .. " · " .. T(_("series %1 of %2 · swipe on for the next"), pos, count) end
     end
-    -- Page arrows are real buttons (a thumb-sized target each), as well as swipes.
-    -- A tap moves one page. A long-press jumps to the first or last page.
+    -- Page arrows are real buttons, as well as swipes. A tap moves one page.
+    -- A long-press jumps to the first or last page.
+    -- The chevron stays the same size as before. The hit target grows sideways
+    -- to about 10 mm (at least 120 px at 300 dpi) so it is easy to hit on a
+    -- Kindle, without a taller or filled-in footer.
     local touch = Tiles.minTouch()
+    local hit_w = math.max(touch, self:pageHit())
     local icon = Screen:scaleBySize(20)
+    local pad_v = math.max(0, math.floor((touch - icon) / 2))
+    local pad_h = math.max(pad_v, math.ceil((hit_w - icon) / 2))
     local function arrow(name, dir, enabled)
         local btn = IconButton:new{
             icon = name,
             width = icon, height = icon,
-            padding = math.floor((touch - icon) / 2),
+            padding = pad_v,
+            padding_left = pad_h,
+            padding_right = pad_h,
+            padding_top = pad_v,
+            padding_bottom = pad_v,
             enabled = enabled,
             allow_flash = false, -- the page redraw is the feedback: one refresh, not two
             callback = function() self:turnPage(dir, false) end,
@@ -797,13 +824,18 @@ function LibraryView:buildFooter(page, pages, total, kind)
         return btn
     end
     local more = self:inSeries() -- past the last page: the next series
-    -- "3 / 12": its own tap target between the arrows, only as wide as the
-    -- number, and only a tap. A tap opens the number box. A long-press on an
-    -- arrow still jumps to the first or last page. One page: nothing to type.
+    -- "3 / 12": its own tap target between the arrows, and only a tap. The
+    -- number is drawn at the same size as before and centered in a wider
+    -- invisible target (about 10 mm). A tap opens the number box. A long-press
+    -- on an arrow still jumps to the first or last page. One page: nothing to type.
     local page_label = TextWidget:new{ text = T(_("%1 / %2"), page, pages), face = f, bold = true }
     self.page_label = nil
     if pages > 1 then
-        page_label = TapArea:new{ min_h = touch, callback = function() self:showPageJump() end, page_label }
+        page_label = TapArea:new{
+            min_w = hit_w, min_h = touch, align = "center",
+            callback = function() self:showPageJump() end,
+            page_label,
+        }
         self.page_label = page_label
     end
     local pager = HorizontalGroup:new{
@@ -880,7 +912,8 @@ function LibraryView:buildFooter(page, pages, total, kind)
     }
 end
 
-function LibraryView:buildGrid(items, kind, layout, height)
+function LibraryView:buildGrid(items, kind, layout, height, width)
+    width = width or self.width
     local grid = VerticalGroup:new{ align = "left" }
     self.tiles = {}
     self.missing_covers = {}
@@ -924,18 +957,19 @@ function LibraryView:buildGrid(items, kind, layout, height)
     if #items == 0 then
         local msg = self.query ~= "" and T(_("No books match “%1”."), self.query) or _("Nothing here yet.")
         grid = CenterContainer:new{
-            dimen = Geom:new{ w = self.width, h = math.floor(height / 2) },
+            dimen = Geom:new{ w = width, h = math.floor(height / 2) },
             TextWidget:new{ text = msg, face = Font:getFace("infofont") },
         }
     end
     -- Fixed height, so the footer stays at the bottom however many rows there are.
     return TopContainer:new{
-        dimen = Geom:new{ w = self.width, h = height },
+        dimen = Geom:new{ w = width, h = height },
         grid,
     }
 end
 
-function LibraryView:buildList(items, kind, layout, height)
+function LibraryView:buildList(items, kind, layout, height, width)
+    width = width or self.width
     self.tiles = {}
     self.missing_covers = {}
     local compact = Core.isCompact(self.view_mode)
@@ -944,7 +978,7 @@ function LibraryView:buildList(items, kind, layout, height)
     -- Compact · 2 columns: down the left column, then the right, with a rule between.
     local ncols = Core.listColumns(self.view_mode)
     local rule = Size.line.thin
-    local col_w = ncols == 1 and self.width or math.floor((self.width - rule) / ncols)
+    local col_w = ncols == 1 and width or math.floor((width - rule) / ncols)
     local columns = Core.columnMajor(items, layout.rows, ncols)
     local now = os.time()
     local groups = {}
@@ -990,12 +1024,12 @@ function LibraryView:buildList(items, kind, layout, height)
     if #items == 0 then
         local msg = self.query ~= "" and T(_("No books match “%1”."), self.query) or _("Nothing here yet.")
         list = CenterContainer:new{
-            dimen = Geom:new{ w = self.width, h = math.floor(height / 2) },
+            dimen = Geom:new{ w = width, h = math.floor(height / 2) },
             TextWidget:new{ text = msg, face = Font:getFace("infofont") },
         }
     end
     return TopContainer:new{
-        dimen = Geom:new{ w = self.width, h = height },
+        dimen = Geom:new{ w = width, h = height },
         list,
     }
 end
@@ -1113,6 +1147,23 @@ function LibraryView:buildBody()
         end
     end
 
+    -- The A–Z strip takes a slice of the width, so covers are laid out in
+    -- what remains and never slide under it. Date and progress sorts leave
+    -- the grid full width (no strip).
+    local letter_mode = (#data.items > 0) and Core.scrubberMode{
+        enabled = self:scrubberEnabled(),
+        kind = data.kind,
+        sort = self.sort,
+        in_series = self:inSeries(),
+        tab = self.group and self.group.kind or self.tab,
+    } or nil
+    local grid_w, letter_w = self.width, 0
+    if letter_mode then
+        letter_w = Core.scrubberWidth(self:screenDpi())
+        grid_w = Core.gridContentWidth(self.width, letter_w)
+        letter_w = self.width - grid_w
+    end
+
     local layout
     if Core.isCompact(self.view_mode) then
         layout = Core.listLayout(grid_h, Tiles.compactRowHeight(), 0, { max_rows = 40 })
@@ -1125,7 +1176,7 @@ function LibraryView:buildBody()
         layout = Core.listLayout(grid_h, self.list_row_h, Size.padding.small, { max_rows = 10 })
     else
         -- Under the Continue reading strip, accept smaller covers for a second row.
-        layout = Core.gridLayout(self.width, grid_h, self.cols, self.label_h, self.gap, strip and 0.6 or nil)
+        layout = Core.gridLayout(grid_w, grid_h, self.cols, self.label_h, self.gap, strip and 0.6 or nil)
     end
     self.layout = layout
 
@@ -1140,9 +1191,17 @@ function LibraryView:buildBody()
     local continue_missing = self.missing_covers
     local grid
     if self.view_mode == "list" or Core.isCompact(self.view_mode) then
-        grid = self:buildList(page_items, data.kind, layout, grid_h)
+        grid = self:buildList(page_items, data.kind, layout, grid_h, grid_w)
     else
-        grid = self:buildGrid(page_items, data.kind, layout, grid_h)
+        grid = self:buildGrid(page_items, data.kind, layout, grid_h, grid_w)
+    end
+    if self.scrubber and self.scrubber.freeSnap then self.scrubber:freeSnap() end
+    self.scrubber = nil
+    if letter_mode and letter_w > 0 then
+        local anchor_item = page_items[1]
+        local anchor = anchor_item and Core.scrubberBucket(Core.scrubberItemKey(anchor_item, letter_mode)) or nil
+        self.scrubber = self:buildScrubber(grid_items, layout.per_page, letter_mode, letter_w, grid_h, anchor)
+        grid = HorizontalGroup:new{ align = "top", grid, self.scrubber }
     end
     for _, p in ipairs(continue_missing) do table.insert(self.missing_covers, p) end
     local footer = self:buildFooter(page, pages, #data.items, data.kind)
@@ -1646,7 +1705,91 @@ end
 function LibraryView:onNextPage() self:turnPage(1); return true end
 function LibraryView:onPrevPage() self:turnPage(-1); return true end
 
+--- Dots per inch, or KOReader's 167 baseline when the device does not say.
+function LibraryView:screenDpi()
+    if Screen and Screen.getDPI then
+        local ok, dpi = pcall(function() return Screen:getDPI() end)
+        if ok and type(dpi) == "number" and dpi >= 1 then return dpi end
+    end
+    return 167
+end
+
+--- How wide a page arrow or the page number must be to hit, in pixels.
+function LibraryView:pageHit()
+    return Core.pageHitPx(self:screenDpi())
+end
+
+--- The A–Z strip is on unless the setting says otherwise.
+function LibraryView:scrubberEnabled()
+    if self.show_scrubber ~= nil then return self.show_scrubber and true or false end
+    return Core.showScrubber(self.plugin and self.plugin.settings)
+end
+
+function LibraryView:setShowScrubber(on)
+    on = on and true or false
+    if self.show_scrubber == on then return end
+    self.show_scrubber = on
+    self:refreshBody(true)
+end
+
+--- Nil when this list should not show the strip. Otherwise the mode, the
+-- reserved width and the width left for the covers.
+function LibraryView:scrubberPlan(kind, n_items)
+    if n_items ~= nil and n_items < 1 then return nil end
+    local mode = Core.scrubberMode({
+        enabled = self:scrubberEnabled(),
+        kind = kind or "books",
+        sort = self.sort,
+        in_series = self.inSeries and self:inSeries() or false,
+        tab = self.group and self.group.kind or self.tab,
+    })
+    if not mode then return nil end
+    local width = self.width or 0
+    local strip_w = Core.scrubberWidth(self:screenDpi())
+    local content_w = Core.gridContentWidth(width, strip_w)
+    return { mode = mode, width = width - content_w, content_w = content_w }
+end
+
+function LibraryView:buildScrubber(items, per_page, mode, width, height, anchor)
+    local index = Core.scrubberIndex(items, per_page, function(item)
+        return Core.scrubberItemKey(item, mode)
+    end)
+    return Scrubber:new{
+        view = self,
+        index = index,
+        anchor = anchor,
+        width = width,
+        height = height,
+        dpi = self:screenDpi(),
+        screen_w = self.dimen and self.dimen.w or self.width,
+        screen_h = self.dimen and self.dimen.h or 0,
+        show_parent = self,
+    }
+end
+
+--- True when a gesture began on the letter strip.
+function LibraryView:gestureOnScrubber(ges)
+    local d = self.scrubber and self.scrubber.dimen
+    if not d or not ges then return false end
+    local function inside(p)
+        return p and p.x and p.y
+            and p.x >= d.x and p.y >= d.y
+            and p.x < d.x + d.w and p.y < d.y + d.h
+    end
+    return inside(ges.pos) or inside(ges.start_pos)
+end
+
 function LibraryView:onSwipe(_, ges)
+    if self.scrubber and self.scrubber._drag then
+        local pos = ges and (ges.end_pos or ges.pos)
+        if pos then self.scrubber._pending = pos end
+        self.scrubber:endDrag()
+        return true
+    end
+    if self.scrubber and self:gestureOnScrubber(ges) then
+        self.scrubber:onSwipeScrubber(nil, ges)
+        return true
+    end
     local dir = ges.direction
     if dir == "south" and self.plugin.openControls
             and Core.inControlsCorner(ges.pos.x, ges.pos.y, self.dimen.w, self.dimen.h)
@@ -1662,6 +1805,40 @@ function LibraryView:onSwipe(_, ges)
         return false
     end
     return true
+end
+
+--- A drag that has left the letter strip keeps driving it. Anywhere else, a
+-- pan is not a page turn.
+function LibraryView:onPan(_, ges)
+    if self.scrubber and self.scrubber._drag then
+        self.scrubber:dragTo(ges and ges.pos)
+        return true
+    end
+    return false
+end
+
+function LibraryView:onHoldPan(_, ges)
+    if self.scrubber and self.scrubber._drag then
+        self.scrubber:dragTo(ges and ges.pos)
+        return true
+    end
+    return false
+end
+
+function LibraryView:onPanRelease()
+    if self.scrubber and self.scrubber._drag then
+        self.scrubber:endDrag()
+        return true
+    end
+    return false
+end
+
+function LibraryView:onHoldRelease()
+    if self.scrubber and self.scrubber._drag then
+        self.scrubber:endDrag()
+        return true
+    end
+    return false
 end
 
 --- Remember where a finger went down. Never consumes the event.
@@ -1758,6 +1935,7 @@ end
 
 function LibraryView:onCloseWidget()
     self._closed = true
+    if self.scrubber and self.scrubber.freeSnap then self.scrubber:freeSnap() end
     if self.timing then
         for _, name in ipairs({ "page", "filter", "search" }) do self.timing:cancel(name) end
     end

@@ -49,6 +49,8 @@ The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's sc
 - **Book details**: long-press a book, or choose **Book details** in the reader's ☰ menu, for its cover, progress, series, genres, collections and the Calibre description. Tap the author, series, a genre or a collection to open that shelf. Along the bottom: **Mark finished** (or **Mark unread**), **More** for KOReader's usual book menu, and **Close**.
 - **Library from inside a book**: **Library** is the first item in the reader's ☰ menu, and there is a Library tab (book icon) in the reader's top menu bar. Both save your place, close the book and open the Library.
 - **Go to page**: tap the page number in the footer (*1 / 50*) and type a page.
+- **A–Z strip**: when books are sorted by title, author or series, and on the Authors, Series, Collections and Genres lists, a letter strip runs down the right edge. Tap or drag a letter to jump to the first page under it; a big letter shows while your finger is down. Turn it off in the ☰ menu (**A–Z strip**).
+- **Bigger page buttons**: the footer arrows and the page number are about 10 mm wide to hit (at least 120 px on a 300 dpi Kindle), without making the footer taller.
 - **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
 - **Controls panel**: swipe down from the top-right corner for Brightness and Warmth sliders and buttons for Light, Night mode, Refresh (clears e-ink ghosting), Wi-Fi, Rotate, Cover sleep and Exit (asks first, then quits KOReader). Anything your device doesn't have is left out.
 - **Top tap while reading** (☰ → Library → **Top tap opens**): **Library GUI bar** (the default) opens a small menu: Library, Contents, Go to page, Search, Font & size, Light, Bookmark, Book details, Exit, and **More…** for KOReader's full reader menu. **KOReader menu** opens KOReader's own reader menu with that same tap. A swipe down from the top opens KOReader's menu with either choice. The Library screen stays as it is, and the search keyboard stays on **Use KOReader's keyboard**.
@@ -58,7 +60,7 @@ The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's sc
 
 ## Install
 
-1. Download **[library-gui-X.Y.Z.zip](https://github.com/voantony/koreader-library-gui/releases/latest)** from the [latest release](https://github.com/voantony/koreader-library-gui/releases/latest). The file is named `library-gui-X.Y.Z.zip`.
+1. Download **library-gui-X.Y.Z.zip** from the [latest release](https://gitlab.com/voantony/koreader-library-gui/-/releases) on GitLab. The file is named `library-gui-X.Y.Z.zip`.
 2. Unzip it. You get a folder called `library.koplugin`.
 3. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).

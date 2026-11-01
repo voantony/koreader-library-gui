@@ -53,6 +53,7 @@ local DEFAULTS = {
     use_koreader_keyboard = false, -- "Use KOReader's keyboard": stock InputDialog for the search bar
     show_clock = true,          -- clock beside the search bar
     show_battery = true,        -- battery percentage beside the search bar
+    show_scrubber = true,       -- A–Z strip on the right when the list is alphabetical
     fuzzy_search = true,        -- "Typo-tolerant search": accents ignored, small typos forgiven
     search_suggestions = true,  -- "Word suggestions": words from the library above the search keyboard
     timing_log = false,         -- "Timing log": how long opening, page turns, filters and search take (librarytiming.lua)
@@ -316,6 +317,7 @@ function Library:newView()
         use_koreader_keyboard = Core.useKoreaderKeyboard(self.settings),
         show_clock = Core.showClock(self.settings),
         show_battery = Core.showBattery(self.settings),
+        show_scrubber = Core.showScrubber(self.settings),
         fuzzy_search = Core.fuzzySearch(self.settings),
         search_suggestions = self.settings.search_suggestions ~= false,
         timing = self:timer(),
@@ -1031,6 +1033,17 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = (Core.showScrubber(self.settings) and "✓ " or "") .. _("A–Z strip"),
+            callback = function()
+                close()
+                self.settings.show_scrubber = not Core.showScrubber(self.settings)
+                self:saveSettings()
+                if view.setShowScrubber then view:setShowScrubber(Core.showScrubber(self.settings)) end
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = (Core.showClock(self.settings) and "✓ " or "") .. _("Show clock"),
             callback = function()
                 close()
@@ -1422,6 +1435,18 @@ function Library:addToMainMenu(menu_items)
                     self.settings.show_battery = not Core.showBattery(self.settings)
                     self:saveSettings()
                     if shared.view then shared.view:setShowBattery(self.settings.show_battery) end
+                end,
+            },
+            {
+                text = _("A–Z strip"),
+                help_text = _("A letter strip down the right edge of the library. Tap or drag a letter to jump to the first page of books (or shelves) that start with it. Shown when books are sorted by title, author or series, and on the Authors, Series, Collections and Genres lists. Hidden for Date added, Last read and Size, and inside a series."),
+                checked_func = function() return Core.showScrubber(self.settings) end,
+                callback = function()
+                    self.settings.show_scrubber = not Core.showScrubber(self.settings)
+                    self:saveSettings()
+                    if shared.view and shared.view.setShowScrubber then
+                        shared.view:setShowScrubber(Core.showScrubber(self.settings))
+                    end
                 end,
             },
             {
