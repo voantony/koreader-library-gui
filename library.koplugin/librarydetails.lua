@@ -283,6 +283,8 @@ end
 ----------------------------------------------------------------------------
 
 local Details = InputContainer:extend{
+    name = "LibraryBookDetails",
+    modal = true, -- above the reader (and the search keyboard, if it is still up)
     book = nil,
     info = nil,
     already_open = false,
@@ -346,9 +348,10 @@ function Details:init()
         TapCard = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } },
         SwipeCard = { GestureRange:new{ ges = "swipe", range = function() return self.dimen end } },
     }
-    if Device.input and Device.input.group then
+    if Device:hasKeys() and Device.input and Device.input.group then
+        local back = Core.detailsCloseKeys(Device.input.group.Back, Device:hasFewKeys())
         self.key_events = {
-            Close = { { Device.input.group.Back } },
+            Close = { { back } },
             NextPage = { { Device.input.group.PgFwd } },
             PrevPage = { { Device.input.group.PgBack } },
         }
@@ -730,8 +733,7 @@ end
 
 function Details:onTapCard(_, ges)
     local p = ges and ges.pos
-    local b = self.frame_box
-    if p and b and (p.x < b.x or p.y < b.y or p.x >= b.x + b.w or p.y >= b.y + b.h) then
+    if p and Core.detailsTapOutside(p.x, p.y, self.frame_box) then
         if self.on_close then self.on_close() else UIManager:close(self) end
     end
     return true

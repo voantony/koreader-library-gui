@@ -40,6 +40,48 @@ function M.shouldIntercept(enabled, activation)
     return activation ~= "swipe"
 end
 
+-- What a tap at the top of the page opens while reading.
+-- "bar": the Library GUI bar (the default). "koreader": KOReader's own reader menu.
+M.TOP_TAP_BAR = "bar"
+M.TOP_TAP_KOREADER = "koreader"
+M.TOP_TAP_MODES = { M.TOP_TAP_BAR, M.TOP_TAP_KOREADER }
+
+--- The stored choice: "bar" or "koreader". Missing and unknown values are
+-- "bar". The old "Simple reader menu" checkbox (off) counts as "koreader"
+-- until an explicit `top_tap` is saved.
+function M.topTapMode(settings)
+    if type(settings) ~= "table" then return M.TOP_TAP_BAR end
+    if settings.top_tap == M.TOP_TAP_KOREADER or settings.top_tap == M.TOP_TAP_BAR then
+        return settings.top_tap
+    end
+    if settings.simple_reader_menu == false then return M.TOP_TAP_KOREADER end
+    return M.TOP_TAP_BAR
+end
+
+--- Write the choice into the plugin settings. The old checkbox is kept in
+-- step so a previous version of the plugin still honours it.
+function M.setTopTapMode(settings, mode)
+    settings.top_tap = mode == M.TOP_TAP_KOREADER and M.TOP_TAP_KOREADER or M.TOP_TAP_BAR
+    settings.simple_reader_menu = settings.top_tap == M.TOP_TAP_BAR
+    return settings.top_tap
+end
+
+--- Before defaults fill in "bar", keep a turned-off Simple reader menu as
+-- KOReader's menu. Does nothing once `top_tap` is set.
+function M.migrateTopTap(settings)
+    if type(settings) ~= "table" then return end
+    if settings.top_tap == nil and settings.simple_reader_menu == false then
+        settings.top_tap = M.TOP_TAP_KOREADER
+    end
+end
+
+--- True when this top-of-page tap should open the Library GUI bar.
+-- "KOReader menu" leaves the tap to KOReader's own handler. With "swipe",
+-- a tap opens nothing in KOReader, so it opens nothing here either.
+function M.opensLibraryBar(settings, activation)
+    return M.shouldIntercept(M.topTapMode(settings) == M.TOP_TAP_BAR, activation)
+end
+
 --- "Page 12 of 300 · 4 %" (or just the percentage when pages are unknown).
 -- fmt: optional template function (KOReader's T) and translations table.
 function M.progressText(page, total, percent, tr)
@@ -105,6 +147,25 @@ function M.layout(w, h, n)
     L.panel = { x = x, y = -r, w = pw, h = y + r }
     L.bottom = y
     return L
+end
+
+--- Run `fn` only after the panel's own refresh has been painted.
+-- `nextTick` runs at the start of the next frame, before that refresh is
+-- consumed, so anything opened there is painted underneath a refresh that
+-- only covers the panel. `tickAfterNext` waits one frame more, for the
+-- repaint. Older KOReader builds only have `nextTick`.
+function M.afterPanelClose(ui, fn)
+    if type(fn) ~= "function" then return end
+    if type(ui) == "table" and type(ui.tickAfterNext) == "function" then
+        ui:tickAfterNext(fn)
+        return "tickAfterNext"
+    end
+    if type(ui) == "table" and type(ui.nextTick) == "function" then
+        ui:nextTick(fn)
+        return "nextTick"
+    end
+    fn()
+    return "now"
 end
 
 --- What a point hits: "tile", i / "more" / "exit" / "panel" / nil (outside: close).

@@ -2045,6 +2045,61 @@ function Core.detailsPrimaryDismisses(already_open)
     return already_open and true or false
 end
 
+--- How the card is shown. `"ui"` with no region is a full-screen update.
+-- A bare show enqueues nothing, so a refresh already queued for a smaller
+-- strip (the reader menu) is the only one that reaches the screen: the
+-- card is painted, and only its top is visible.
+function Core.detailsShowMode()
+    return "ui"
+end
+
+--- Keys that close the card: Back, plus Menu (or Left on a few-key device).
+function Core.detailsCloseKeys(back_keys, few_keys)
+    local keys = {}
+    if type(back_keys) == "table" then
+        for _, k in ipairs(back_keys) do
+            if type(k) == "string" and k ~= "" then keys[#keys + 1] = k end
+        end
+    end
+    if #keys == 0 then keys[1] = "Back" end
+    local extra = few_keys and "Left" or "Menu"
+    local have = false
+    for _, k in ipairs(keys) do if k == extra then have = true break end end
+    if not have then keys[#keys + 1] = extra end
+    return keys
+end
+
+--- A tap outside the card's frame dismisses it. Inside the frame it does not
+-- (buttons and links handle themselves).
+function Core.detailsTapOutside(x, y, frame)
+    if type(x) ~= "number" or type(y) ~= "number" or type(frame) ~= "table" then
+        return false
+    end
+    local fx, fy = tonumber(frame.x) or 0, tonumber(frame.y) or 0
+    local fw, fh = tonumber(frame.w) or 0, tonumber(frame.h) or 0
+    return x < fx or y < fy or x >= fx + fw or y >= fy + fh
+end
+
+--- The rectangle a search-results refresh may push to the screen while the
+-- keyboard is up: the list under the header, stopping at the keyboard.
+-- Extending through the keyboard makes one near-fullscreen update, which is
+-- what flashes a full-screen card through the keys on every keystroke.
+function Core.searchRefreshRegion(screen_w, screen_h, body_y, keyboard_h)
+    local w = math.floor(tonumber(screen_w) or 0)
+    local sh = math.floor(tonumber(screen_h) or 0)
+    local y = math.floor(tonumber(body_y) or 0)
+    local kb = math.floor(tonumber(keyboard_h) or 0)
+    if w < 1 then w = 1 end
+    if sh < 1 then sh = 1 end
+    if y < 0 then y = 0 end
+    if y > sh - 1 then y = sh - 1 end
+    if kb < 0 then kb = 0 end
+    if kb > sh - y - 1 then kb = sh - y - 1 end
+    local h = sh - y - kb
+    if h < 1 then h = 1 end
+    return { x = 0, y = y, w = w, h = h }
+end
+
 --- Author names to show, each one tappable on its own.
 function Core.authorNames(book)
     if type(book) ~= "table" then return {} end

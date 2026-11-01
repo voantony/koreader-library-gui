@@ -58,7 +58,8 @@ local DEFAULTS = {
     timing_log = false,         -- "Timing log": how long opening, page turns, filters and search take (librarytiming.lua)
     remember_views = true,      -- each shelf (collection, author, series, tab) remembers its layout, sort, filter
     controls_panel = true,      -- swipe down from the Library's top-right corner: light, warmth, toggles
-    simple_reader_menu = true,  -- tapping the top of a page opens our small menu; More… opens KOReader's
+    top_tap = "bar",            -- "Top tap opens": "bar" (Library GUI bar) | "koreader" (KOReader's menu)
+    simple_reader_menu = true,  -- kept in step with top_tap; false is the old checkbox for KOReader's menu
     bezel_lift = true,          -- Colorsoft: lift KOReader's status bar above the bezel (librarybezel.lua)
     -- bezel_prev: the status bar's bottom margin from before we lifted it
     -- view_memory: { [key] = { view =, sort =, filter =, t = } }, see Core.viewKey
@@ -108,6 +109,8 @@ Library.collate = collate
 
 function Library:init()
     self.settings = G_reader_settings:readSetting(SETTINGS_KEY) or {}
+    -- The old checkbox has to be read before the default writes top_tap = "bar".
+    require("libraryreadermenu").migrateTopTap(self.settings)
     for k, v in pairs(DEFAULTS) do
         if self.settings[k] == nil then self.settings[k] = v end
     end
@@ -879,7 +882,10 @@ function Library:showBookDetails(book, view, opts)
             UIManager:nextTick(function() self:openShelf(kind, name, view) end)
         end,
     }
-    UIManager:show(card)
+    -- "ui" with no region covers the whole screen. The reader menu (and the
+    -- top bar) close with a refresh of only their own strip; without this,
+    -- that strip is the only update, and the card's buttons never appear.
+    UIManager:show(card, Core.detailsShowMode())
     return card
 end
 
@@ -1202,7 +1208,8 @@ function Library:addBookDetailsItem(menu_items)
         help_text = _("Title, author, description and progress for this book. Continue returns to the page."),
         callback = function()
             if self.ui.menu then self.ui.menu:onTapCloseMenu() end
-            UIManager:nextTick(function()
+            -- After the menu's own refresh, not in the same frame as it.
+            require("libraryreadermenu").afterPanelClose(UIManager, function()
                 local book = self:currentBook()
                 if book then self:showBookDetails(book, nil, { already_open = true }) end
             end)
@@ -1449,7 +1456,7 @@ function Library:addToMainMenu(menu_items)
                     if shared.view then shared.view.timing = self:timer() end
                 end,
             },
-            self:simpleReaderMenuItem(),
+            self:topTapMenu(),
             self:bezelLiftMenuItem(),
             {
                 text = _("Next in series skips finished books"),
@@ -1477,14 +1484,16 @@ end
 -- Simple reader menu (libraryreaderpanel.lua, loaded on first use)
 ----------------------------------------------------------------------------
 
---- Tapping the top of a page opens our small menu instead of KOReader's full
--- one. KOReader's top tap zones ("readermenu_tap", "readermenu_ext_tap") call
--- `ReaderMenu:onTapShowMenu(ges)` through a method lookup, so we shadow that
--- one method on this book's ReaderMenu instance. Nothing else changes: zone
--- order and sizes, corner taps and Gesture manager actions, the swipe down
--- from the top, the Menu key and the "Show menu" action all keep KOReader's
--- behaviour, and the hook goes away with the book. With the setting off (or
--- KOReader's "Activate menu" set to swipe only) the tap goes straight through.
+--- Tapping the top of a page opens the Library GUI bar, or KOReader's own
+-- reader menu, depending on "Top tap opens". KOReader's top tap zones
+-- ("readermenu_tap", "readermenu_ext_tap") call `ReaderMenu:onTapShowMenu(ges)`
+-- through a method lookup, so we shadow that one method on this book's
+-- ReaderMenu instance. "KOReader menu" calls that original method: the same
+-- action KOReader uses for its top menu. Nothing else changes: zone order
+-- and sizes, corner taps and Gesture manager actions, the swipe down from
+-- the top, the Menu key and the "Show menu" action all keep KOReader's
+-- behaviour, and the hook goes away with the book. KOReader's "Activate menu"
+-- set to swipe only still lets the original method decide (a tap opens nothing).
 function Library:hookReaderMenuTap()
     local menu = self.ui and self.ui.menu
     if not menu or rawget(menu, "_library_tap_hook") then return end
@@ -1494,7 +1503,7 @@ function Library:hookReaderMenuTap()
     menu._library_tap_hook = original
     menu.onTapShowMenu = function(m, ges)
         local RM = require("libraryreadermenu")
-        if RM.shouldIntercept(plugin.settings.simple_reader_menu, m.activation_menu)
+        if RM.opensLibraryBar(plugin.settings, m.activation_menu)
                 and plugin:showSimpleMenu(function() return original(m, ges) end) then
             return true
         end
@@ -1635,15 +1644,34 @@ function Library:exitKOReader()
     self:sendUIEvent(Event:new("Exit"))
 end
 
-function Library:simpleReaderMenuItem()
+local TOP_TAP_NAMES = {
+    bar = _("Library GUI bar"),
+    koreader = _("KOReader menu"),
+}
+
+function Library:setTopTapMode(mode)
+    require("libraryreadermenu").setTopTapMode(self.settings, mode)
+    self:saveSettings()
+end
+
+--- ☰ → Library → Top tap opens: the Library GUI bar (default) or KOReader's menu.
+function Library:topTapMenu()
+    local RM = require("libraryreadermenu")
+    local items = {}
+    for _, mode in ipairs(RM.TOP_TAP_MODES) do
+        table.insert(items, {
+            text = TOP_TAP_NAMES[mode],
+            radio = true,
+            checked_func = function() return RM.topTapMode(self.settings) == mode end,
+            callback = function() self:setTopTapMode(mode) end,
+        })
+    end
     return {
-        text = _("Simple reader menu"),
-        help_text = _("Tapping the top of the page while reading opens a small menu: Library, Contents, Go to page, Search, Font & size, Readability, Light, Bookmark and Book details. More… in that menu opens KOReader's full reader menu. Turn this off to get KOReader's full menu straight away. Swiping down from the top always opens the full menu."),
-        checked_func = function() return self.settings.simple_reader_menu ~= false end,
-        callback = function()
-            self.settings.simple_reader_menu = self.settings.simple_reader_menu == false
-            self:saveSettings()
+        text_func = function()
+            return T(_("Top tap opens: %1"), TOP_TAP_NAMES[RM.topTapMode(self.settings)])
         end,
+        help_text = _("What a tap at the top of the page does while you are reading. Library GUI bar opens the small menu (Library, Contents, Go to page, Search, Font & size, Readability, Light, Bookmark, Book details and Exit); More… there opens KOReader's full reader menu. KOReader menu opens KOReader's own reader menu on that tap. A swipe down from the top opens KOReader's menu with either choice. The Library screen stays as it is, and the search keyboard follows Use KOReader's keyboard."),
+        sub_item_table = items,
     }
 end
 

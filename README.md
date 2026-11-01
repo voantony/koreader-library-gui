@@ -51,14 +51,14 @@ The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's sc
 - **Go to page**: tap the page number in the footer (*1 / 50*) and type a page.
 - **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
 - **Controls panel**: swipe down from the top-right corner for Brightness and Warmth sliders and buttons for Light, Night mode, Refresh (clears e-ink ghosting), Wi-Fi, Rotate, Cover sleep and Exit (asks first, then quits KOReader). Anything your device doesn't have is left out.
-- **Simple reader menu**: while reading, tap the top of the page for a small menu: Library, Contents, Go to page, Search, Font & size, Light, Bookmark, Book details, Exit, and **More…** for KOReader's full reader menu. Swiping down from the top still opens the full menu. Turn it off in ☰ → Library → **Simple reader menu**.
+- **Top tap while reading** (☰ → Library → **Top tap opens**): **Library GUI bar** (the default) opens a small menu: Library, Contents, Go to page, Search, Font & size, Light, Bookmark, Book details, Exit, and **More…** for KOReader's full reader menu. **KOReader menu** opens KOReader's own reader menu with that same tap. A swipe down from the top opens KOReader's menu with either choice. The Library screen stays as it is, and the search keyboard stays on **Use KOReader's keyboard**.
 - **Start with Library**: open the Library instead of the file browser when KOReader starts, and come back to it after closing a book.
 - **Covers without other plugins.** Library GUI extracts covers itself in the background. If Project: Title or Cover browser is enabled, it reuses their cover cache.
 - **Gestures**: Open Library, Search library, Resume last book, Rescan library, and Next / Previous in series can be assigned under *Taps and gestures*.
 
 ## Install
 
-1. Download **[library-gui-0.3.8.zip](https://github.com/voantony/koreader-library-gui/releases/download/v0.3.8/library-gui-0.3.8.zip)** from the [latest release](https://github.com/voantony/koreader-library-gui/releases/latest).
+1. Download **[library-gui-X.Y.Z.zip](https://github.com/voantony/koreader-library-gui/releases/latest)** from the [latest release](https://github.com/voantony/koreader-library-gui/releases/latest). The file is named `library-gui-X.Y.Z.zip`.
 2. Unzip it. You get a folder called `library.koplugin`.
 3. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).

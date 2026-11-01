@@ -637,11 +637,19 @@ end
 ----------------------------------------------------------------------------
 
 function LibraryView:keyboardHeight()
-    if self.search_input:isKeyboardVisible() and self.search_input.keyboard then
-        local kb = self.search_input.keyboard
-        return (kb.dimen and kb.dimen.h) or kb:getSize().h
+    local input = self.search_input
+    if not (input and input.keyboard) then return 0 end
+    local kb = input.keyboard
+    local shown = input.isKeyboardVisible and input:isKeyboardVisible()
+    if not shown and UIManager._window_stack then
+        for _, entry in ipairs(UIManager._window_stack) do
+            if entry.widget == kb then shown = true; break end
+        end
     end
-    return 0
+    if not shown then return 0 end
+    local h = kb.dimen and kb.dimen.h
+    if not h and kb.getSize then h = kb:getSize().h end
+    return h or 0
 end
 
 function LibraryView:buildTabs()
@@ -1256,12 +1264,31 @@ function LibraryView:bodyRegion()
     return Geom:new{ x = 0, y = self.body_y, w = self.dimen.w, h = self.dimen.h - self.body_y }
 end
 
+--- While the keyboard is up, the results refresh stops above the keyboard.
+-- The old region ran from the header to the bottom edge, so every keystroke
+-- pushed one near-fullscreen update through the keys. The keys are painted
+-- with the library (they sit above it) but are not part of this refresh:
+-- a second refresh of the keyboard would be merged with this one, since the
+-- two rectangles share an edge, and the full-height flash would be back.
+function LibraryView:resultsRegion()
+    local r = Core.searchRefreshRegion(self.dimen.w, self.dimen.h, self.body_y or 0, self:keyboardHeight())
+    return Geom:new{ x = r.x, y = r.y, w = r.w, h = r.h }
+end
+
 --- Rebuild and refresh only the results region (fast path used while typing).
 function LibraryView:refreshBody(full)
     -- A full repaint already covers the header, so the clock can move with it.
     if full or self._title_changed then self:updateStatusText() end
     self:buildBody()
-    local region = (full or self._title_changed) and self.dimen or self:bodyRegion()
+    local typing = self:keyboardHeight() > 0
+    local region
+    if typing then
+        region = self:resultsRegion()
+    elseif full or self._title_changed then
+        region = self.dimen
+    else
+        region = self:bodyRegion()
+    end
     self._title_changed = nil
     UIManager:setDirty(self, function()
         return "ui", region, true
