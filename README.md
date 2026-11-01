@@ -60,7 +60,7 @@ The screenshots were taken in the KOReader emulator at the Kindle Colorsoft's sc
 
 ## Install
 
-1. Download **[library-gui-0.4.0.zip](https://gitlab.com/voantony/koreader-library-gui/-/releases/v0.4.0/downloads/library-gui-0.4.0.zip)** from the [v0.4.0 release](https://gitlab.com/voantony/koreader-library-gui/-/releases/v0.4.0) on GitLab.
+1. Download **[library-gui-0.4.0.zip](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.4.0/downloads/library-gui-0.4.0.zip)** from the [v0.4.0 release](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.4.0) on GitLab.
 2. Unzip it. You get a folder called `library.koplugin`.
 3. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).
@@ -89,7 +89,7 @@ Delete `koreader/plugins/library.koplugin/` and restart KOReader. To remove ever
 
 ## About this project
 
-This is the first thing I've developed in public. I built it with Grok Bot, and I'm happy to take any suggestions and feedback: [open an issue](https://github.com/voantony/koreader-library-gui/issues) for bugs, ideas or anything that looks off on your device.
+This is the first thing I've developed in public. I built it with Grok Bot, and I'm happy to take any suggestions and feedback: [open an issue](https://gitlab.com/antonyvo/koreader-library-gui/-/issues) for bugs, ideas or anything that looks off on your device.
 
 Ideas came from [Project: Title](https://github.com/joshuacant/ProjectTitle), [SimpleUI](https://github.com/doctorhetfield-cmd/simpleui.koplugin) and ZenOS. Only ideas: no code was copied from them or from KOReader, and Library GUI is written from scratch under the MIT licence.
 
