@@ -3,13 +3,17 @@ Dev-only probe. Runs inside KOReader, drives Library GUI, and writes PNGs.
 
 Environment:
   GUIPROBE_OUT     directory for PNGs and probe.log (required)
-  GUIPROBE_SCRIPT  scenario name: smoke, footer (default smoke)
+  GUIPROBE_SCRIPT  scenario name: smoke, footer, az, toptap (default smoke)
   GUIPROBE_TAG     optional filename prefix
 
 Scenarios
   smoke   one shot of the library, to prove the harness
   footer  page label "3 / 12", the Go to page dialog, and (when the next
           arrow has a long-press) the last page after that long-press
+  az      A–Z strip: Title sort, tap a letter, drag with the big letter,
+          the Authors list, and Last read (no strip)
+  toptap  in a book: top tap with "Library GUI bar", then "KOReader menu",
+          then Book details opened from the reader
 ]]
 
 local Device = require("device")
@@ -316,6 +320,168 @@ scenarios.footer = function()
             local label = view.page_label and findText(view.page_label) or ""
             P("AFTER JUMP", label, "page", view.page, "pages", view.pages)
             shot("footer-jump-last")
+        end)
+    end)
+end
+
+-- A–Z strip (#37): Title sort with the strip, a tap on a letter, a drag
+-- with the big letter up, the Authors list, and Last read (no strip).
+local function stripPoint(letter)
+    local sc = V().scrubber
+    if not (sc and sc.dimen) then return nil end
+    local letters = sc.letters
+    for i, l in ipairs(letters) do
+        if l == letter then
+            local d = sc.dimen
+            local y = d.y + math.floor((i - 0.5) * d.h / #letters)
+            return d.x + math.floor(d.w / 2), y
+        end
+    end
+end
+
+local function firstTitle()
+    local view = V()
+    local it = view.current and view.current.items and view.current.items[view.layout and ((view.page - 1) * view.layout.per_page + 1) or 1]
+    return it and (it.title or it.name) or "?"
+end
+
+scenarios.az = function()
+    whenLibrary(function()
+        q(0.5, function()
+            dismissNotices()
+            local view = V()
+            view.show_continue = false
+            if view.closeKeyboard then view:closeKeyboard() end
+            view:resort("title")
+        end)
+        q(0.8, function()
+            dismissNotices()
+            local view = V()
+            local sc = view.scrubber
+            P("AZ title", "strip", sc and sc.dimen and (sc.dimen.x .. "," .. sc.dimen.y .. " " .. sc.dimen.w .. "x" .. sc.dimen.h) or "none",
+                "page", view.page, "pages", view.pages)
+            if not sc then state.ok = false; P("FAIL no strip on Title sort") end
+            shot("az-01-title-sort")
+        end)
+        q(0.4, function()
+            local x, y = stripPoint("M")
+            if not x then state.ok = false; return end
+            local before = V().page
+            P("tap M", x, y)
+            ges("tap", x, y)
+            P("AZ after tap M", "page", before, "->", V().page)
+            if V().page == before then state.ok = false; P("FAIL tap M did not move") end
+        end)
+        q(0.8, function()
+            dismissNotices()
+            shot("az-02-after-tap-M")
+        end)
+        q(0.4, function()
+            local sc = V().scrubber
+            local x, y = stripPoint("T")
+            P("drag to T", x, y)
+            sc:dragTo(Geom:new{ x = x, y = y, w = 0, h = 0 })
+        end)
+        q(0.5, function()
+            UIManager:forceRePaint()
+            Screen:shot(OUT .. "/" .. TAG .. "az-03-drag-bubble-T.png")
+            P("SHOT", "az-03-drag-bubble-T.png")
+            local before = V().page
+            V().scrubber:endDrag()
+            P("AZ after drag T", "page", before, "->", V().page)
+        end)
+        q(0.8, function()
+            dismissNotices()
+            shot("az-04-after-drag-T")
+        end)
+        q(0.4, function() V():setTab("authors") end)
+        q(0.8, function()
+            dismissNotices()
+            local view = V()
+            P("AZ authors", "strip", view.scrubber and "yes" or "no")
+            if not view.scrubber then state.ok = false; P("FAIL no strip on Authors") end
+            shot("az-05-authors")
+        end)
+        q(0.4, function()
+            local view = V()
+            view:setTab("books")
+            view.show_continue = false
+            view:resort("recent")
+        end)
+        q(0.8, function()
+            dismissNotices()
+            local view = V()
+            P("AZ last read", "strip", view.scrubber and "yes" or "no")
+            if view.scrubber then state.ok = false; P("FAIL strip shown on Last read") end
+            shot("az-06-last-read-no-strip")
+        end)
+    end)
+end
+
+-- Top tap while reading (#34) and the details card from the reader (#35).
+local function RUI()
+    return require("apps/reader/readerui").instance
+end
+
+local function topWidget()
+    local st = UIManager._window_stack
+    return st[#st] and st[#st].widget
+end
+
+scenarios.toptap = function()
+    whenLibrary(function()
+        q(0.5, function()
+            dismissNotices()
+            local view = V()
+            local book
+            for _, b in ipairs(view.sorted or {}) do
+                if b.path and b.path:match("%.epub$") then book = b; break end
+            end
+            book = book or view.sorted[1]
+            P("open", tostring(book.path))
+            lib():openBook(book.path, view)
+        end)
+        local tries = 0
+        local function waitReader()
+            tries = tries + 1
+            local ui = RUI()
+            if ui and ui.document and ui.menu then
+                P("reader up", "tries", tries)
+                return
+            end
+            if tries > 30 then state.ok = false; P("FAIL reader did not open"); return end
+            table.insert(steps, 1, { d = 1, f = waitReader })
+        end
+        q(1, waitReader)
+        q(2, function()
+            local ui = RUI()
+            ui.library.settings.top_tap = "bar"
+            ui.menu:onTapShowMenu({ ges = "tap", pos = Geom:new{ x = 600, y = 40, w = 0, h = 0 } })
+            P("top tap (bar)", "stack", stackLine())
+        end)
+        q(1, function() shot("toptap-01-library-gui-bar") end)
+        q(0.3, function()
+            local w = topWidget()
+            if w and w ~= RUI() then UIManager:close(w) end
+            local ui = RUI()
+            require("libraryreadermenu").setTopTapMode(ui.library.settings, "koreader")
+            ui.menu:onTapShowMenu({ ges = "tap", pos = Geom:new{ x = 600, y = 40, w = 0, h = 0 } })
+            P("top tap (koreader)", "stack", stackLine())
+        end)
+        q(1, function() shot("toptap-02-koreader-menu") end)
+        q(0.3, function()
+            local ui = RUI()
+            if ui.menu.onTapCloseMenu then ui.menu:onTapCloseMenu() end
+            require("libraryreadermenu").setTopTapMode(ui.library.settings, "bar")
+            local book = ui.library:currentBook()
+            P("details from reader", tostring(book and book.title))
+            ui.library:showBookDetails(book, nil, { already_open = true })
+        end)
+        q(1.2, function()
+            local w = topWidget()
+            P("details", w and w.name or "?")
+            if not (w and w.name == "LibraryBookDetails") then state.ok = false; P("FAIL details card not on top") end
+            shot("toptap-03-details-from-reader")
         end)
     end)
 end
