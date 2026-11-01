@@ -17,7 +17,12 @@ local function load(file, extra)
         if extra[name] ~= nil then return extra[name] end
         if real[name] then return old_require(name) end
         if name == "gettext" then return function(s) return s end end
-        if name == "ffi/util" then return { template = function(s) return s end } end
+        if name == "ffi/util" then
+            return { template = function(s, ...)
+                local a = { ... }
+                return (s:gsub("%%(%d)", function(i) return tostring(a[tonumber(i)]) end))
+            end }
+        end
         return stub()
     end
     local ok, mod = pcall(dofile, "library.koplugin/" .. file)
@@ -77,6 +82,27 @@ local function readerLib(Library, ui, settings)
     return self
 end
 
+describe("opening the next screen after the panel closes", function()
+    it("waits until the panel strip has been repainted", function()
+        local ran = false
+        local ui = {
+            tickAfterNext = function(_, fn) ran = true; fn() end,
+            nextTick = function() error("nextTick paints the next screen in the same frame as the strip") end,
+        }
+        eq(RM.afterPanelClose(ui, function() end), "tickAfterNext")
+        eq(ran, true)
+    end)
+
+    it("uses nextTick only when that is all KOReader offers", function()
+        local ran = false
+        local ui = { nextTick = function(_, fn) ran = true; fn() end }
+        eq(RM.afterPanelClose(ui, function() end), "nextTick")
+        eq(ran, true)
+        eq(RM.afterPanelClose({}, function() end), "now")
+        eq(RM.afterPanelClose(nil, nil), nil)
+    end)
+end)
+
 describe("Simple reader menu: pure parts", function()
     it("lists the buttons in panel order, leaving out what the reader lacks", function()
         same(RM.items({ toc = true, search = true, config = true, light = true, bookmark = true }),
@@ -91,6 +117,39 @@ describe("Simple reader menu: pure parts", function()
         eq(RM.shouldIntercept(nil, nil), true)
         eq(RM.shouldIntercept(false, "swipe_tap"), false, "setting off")
         eq(RM.shouldIntercept(true, "swipe"), false, "swipe-only menu: a tap opens nothing")
+    end)
+    it("chooses the Library GUI bar by default, and KOReader's menu when asked", function()
+        eq(RM.topTapMode(nil), "bar")
+        eq(RM.topTapMode({}), "bar")
+        eq(RM.topTapMode({ simple_reader_menu = true }), "bar")
+        eq(RM.topTapMode({ top_tap = "bar" }), "bar")
+        eq(RM.topTapMode({ top_tap = "koreader" }), "koreader")
+        eq(RM.topTapMode({ top_tap = "nope" }), "bar", "unknown value is the bar")
+        eq(RM.topTapMode({ simple_reader_menu = false }), "koreader", "old checkbox, off")
+        eq(RM.topTapMode({ top_tap = "bar", simple_reader_menu = false }), "bar", "explicit choice wins")
+        eq(RM.topTapMode({ top_tap = "koreader", simple_reader_menu = true }), "koreader")
+        local s = {}
+        eq(RM.setTopTapMode(s, "koreader"), "koreader")
+        eq(s.top_tap, "koreader")
+        eq(s.simple_reader_menu, false, "old checkbox stays in step")
+        eq(RM.setTopTapMode(s, "bar"), "bar")
+        eq(s.top_tap, "bar")
+        eq(s.simple_reader_menu, true)
+        eq(RM.setTopTapMode(s, "other"), "bar")
+        local legacy = { simple_reader_menu = false }
+        RM.migrateTopTap(legacy)
+        eq(legacy.top_tap, "koreader")
+        RM.migrateTopTap(legacy)
+        eq(legacy.top_tap, "koreader", "a saved choice is left alone")
+        local chosen = { top_tap = "bar", simple_reader_menu = false }
+        RM.migrateTopTap(chosen)
+        eq(chosen.top_tap, "bar")
+        eq(RM.opensLibraryBar({ top_tap = "bar" }, "tap"), true)
+        eq(RM.opensLibraryBar({ top_tap = "koreader" }, "tap"), false)
+        eq(RM.opensLibraryBar({ top_tap = "koreader" }, "swipe_tap"), false)
+        eq(RM.opensLibraryBar({ top_tap = "bar" }, "swipe"), false, "swipe-only: a tap opens nothing")
+        eq(RM.opensLibraryBar({}, nil), true)
+        eq(RM.opensLibraryBar({ simple_reader_menu = false }, "swipe_tap"), false)
     end)
     it("writes the progress line", function()
         eq(RM.progressText(12, 300, 12 / 300), "Page 12 of 300  \u{00B7}  4 %")
@@ -178,7 +237,7 @@ describe("Simple reader menu: the top tap", function()
         by.toc.run(); by["goto"].run(); by.search.run(); by.font.run(); by.bookmark.run()
         eq(table.concat(log, ";"), "event ShowToc;event ShowGotoDialog;event ShowFulltextSearchInput;event ShowConfigMenu;event ToggleBookmark")
     end)
-    it("goes straight through when the setting is off", function()
+    it("goes straight through when the old checkbox is off", function()
         local Library = mainLib()
         package.loaded.libraryreaderpanel = FakePanel
         local log = {}
@@ -192,6 +251,42 @@ describe("Simple reader menu: the top tap", function()
         self.ui.menu:onTapShowMenu({})
         assert(Library.shared.reader_panel, "panel now")
         Library.shared.reader_panel = nil
+        package.loaded.libraryreaderpanel = nil
+    end)
+    it("opens KOReader's own menu on a top tap when set to KOReader menu", function()
+        local Library = mainLib()
+        package.loaded.libraryreaderpanel = FakePanel
+        local log = {}
+        local self = readerLib(Library, (fakeReader(log)), { top_tap = "koreader", simple_reader_menu = true })
+        self:hookReaderMenuTap()
+        eq(self.ui.menu:onTapShowMenu({ tag = "native" }), true)
+        eq(table.concat(log, ";"), "full menu native")
+        eq(Library.shared.reader_panel, nil, "the Library GUI bar stays closed")
+        -- the same hook follows a change back to the bar, without reopening the book
+        self.settings.top_tap = "bar"
+        self.settings.simple_reader_menu = true
+        self.ui.menu:onTapShowMenu({ tag = "bar" })
+        assert(Library.shared.reader_panel and Library.shared.reader_panel.is_shown, "bar now")
+        eq(table.concat(log, ";"), "full menu native", "KOReader's menu was not opened for the bar")
+        Library.shared.reader_panel = nil
+        package.loaded.libraryreaderpanel = nil
+    end)
+    it("opens the Library GUI bar when that choice is stored", function()
+        local Library = mainLib()
+        Library.shared.reader_panel = nil
+        package.loaded.libraryreaderpanel = FakePanel
+        local log = {}
+        local self = readerLib(Library, (fakeReader(log)), { top_tap = "bar" })
+        self:hookReaderMenuTap()
+        eq(self.ui.menu:onTapShowMenu({ tag = "top" }), true)
+        eq(#log, 0, "KOReader's menu not opened")
+        assert(Library.shared.reader_panel and Library.shared.reader_panel.is_shown, "bar shown")
+        Library.shared.reader_panel = nil
+        -- switching to KOReader menu uses the same tap handler
+        self.settings.top_tap = "koreader"
+        self.ui.menu:onTapShowMenu({ tag = "again" })
+        eq(table.concat(log, ";"), "full menu again")
+        eq(Library.shared.reader_panel, nil)
         package.loaded.libraryreaderpanel = nil
     end)
     it("leaves a swipe-only Activate menu setting alone", function()
@@ -236,16 +331,58 @@ describe("Simple reader menu: the top tap", function()
         package.preload.libraryreaderpanel = old
         package.loaded.libraryreaderpanel = nil
     end)
-    it("has a ☰ setting, on by default", function()
+    it("has a ☰ choice, Library GUI bar by default, saved with the other settings", function()
         local Library = mainLib()
         local self = readerLib(Library, (fakeReader({})), {})
-        _G.G_reader_settings = { saveSetting = function() end }
-        local item = self:simpleReaderMenuItem()
-        eq(item.text, "Simple reader menu")
-        eq(item.checked_func(), true)
-        item.callback()
+        local saved_key, saved
+        _G.G_reader_settings = {
+            saveSetting = function(_, key, value) saved_key, saved = key, value end,
+        }
+        local item = self:topTapMenu()
+        eq(item.text_func(), "Top tap opens: Library GUI bar")
+        eq(#item.sub_item_table, 2)
+        eq(item.sub_item_table[1].text, "Library GUI bar")
+        eq(item.sub_item_table[2].text, "KOReader menu")
+        eq(item.sub_item_table[1].radio, true)
+        eq(item.sub_item_table[2].radio, true)
+        eq(item.sub_item_table[1].checked_func(), true)
+        eq(item.sub_item_table[2].checked_func(), false)
+        item.sub_item_table[2].callback()
+        eq(self.settings.top_tap, "koreader")
         eq(self.settings.simple_reader_menu, false)
-        eq(item.checked_func(), false)
+        eq(saved_key, "library_plugin")
+        eq(saved.top_tap, "koreader")
+        eq(item.text_func(), "Top tap opens: KOReader menu")
+        eq(item.sub_item_table[1].checked_func(), false)
+        eq(item.sub_item_table[2].checked_func(), true)
+        item.sub_item_table[1].callback()
+        eq(self.settings.top_tap, "bar")
+        eq(self.settings.simple_reader_menu, true)
+        eq(saved.top_tap, "bar")
+        eq(item.text_func(), "Top tap opens: Library GUI bar")
+        _G.G_reader_settings = nil
+    end)
+    it("reads a turned-off Simple reader menu as KOReader menu at startup", function()
+        local Library = mainLib()
+        local stored = { simple_reader_menu = false, start_with_library = false }
+        _G.G_reader_settings = {
+            readSetting = function() return stored end,
+            saveSetting = function() end,
+        }
+        local ui = {
+            document = { file = "/books/Emma.epub" },
+            menu = { registerToMainMenu = function() end, onTapShowMenu = function() return true end },
+        }
+        local self = setmetatable({ ui = ui }, { __index = Library })
+        Library.init(self)
+        eq(self.settings.top_tap, "koreader")
+        eq(self.settings.simple_reader_menu, false)
+        -- a fresh install still gets the bar
+        stored = { start_with_library = false }
+        local fresh = setmetatable({ ui = ui }, { __index = Library })
+        Library.init(fresh)
+        eq(fresh.settings.top_tap, "bar")
+        eq(fresh.settings.simple_reader_menu, true)
         _G.G_reader_settings = nil
     end)
 end)
