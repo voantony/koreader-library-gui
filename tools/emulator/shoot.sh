@@ -3,7 +3,7 @@
 #
 #   tools/emulator/shoot.sh <scenario>
 #
-# Scenarios: smoke, footer, az, toptap
+# Scenarios: smoke, footer, az, aznav, toptap
 # Output:    emulator-out/<scenario>/   (or $EMU_OUT)
 #
 # The current library.koplugin is copied into a temporary KOReader home.
@@ -17,7 +17,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 scenario="${1:-}"
 if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
-    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|toptap>" >&2
+    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|aznav|toptap>" >&2
     echo "  EMU_OUT     output directory (default: emulator-out/<scenario>)" >&2
     echo "  EMU_PLUGIN  library.koplugin to copy (default: ./library.koplugin)" >&2
     echo "  EMU_COUNT   books in the seeded library (default: 200)" >&2
@@ -26,7 +26,7 @@ if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
     exit 2
 fi
 case "$scenario" in
-    smoke|footer|az|toptap) ;;
+    smoke|footer|az|aznav|toptap) ;;
     *) echo "unknown scenario: $scenario" >&2; exit 2 ;;
 esac
 

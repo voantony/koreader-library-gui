@@ -2615,6 +2615,16 @@ function Core.detailsLayout(w, h)
     }
 end
 
+--- Which way a swipe turns the Library list, or nil when it does not.
+-- Left (west) is the next page; right (east) is the previous. Up and down
+-- are not page turns. The details card's description keeps its own rule
+-- (`descriptionPageTurn`).
+function Core.libraryPageTurn(direction)
+    if direction == "west" then return 1 end
+    if direction == "east" then return -1 end
+    return nil
+end
+
 --- Which way a tap or swipe turns the description, or nil when it does not.
 -- North / the right half go forward; south / the left half go back.
 -- `area` is `{ x, y, w, h }` in screen coordinates.
@@ -2776,19 +2786,30 @@ function Core.scrubberItemKey(item, mode)
     return ""
 end
 
---- Which strip to show, or nil when the list is not alphabetical.
--- Title and author use that field. Series (a name sort) uses the series
--- name. Date, last-read and size stay hidden. Inside a series the books are
--- in reading order, so the strip hides there too. Author, series, collection
--- and genre shelves are already A–Z: they use each shelf's name.
--- `state.enabled == false` forces it off.
+--- Which strip to show, or nil when this list should not have one.
+-- Book lists use the strip only while they are already sorted by title,
+-- author or series. Date added, Last read and Size stay hidden, and this
+-- never changes `state.sort`. Inside one series the books stay in reading
+-- order, so the strip stays off there too.
+-- Authors, Collections and Genres are name lists. The Series list is too,
+-- but only once it runs past a single page (`pages` >= 2). Omit `pages`
+-- when the count is not known yet.
+-- Compact · 2 columns stays page-based (no strip). A search that fits on
+-- one page is too small for the strip. `state.enabled == false` forces it off.
 function Core.scrubberMode(state)
     state = type(state) == "table" and state or {}
     if state.enabled == false then return nil end
+    if state.view == "compact2" then return nil end
     if state.in_series then return nil end
+    local one_page = type(state.pages) == "number" and state.pages < 2
+    if state.searching and one_page then return nil end
     if state.kind == "groups" then
         local tab = state.tab
-        if tab == "authors" or tab == "series" or tab == "collections" or tab == "genres" then
+        if tab == "series" then
+            if one_page then return nil end
+            return "name"
+        end
+        if tab == "authors" or tab == "collections" or tab == "genres" then
             return "name"
         end
         return nil
