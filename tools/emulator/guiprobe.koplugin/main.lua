@@ -3,7 +3,7 @@ Dev-only probe. Runs inside KOReader, drives Library GUI, and writes PNGs.
 
 Environment:
   GUIPROBE_OUT     directory for PNGs and probe.log (required)
-  GUIPROBE_SCRIPT  scenario name: smoke, footer, az, toptap (default smoke)
+  GUIPROBE_SCRIPT  scenario name: smoke, footer, az, aznav, toptap (default smoke)
   GUIPROBE_TAG     optional filename prefix
 
 Scenarios
@@ -12,6 +12,9 @@ Scenarios
           arrow has a long-press) the last page after that long-press
   az      A–Z strip: Title sort, tap a letter, drag with the big letter,
           the Authors list, and Last read (no strip)
+  aznav   where the strip is on: single-column Compact (Title), Authors,
+          a Title cover grid, the Series list, Compact · 2 columns (off)
+          and Last read (off, sort unchanged)
   toptap  in a book: top tap with "Library GUI bar", then "KOReader menu",
           then Book details opened from the reader
 ]]
@@ -426,6 +429,103 @@ end
 local function topWidget()
     local st = UIManager._window_stack
     return st[#st] and st[#st].widget
+end
+
+-- Where the strip appears: Compact, Authors, an alphabetical cover grid,
+-- the Series list, and the places it stays off.
+scenarios.aznav = function()
+    whenLibrary(function()
+        q(0.5, function()
+            dismissNotices()
+            local view = V()
+            view.show_continue = false
+            if view.closeKeyboard then view:closeKeyboard() end
+            view:setViewMode("compact")
+            view:resort("title")
+        end)
+        q(0.8, function()
+            dismissNotices()
+            local view = V()
+            P("AZNAV compact", "strip", view.scrubber and "yes" or "no",
+                "pages", view.pages, "sort", view.sort, "view", view.view_mode)
+            if view.view_mode ~= "compact" or view.sort ~= "title" then
+                state.ok = false; P("FAIL compact setup")
+            end
+            if not view.scrubber then state.ok = false; P("FAIL no strip on single-column Compact") end
+            if not (view.pages and view.pages > 1) then state.ok = false; P("FAIL compact is one page") end
+            shot("aznav-compact")
+        end)
+        q(0.4, function() V():setTab("authors") end)
+        q(0.8, function()
+            dismissNotices()
+            local view = V()
+            P("AZNAV authors", "strip", view.scrubber and "yes" or "no",
+                "pages", view.pages, "tab", view.tab, "view", view.view_mode)
+            if not view.scrubber then state.ok = false; P("FAIL no strip on Authors") end
+            shot("aznav-authors")
+        end)
+        q(0.4, function()
+            local view = V()
+            view:setTab("books")
+            view.show_continue = false
+            view:setViewMode("grid")
+            view:resort("title")
+        end)
+        q(0.8, function()
+            dismissNotices()
+            local view = V()
+            P("AZNAV grid", "strip", view.scrubber and "yes" or "no",
+                "pages", view.pages, "sort", view.sort, "view", view.view_mode)
+            if not view.scrubber then state.ok = false; P("FAIL no strip on title grid") end
+            if not (view.pages and view.pages > 1) then state.ok = false; P("FAIL grid is one page") end
+            shot("aznav-grid")
+        end)
+        q(0.4, function() V():setTab("series") end)
+        q(0.8, function()
+            dismissNotices()
+            local view = V()
+            local multi = view.pages and view.pages > 1
+            P("AZNAV series", "strip", view.scrubber and "yes" or "no",
+                "pages", view.pages, "tab", view.tab, "view", view.view_mode)
+            if multi and not view.scrubber then
+                state.ok = false; P("FAIL no strip on a multi-page Series list")
+            end
+            if not multi and view.scrubber then
+                state.ok = false; P("FAIL strip on a one-page Series list")
+            end
+            shot("aznav-series")
+        end)
+        q(0.4, function()
+            local view = V()
+            view:setTab("books")
+            view.show_continue = false
+            view:setViewMode("compact2")
+            view:resort("title")
+        end)
+        q(0.6, function()
+            dismissNotices()
+            local view = V()
+            P("AZNAV compact2", "strip", view.scrubber and "yes" or "no",
+                "pages", view.pages, "sort", view.sort, "view", view.view_mode)
+            if view.scrubber then state.ok = false; P("FAIL strip on two-column Compact") end
+            if view.sort ~= "title" then state.ok = false; P("FAIL compact2 changed the sort") end
+            shot("aznav-compact2")
+        end)
+        q(0.4, function()
+            local view = V()
+            view.show_continue = false
+            view:setViewMode("compact")
+            view:resort("recent")
+        end)
+        q(0.6, function()
+            dismissNotices()
+            local view = V()
+            P("AZNAV last read", "strip", view.scrubber and "yes" or "no", "sort", view.sort)
+            if view.scrubber then state.ok = false; P("FAIL strip on Last read") end
+            if view.sort ~= "recent" then state.ok = false; P("FAIL Last read sort changed") end
+            shot("aznav-last-read")
+        end)
+    end)
 end
 
 scenarios.toptap = function()

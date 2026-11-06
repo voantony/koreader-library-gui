@@ -1486,7 +1486,7 @@ function Library:addToMainMenu(menu_items)
             },
             {
                 text = _("A–Z strip"),
-                help_text = _("A letter strip down the right edge of the library. Tap or drag a letter to jump to the first page of books (or shelves) that start with it. Shown when books are sorted by title, author or series, and on the Authors, Series, Collections and Genres lists. Hidden for Date added, Last read and Size, and inside a series."),
+                help_text = _("A letter strip down the right edge. Tap or drag a letter to jump to the first page that starts with it. Shown when books are already sorted by title, author or series (a cover grid or single-column Compact included), and on the Authors, Collections and Genres lists. The Series list shows it when that list runs past one page. Hidden for Date added, Last read and Size, inside one series, on Compact · 2 columns, and when a search fits on one page. Showing the strip does not change the sort."),
                 checked_func = function() return Core.showScrubber(self.settings) end,
                 callback = function()
                     self.settings.show_scrubber = not Core.showScrubber(self.settings)

@@ -17,6 +17,8 @@ tools/emulator/shoot.sh footer
 
 `az` writes `az-01-title-sort.png` … `az-06-last-read-no-strip.png` (the A–Z strip on a Title sort, after tapping M, mid-drag on T with the big letter, after the drag, on the Authors list, and hidden on Last read).
 
+`aznav` writes `aznav-compact.png` (single-column Compact, Title sort), `aznav-authors.png`, `aznav-grid.png` (Title cover grid), `aznav-series.png` (the Series list; the strip is on only when that list has more than one page), `aznav-compact2.png` (two columns, no strip) and `aznav-last-read.png` (no strip, sort still Last read).
+
 `toptap` opens a book and writes `toptap-01-library-gui-bar.png`, `toptap-02-koreader-menu.png` and `toptap-03-details-from-reader.png`.
 
 KOReader itself is not committed. `tools/emulator/setup.sh` downloads the official Linux x86_64 tarball of **v2026.07.1** from the [KOReader releases](https://github.com/koreader/koreader/releases/tag/v2026.07.1), checks the sha256 pinned in `config.sh`, and extracts it under `~/.cache/koreader-library-gui/`. A public-domain dummy library (from `tools/make_dummy_library.py`) is cached in the same place.

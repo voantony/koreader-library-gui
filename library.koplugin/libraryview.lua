@@ -14,9 +14,10 @@ Layout, top to bottom:
                      (in a series: "2 of 5 read")
 
 Inside a series the books are in series order and numbered ("3 · Title").
-Paging past the last page (swipe or page key) opens the next series, and
-before the first page the previous one, so a whole shelf of series can be
-flipped through without going back to the list. A long-press on a page
+Paging past the last page (a left or right swipe, or a page key) opens
+the next series, and before the first page the previous one, so a whole
+shelf of series can be flipped through without going back to the list.
+Up and down do not turn pages. A long-press on a page
 arrow jumps to the first or last page of the list on screen (a tab, a
 folder, search results, or the series that is open). A tap still moves
 one page.
@@ -832,7 +833,8 @@ function LibraryView:buildFooter(page, pages, total, kind)
         local pos, count = self:seriesPosition()
         if pos then left = left .. " · " .. T(_("series %1 of %2 · swipe on for the next"), pos, count) end
     end
-    -- Page arrows are real buttons, as well as swipes. A tap moves one page.
+    -- Page arrows are real buttons, as well as left and right swipes. A tap
+    -- moves one page. Up and down do not.
     -- A long-press jumps to the first or last page.
     -- The chevron stays the same size as before. The hit target grows sideways
     -- to about 10 mm (at least 120 px at 300 dpi) so it is easy to hit on a
@@ -1188,21 +1190,22 @@ function LibraryView:buildBody()
     end
 
     -- The A–Z strip takes a slice of the width, so covers are laid out in
-    -- what remains and never slide under it. Date and progress sorts leave
-    -- the grid full width (no strip).
-    local letter_mode = (#data.items > 0) and Core.scrubberMode{
-        enabled = self:scrubberEnabled(),
-        kind = data.kind,
-        sort = self.sort,
-        in_series = self:inSeries(),
-        tab = self.group and self.group.kind or self.tab,
-    } or nil
-    local grid_w, letter_w = self.width, 0
-    if letter_mode then
-        letter_w = Core.scrubberWidth(self:screenDpi())
-        grid_w = Core.gridContentWidth(self.width, letter_w)
-        letter_w = self.width - grid_w
+    -- what remains and never slide under it. Which lists get it is
+    -- Core.scrubberMode (alphabetical sorts, Authors, a multi-page Series
+    -- list; not Last read, not Compact · 2 columns, not a one-page search).
+    -- The sort itself is left alone.
+    local function letterMode(pages)
+        if #data.items < 1 then return nil end
+        return self:scrubberLetterMode(data.kind, pages)
     end
+    local function widthsFor(mode)
+        if not mode then return self.width, 0 end
+        local strip_w = Core.scrubberWidth(self:screenDpi())
+        local content_w = Core.gridContentWidth(self.width, strip_w)
+        return content_w, self.width - content_w
+    end
+    local letter_mode = letterMode(nil)
+    local grid_w, letter_w = widthsFor(letter_mode)
 
     local function layoutFor(h, under_strip)
         if Core.isCompact(self.view_mode) then
@@ -1221,16 +1224,28 @@ function LibraryView:buildBody()
         end
     end
 
-    local later_layout = layoutFor(full_h, false)
-    local page1_h = continue_layout and (full_h - continue_layout.height) or full_h
-    local page1_layout = continue_layout and layoutFor(page1_h, true) or later_layout
-    local first_per, later_per = page1_layout.per_page, later_layout.per_page
-
-    -- Books in the strip appear only there (page 1), so leave them out of
-    -- the paged rows on every page: each title is on screen once. The
-    -- footer still counts all books.
-    local grid_items = continue_books and Core.withoutShown(data.items, continue_books) or data.items
-    local page_items, page, pages = Core.page(grid_items, first_per, self.page, later_per)
+    local function pageSlice()
+        local later_layout = layoutFor(full_h, false)
+        local page1_h = continue_layout and (full_h - continue_layout.height) or full_h
+        local page1_layout = continue_layout and layoutFor(page1_h, true) or later_layout
+        local first_per, later_per = page1_layout.per_page, later_layout.per_page
+        -- Books in the Continue reading strip appear only there (page 1), so
+        -- leave them out of the paged rows: each title is on screen once.
+        -- The footer still counts all books.
+        local grid_items = continue_books and Core.withoutShown(data.items, continue_books) or data.items
+        local page_items, page, pages = Core.page(grid_items, first_per, self.page, later_per)
+        return later_layout, page1_layout, page1_h, first_per, later_per, grid_items, page_items, page, pages
+    end
+    local later_layout, page1_layout, page1_h, first_per, later_per, grid_items, page_items, page, pages = pageSlice()
+    -- A one-page search, or a Series list that fits on one page, drops the
+    -- strip. Laying out again at full width can only fit the same or more,
+    -- so the page count does not grow back across the threshold.
+    local fitted = letterMode(pages)
+    if fitted ~= letter_mode then
+        letter_mode = fitted
+        grid_w, letter_w = widthsFor(letter_mode)
+        later_layout, page1_layout, page1_h, first_per, later_per, grid_items, page_items, page, pages = pageSlice()
+    end
     self.page, self.pages = page, pages
     self.current = data
     self.missing_covers = {}
@@ -1832,17 +1847,27 @@ function LibraryView:setShowScrubber(on)
     self:refreshBody(true)
 end
 
---- Nil when this list should not show the strip. Otherwise the mode, the
--- reserved width and the width left for the covers.
-function LibraryView:scrubberPlan(kind, n_items)
-    if n_items ~= nil and n_items < 1 then return nil end
-    local mode = Core.scrubberMode({
+--- The letter field for the strip on this list, or nil when it stays off.
+-- `pages` is the page count once layout is known; omit it before that.
+function LibraryView:scrubberLetterMode(kind, pages)
+    local q = self.query
+    return Core.scrubberMode({
         enabled = self:scrubberEnabled(),
         kind = kind or "books",
         sort = self.sort,
         in_series = self.inSeries and self:inSeries() or false,
         tab = self.group and self.group.kind or self.tab,
+        view = self.view_mode,
+        searching = (type(q) == "string" and q:match("%S") ~= nil) or nil,
+        pages = pages,
     })
+end
+
+--- Nil when this list should not show the strip. Otherwise the mode, the
+-- reserved width and the width left for the covers.
+function LibraryView:scrubberPlan(kind, n_items, pages)
+    if n_items ~= nil and n_items < 1 then return nil end
+    local mode = self:scrubberLetterMode(kind, pages)
     if not mode then return nil end
     local width = self.width or 0
     local strip_w = Core.scrubberWidth(self:screenDpi())
@@ -1925,14 +1950,17 @@ function LibraryView:onSwipe(_, ges)
         self.scrubber:onSwipeScrubber(nil, ges)
         return true
     end
-    local dir = ges.direction
-    if dir == "west" or dir == "north" then
-        self:turnPage(1, true)
-    elseif dir == "east" or dir == "south" then
-        self:turnPage(-1, true)
-    else
+    -- Left is next, right is previous. Up and down are not page turns.
+    -- They are still consumed: the file browser under the Library must not
+    -- see them. A diagonal that is not the Controls gesture is left alone
+    -- (a long diagonal swipe is also how KOReader takes a screenshot).
+    local turn = Core.libraryPageTurn(ges and ges.direction)
+    if not turn then
+        local d = ges and ges.direction
+        if d == "north" or d == "south" then return true end
         return false
     end
+    self:turnPage(turn, true)
     return true
 end
 
