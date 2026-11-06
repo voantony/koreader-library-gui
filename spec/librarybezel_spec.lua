@@ -19,7 +19,7 @@ end
 
 local function mainLib(model, stored_footer)
     local old_require = require
-    local real = { librarycore = true, libraryindex = true, libraryreadermenu = true, librarybezel = true,
+    local real = { librarycore = true, libraryindex = true, libraryreadermenu = true, librarybezel = true, libraryfooter = true,
         string = true, table = true, math = true }
     local saved_reader_settings = _G.G_reader_settings
     _G.G_reader_settings = {

@@ -73,7 +73,7 @@ Using KOReader's APIs (requiring its modules and widgets) is fine; that's how ev
 1. Fork the repository and create a branch from `main`.
 2. Keep each PR to one change, and explain what it does and why in the description. Screenshots help for anything visual.
 3. Add or update specs for any behaviour you change, and make sure `luajit spec/run.lua` passes.
-4. Only the files in `library.koplugin/` go on the device (17 right now). Keep runtime code in that folder, and if you add a file there, add it to `FILES` in the `Makefile`.
+4. Only the files in `library.koplugin/` go on the device (18 right now). Keep runtime code in that folder, and if you add a file there, add it to `FILES` in the `Makefile`.
 5. Don't commit books, `.sdr` folders, KOReader settings or anything from your own device. `.gitignore` blocks the usual ones.
 6. Open the PR. I'll review it, may ask for changes, and merge it when it's ready.
 

@@ -63,6 +63,9 @@ local DEFAULTS = {
     simple_reader_menu = true,  -- kept in step with top_tap; false is the old checkbox for KOReader's menu
     bezel_lift = true,          -- Colorsoft: lift KOReader's status bar above the bezel (librarybezel.lua)
     -- bezel_prev: the status bar's bottom margin from before we lifted it
+    footer_page_total = true,   -- reader status bar: page out of total, short tap cycle (libraryfooter.lua)
+    -- footer_page_total_prev: the status bar view from before we switched it
+    -- footer_cycle: { [view] = false } views turned off in the tap cycle
     -- view_memory: { [key] = { view =, sort =, filter =, t = } }, see Core.viewKey
     -- sleep_cover_prev: KOReader's sleep screen settings from before
     -- "Sleep screen: cover of last book" was turned on (restored when turned off)
@@ -117,7 +120,10 @@ function Library:init()
     end
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
-    if self.ui.document then self:hookReaderMenuTap() end
+    if self.ui.document then
+        self:hookReaderMenuTap()
+        self:hookFooterGestures()
+    end
 
     -- In the file browser: show the Library at start-up, or again after reading.
     -- (file_chooser is only created after plugins, so test for the reader instead.)
@@ -1483,6 +1489,7 @@ function Library:addToMainMenu(menu_items)
             },
             self:topTapMenu(),
             self:bezelLiftMenuItem(),
+            self:footerPageTotalMenuItem(),
             {
                 text = _("Next in series skips finished books"),
                 help_text = _("Next in series opens the next book you have not finished. Turn this off to always open the very next book."),
@@ -1844,6 +1851,8 @@ end
 
 function Library:onReaderReady()
     self:liftFooterAboveBezel()
+    self:applyFooterPageTotal()
+    self:hookFooterGestures()
 end
 
 function Library:bezelLiftMenuItem()
@@ -1876,6 +1885,266 @@ function Library:bezelLiftMenuItem()
                 else
                     G_reader_settings:readSetting("footer").container_bottom_padding = back
                 end
+            end
+        end,
+    }
+end
+
+----------------------------------------------------------------------------
+-- Reader status bar: page out of total, short tap cycle (libraryfooter.lua)
+----------------------------------------------------------------------------
+
+local FOOTER_VIEW_NAMES = {
+    page_progress = _("Current page"),
+    chapter_time_to_read = _("Time left in chapter"),
+    book_time_to_read = _("Time left in book"),
+    percentage = _("Percent read"),
+    pages_left = _("Pages left in chapter"),
+    time = _("Clock"),
+}
+
+function Library:footerModeName(footer)
+    local Footer = require("libraryfooter")
+    local name = Footer.modeName(footer, G_reader_settings:readSetting("reader_footer_mode"))
+    if footer and (footer.mode == 0 or (footer.mode_list and footer.mode == footer.mode_list.off)) then
+        return "off"
+    end
+    return name
+end
+
+--- Switch KOReader's status bar to one named view, the same way tapping
+-- the bar does, and remember it so it is still there in the next book.
+function Library:setFooterMode(footer, name)
+    local Footer = require("libraryfooter")
+    local mode = Footer.MODE[name]
+    if footer then
+        if type(footer.settings) == "table" and name ~= "off" then
+            footer.settings[name] = true
+        end
+        if type(footer.mode_list) == "table" and footer.mode_list[name] ~= nil then
+            mode = footer.mode_list[name]
+        end
+        if type(footer.applyFooterMode) == "function" then
+            pcall(footer.applyFooterMode, footer, mode)
+        else
+            footer.mode = mode
+        end
+        if type(footer.onUpdateFooter) == "function" then
+            pcall(footer.onUpdateFooter, footer, true)
+        elseif type(footer.refreshFooter) == "function" then
+            pcall(footer.refreshFooter, footer, true, true)
+        end
+        if footer.settings then
+            G_reader_settings:saveSetting("footer", footer.settings)
+        end
+    elseif name ~= "off" then
+        local stored = G_reader_settings:readSetting("footer")
+        if type(stored) == "table" then
+            stored[name] = true
+            G_reader_settings:saveSetting("footer", stored)
+        end
+    end
+    G_reader_settings:saveSetting("reader_footer_mode", mode)
+end
+
+function Library:applyFooterPageTotal()
+    local Footer = require("libraryfooter")
+    local footer = self:readerFooter()
+    local current = Footer.modeName(footer, G_reader_settings:readSetting("reader_footer_mode"))
+    local all_at_once = footer and footer.settings and footer.settings.all_at_once
+    local value = Footer.plan{
+        enabled = self.settings.footer_page_total,
+        current = current,
+        prev = self.settings.footer_page_total_prev,
+        all_at_once = all_at_once,
+    }
+    if not value then return end
+    self.settings.footer_page_total_prev = current
+    self:saveSettings()
+    self:setFooterMode(footer, value)
+end
+
+function Library:hookFooterGestures()
+    local footer = self:readerFooter()
+    if not footer or rawget(footer, "_library_footer_hook") then return end
+    footer._library_footer_hook = true
+    local plugin = self
+    local original_hold = footer.onHoldFooter
+    local original_cycle = footer.onToggleFooterMode
+
+    footer.onHoldFooter = function(f, ges)
+        local Footer = require("libraryfooter")
+        local view = plugin.ui and plugin.ui.view
+        local content = f.footer_content
+        local dimen = content and content.dimen
+        local has_dimen = type(dimen) == "table" and type(dimen.contains) == "function"
+        local inside = false
+        if has_dimen and ges and ges.pos then
+            local ok, hit = pcall(dimen.contains, dimen, ges.pos)
+            inside = ok and hit == true
+        end
+        if Footer.shouldClaimHold{
+            enabled = plugin.settings.footer_page_total,
+            footer_visible = view and view.footer_visible,
+            has_dimen = has_dimen,
+            inside = inside,
+        } then
+            plugin:showFooterPicker()
+            return true
+        end
+        if type(original_hold) == "function" then
+            return original_hold(f, ges)
+        end
+    end
+
+    footer.onToggleFooterMode = function(f, ...)
+        local Footer = require("libraryfooter")
+        if not Footer.shouldCycle{
+            enabled = plugin.settings.footer_page_total,
+            all_at_once = f.settings and f.settings.all_at_once,
+        } then
+            if type(original_cycle) == "function" then
+                return original_cycle(f, ...)
+            end
+            return
+        end
+        local current = plugin:footerModeName(f)
+        local nxt = Footer.next(Footer.enabledSet(plugin.settings.footer_cycle), current)
+        if not nxt then return true end
+        plugin:setFooterMode(f, nxt)
+        return true
+    end
+end
+
+function Library:footerMinutesForPages(stats, pages)
+    if not stats or not pages then return nil end
+    local avg = tonumber(stats.avg_time)
+    if avg then return pages * avg / 60 end
+    if type(stats.getTimeForPages) == "function" then
+        local ok, s = pcall(stats.getTimeForPages, stats, pages)
+        if not ok then return nil end
+        if type(s) == "number" then return s / 60 end
+        return require("libraryfooter").parseClockToMinutes(s)
+    end
+end
+
+function Library:footerLabelInfo(footer)
+    local info = {}
+    if not footer then return info end
+    info.page = tonumber(footer.pageno)
+    info.pages = tonumber(footer.pages)
+    info.percent = tonumber(footer.percent_finished)
+    local twelve = G_reader_settings.isTrue and G_reader_settings:isTrue("twelve_hour_clock")
+    info.clock = os.date(twelve and "%I:%M %p" or "%H:%M")
+    if twelve then info.clock = info.clock:gsub("^0", "") end
+    local ui = self.ui
+    local toc = ui and ui.toc
+    if toc and type(toc.getChapterPagesLeft) == "function" and footer.pageno then
+        local ok, left = pcall(toc.getChapterPagesLeft, toc, footer.pageno)
+        if ok then info.chapter_left = tonumber(left) end
+    end
+    local stats = ui and ui.statistics
+    local doc = ui and ui.document
+    if stats then
+        if info.chapter_left then
+            info.chapter_min = self:footerMinutesForPages(stats, info.chapter_left)
+        end
+        if doc and type(doc.getTotalPagesLeft) == "function" and footer.pageno then
+            local ok, left = pcall(doc.getTotalPagesLeft, doc, footer.pageno)
+            if ok then info.book_min = self:footerMinutesForPages(stats, tonumber(left)) end
+        end
+    end
+    return info
+end
+
+function Library:showFooterPicker()
+    local Footer = require("libraryfooter")
+    local footer = self:readerFooter()
+    local info = self:footerLabelInfo(footer)
+    local enabled = Footer.enabledSet(self.settings.footer_cycle)
+    local current = self:footerModeName(footer)
+    local dialog
+    local buttons = {}
+    for _, v in ipairs(Footer.VIEWS) do
+        local id = v.id
+        local label = Footer.viewLabel(id, info) or FOOTER_VIEW_NAMES[id] or id
+        if current == id then
+            label = "\u{2713} " .. label
+        end
+        local mark = enabled[id] and "\u{2611}" or "\u{2610}"
+        buttons[#buttons + 1] = {
+            {
+                text = label,
+                callback = function()
+                    UIManager:close(dialog)
+                    self:setFooterMode(footer, id)
+                end,
+            },
+            {
+                text = "  " .. mark .. "  ",
+                callback = function()
+                    local new_set = Footer.toggle(self.settings.footer_cycle, id)
+                    if not new_set then return end
+                    self.settings.footer_cycle = new_set
+                    self:saveSettings()
+                    if current ~= "off" then
+                        local show = Footer.currentAfterToggle(new_set, current, id)
+                        if show and show ~= current then
+                            self:setFooterMode(footer, show)
+                        end
+                    end
+                    UIManager:close(dialog)
+                    self:showFooterPicker()
+                end,
+            },
+        }
+    end
+    local function act(text, ev)
+        buttons[#buttons + 1] = { {
+            text = text,
+            callback = function()
+                UIManager:close(dialog)
+                if ev then
+                    if self.ui then self.ui:handleEvent(Event:new(ev)) end
+                else
+                    self:setFooterMode(footer, "off")
+                end
+            end,
+        } }
+    end
+    act(_("Skim\u{2026}"), "ShowSkimtoDialog")
+    act(_("Go to page\u{2026}"), "ShowGotoDialog")
+    act(_("Show nothing"))
+    dialog = ButtonDialog:new{
+        title = _("Status bar"),
+        title_align = "center",
+        buttons = buttons,
+    }
+    UIManager:show(dialog)
+    return dialog
+end
+
+function Library:footerPageTotalMenuItem()
+    return {
+        text = _("Show page number out of total"),
+        help_text = _("When you open a book, the status bar at the bottom of the page shows the current page out of the total (for example 42 / 310), once, if it was showing pages left and you have not changed it yourself. Turning this off puts the old item back. Long-press the status bar to pick what it shows and which items a tap cycles through: current page, time left in the chapter, time left in the book, percent read, pages left in the chapter, and the clock. The same list has Skim, Go to page, and Show nothing (a tap brings the bar back)."),
+        checked_func = function() return self.settings.footer_page_total ~= false end,
+        callback = function()
+            local Footer = require("libraryfooter")
+            local turning_on = self.settings.footer_page_total == false
+            self.settings.footer_page_total = turning_on
+            local footer = self:readerFooter()
+            if turning_on then
+                self:saveSettings()
+                self:applyFooterPageTotal()
+                return
+            end
+            local current = Footer.modeName(footer, G_reader_settings:readSetting("reader_footer_mode"))
+            local back = Footer.restore(current, self.settings.footer_page_total_prev)
+            self.settings.footer_page_total_prev = nil
+            self:saveSettings()
+            if back then
+                self:setFooterMode(footer, back)
             end
         end,
     }
