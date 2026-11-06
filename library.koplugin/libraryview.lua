@@ -579,7 +579,7 @@ function LibraryView:setCollectionsView(mode)
     if self.plugin.saveSettings then self.plugin:saveSettings() end
     self.page = 1
     self:updateSearchHint()
-    self:refreshBody(true)
+    self:refreshBody(true, "tab")
 end
 
 --- The search bar's placeholder: what it searches here.
@@ -1335,7 +1335,8 @@ function LibraryView:resultsRegion()
 end
 
 --- Rebuild and refresh only the results region (fast path used while typing).
-function LibraryView:refreshBody(full)
+-- reason is for e-ink ghosting ("page", "tab", "shelf", "overlay"): see libraryrefresh.lua.
+function LibraryView:refreshBody(full, reason)
     -- A full repaint already covers the header, so the clock can move with it.
     if full or self._title_changed then self:updateStatusText() end
     self:buildBody()
@@ -1349,8 +1350,49 @@ function LibraryView:refreshBody(full)
         region = self:bodyRegion()
     end
     self._title_changed = nil
+    local mode = self:refreshMode(reason)
     UIManager:setDirty(self, function()
-        return "ui", region, true
+        return mode, region, true
+    end)
+end
+
+--- "flashui" on e-ink when we should clear cover ghosts; "ui" otherwise.
+-- libraryrefresh.lua is required here so specs that stub require() keep
+-- the old "ui" refresh (the stub has no decide function).
+function LibraryView:refreshMode(reason)
+    local ok, Refresh = pcall(require, "libraryrefresh")
+    if not (ok and type(Refresh) == "table" and type(Refresh.decide) == "function") then
+        return "ui"
+    end
+    local eink = type(Device.hasEinkScreen) == "function" and Device:hasEinkScreen() == true
+    local every
+    if type(UIManager.getRefreshRate) == "function" then
+        local ok_rate, rate = pcall(UIManager.getRefreshRate, UIManager)
+        if ok_rate then every = tonumber(rate) end
+    end
+    if every == nil and _G.G_reader_settings and type(_G.G_reader_settings.readSetting) == "function" then
+        every = tonumber(_G.G_reader_settings:readSetting("full_refresh_count"))
+    end
+    local settings = self.plugin and self.plugin.settings
+    local mode, turns = Refresh.decide{
+        eink = eink,
+        choice = settings and settings.flash_ghosting,
+        reason = reason,
+        turns = self._page_turns or 0,
+        every = every,
+        cover_grid = Refresh.isCoverGrid(self.view_mode),
+    }
+    self._page_turns = turns
+    return mode
+end
+
+--- One flashing refresh of the Library after an overlay closes, when
+-- the cover grid is showing. No rebuild.
+function LibraryView:flashOverlay()
+    local mode = self:refreshMode("overlay")
+    if mode ~= "flashui" or not UIManager.setDirty then return end
+    UIManager:setDirty(self, function()
+        return mode, self.dimen, true
     end)
 end
 
@@ -1494,7 +1536,7 @@ function LibraryView:closeKeyboard()
     self.search_input:unfocus()
     self:markSearchFocus(false)
     self.is_always_active = false
-    self:refreshBody(true)
+    self:refreshBody(true, "overlay")
 end
 
 -- The keyboard's own layout changes (e.g. switching to symbols) can change its height.
@@ -1539,7 +1581,7 @@ function LibraryView:setTab(id)
     self.tab, self.group, self.page = id, nil, 1
     self:updateSearchHint()
     self:applyRemembered()
-    self:refreshBody(true)
+    self:refreshBody(true, "tab")
 end
 
 function LibraryView:setFilter(f)
@@ -1557,7 +1599,7 @@ function LibraryView:openGroup(group)
     self.group, self.page = group, 1
     self:updateSearchHint()
     self:applyRemembered()
-    self:refreshBody(true)
+    self:refreshBody(true, "shelf")
 end
 
 function LibraryView:closeGroup()
@@ -1668,7 +1710,7 @@ function LibraryView:stepSeries(dir)
     self.group = g
     self.page = dir > 0 and 1 or math.huge
     self:applyRemembered()
-    self:refreshBody(true)
+    self:refreshBody(true, "shelf")
     return true
 end
 
@@ -1699,7 +1741,7 @@ function LibraryView:goToPage(page)
     self:timeStart("page", true)
     self.page = page
     self._turned_ms = time.to_ms(time.now())
-    self:refreshBody()
+    self:refreshBody(nil, "page")
 end
 
 function LibraryView:onNextPage() self:turnPage(1); return true end
@@ -1920,7 +1962,7 @@ function LibraryView:openNamedShelf(kind, name)
     end
     self:updateSearchHint()
     self:applyRemembered()
-    self:refreshBody(true)
+    self:refreshBody(true, "shelf")
     return g ~= nil
 end
 

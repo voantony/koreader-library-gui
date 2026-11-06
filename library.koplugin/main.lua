@@ -65,6 +65,7 @@ local DEFAULTS = {
     -- bezel_prev: the status bar's bottom margin from before we lifted it
     footer_page_total = true,   -- reader status bar: page out of total, short tap cycle (libraryfooter.lua)
     -- footer_page_total_prev: the status bar view from before we switched it
+    flash_ghosting = "setting", -- e-ink: flash every N Library page turns (libraryrefresh.lua)
     -- footer_cycle: { [view] = false } views turned off in the tap cycle
     -- view_memory: { [key] = { view =, sort =, filter =, t = } }, see Core.viewKey
     -- sleep_cover_prev: KOReader's sleep screen settings from before
@@ -558,6 +559,28 @@ end
 
 function Library:onControlsClosed(panel)
     if shared.controls == panel then shared.controls = nil end
+    self:flashLibraryOverlay(shared.view)
+end
+
+--- Close a dialog or card over the Library and flash the cover grid
+-- so leftover images don't ghost on e-ink. The flash waits a tick so
+-- a rebuild in the same callback is painted first.
+function Library:closeOverLibrary(widget, view)
+    if widget then UIManager:close(widget) end
+    self:flashLibraryOverlay(view)
+end
+
+function Library:flashLibraryOverlay(view)
+    if not (view and view.flashOverlay) then return end
+    local function flash()
+        if view.flashOverlay then view:flashOverlay() end
+    end
+    -- After a rebuild in the same callback (sort, go to page). Specs stub nextTick.
+    if type(UIManager.nextTick) == "function" then
+        UIManager:nextTick(flash)
+    else
+        flash()
+    end
 end
 
 --- Send a KOReader event (night mode, rotation) to the file browser or reader.
@@ -672,7 +695,7 @@ function Library:showBookDialog(book, view)
     local BookList = require("ui/widget/booklist")
     local file = book.path
     local dialog
-    local function close() UIManager:close(dialog) end
+    local function close() self:closeOverLibrary(dialog, view) end
     local function after_status_change()
         close()
         if BookList.resetBookInfoCache then BookList.resetBookInfoCache(file) end
@@ -707,6 +730,7 @@ function Library:showBookDialog(book, view)
         title = book.title .. (book.authors and book.authors[1] and ("\n" .. book.authors[1]) or ""),
         title_align = "center",
         buttons = buttons,
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
     }
     UIManager:show(dialog)
 end
@@ -868,8 +892,11 @@ function Library:showBookDetails(book, view, opts)
         covers = (view and view.covers) or { store = Covers.getStore(), bim = self:getBIM() },
         cover_cache = (view and view.cover_cache) or Tiles.newCoverCache(4),
         on_continue = function()
+            if Core.detailsPrimaryDismisses(already_open) then
+                self:closeOverLibrary(card, view)
+                return
+            end
             UIManager:close(card)
-            if Core.detailsPrimaryDismisses(already_open) then return end
             UIManager:nextTick(function() self:openBook(book.path, view) end)
         end,
         on_status = function()
@@ -879,7 +906,7 @@ function Library:showBookDetails(book, view, opts)
             if card.setProgress then card:setProgress() end
         end,
         on_close = function()
-            UIManager:close(card)
+            self:closeOverLibrary(card, view)
         end,
         on_more = function()
             UIManager:close(card)
@@ -905,12 +932,17 @@ function Library:showSortPicker(view)
         table.insert(buttons, { {
             text = (view.sort == mode and "\u{2713} " or "") .. SORT_NAMES[mode],
             callback = function()
-                UIManager:close(dialog)
+                self:closeOverLibrary(dialog, view)
                 if view.sort ~= mode then view:resort(mode) end -- remembered for this tab or shelf
             end,
         } })
     end
-    dialog = ButtonDialog:new{ title = _("Sort by"), title_align = "center", buttons = buttons }
+    dialog = ButtonDialog:new{
+        title = _("Sort by"),
+        title_align = "center",
+        buttons = buttons,
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
     UIManager:show(dialog)
     return dialog
 end
@@ -924,7 +956,7 @@ function Library:showPageJump(view)
         -- Empty or not a number: leave the box open. Out of range is clamped
         -- by goToPage. Cancel is the way out without moving.
         if not n or n ~= n then return end
-        UIManager:close(dialog)
+        self:closeOverLibrary(dialog, view)
         view:goToPage(math.floor(n))
     end
     dialog = InputDialog:new{
@@ -933,7 +965,7 @@ function Library:showPageJump(view)
         input_hint = T(_("1 – %1"), view.pages),
         input_type = "number",
         buttons = { {
-            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Cancel"), id = "close", callback = function() self:closeOverLibrary(dialog, view) end },
             { text = _("Go"), is_enter_default = true, callback = go },
         } },
     }
@@ -945,7 +977,7 @@ end
 --- The ☰ menu inside the Library view.
 function Library:showLibraryMenu(view)
     local dialog
-    local function close() UIManager:close(dialog) end
+    local function close() self:closeOverLibrary(dialog, view) end
     local sort_row, col_row = {}, {}
     for _, mode in ipairs(Core.SORT_MENU) do
         table.insert(sort_row, {
@@ -1095,6 +1127,7 @@ function Library:showLibraryMenu(view)
         title = title,
         title_align = "center",
         buttons = buttons,
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
     }
     UIManager:show(dialog)
 end
@@ -1490,6 +1523,7 @@ function Library:addToMainMenu(menu_items)
             self:topTapMenu(),
             self:bezelLiftMenuItem(),
             self:footerPageTotalMenuItem(),
+            self:flashGhostingMenu(),
             {
                 text = _("Next in series skips finished books"),
                 help_text = _("Next in series opens the next book you have not finished. Turn this off to always open the very next book."),
@@ -2147,6 +2181,54 @@ function Library:footerPageTotalMenuItem()
                 self:setFooterMode(footer, back)
             end
         end,
+    }
+end
+
+function Library:flashGhostingMenu()
+    local Refresh = require("libraryrefresh")
+    local names = {
+        [Refresh.ALWAYS] = _("every page"),
+        [Refresh.NEVER] = _("never"),
+    }
+    local function everyLabel()
+        local n = Refresh.DEFAULT_EVERY
+        if type(UIManager.getRefreshRate) == "function" then
+            local ok, rate = pcall(UIManager.getRefreshRate, UIManager)
+            if ok and tonumber(rate) ~= nil then n = tonumber(rate) end
+        elseif _G.G_reader_settings and type(G_reader_settings.readSetting) == "function" then
+            n = tonumber(G_reader_settings:readSetting("full_refresh_count")) or n
+        end
+        if n <= 0 then return _("KOReader setting (no page flashes)") end
+        return T(_("every %1 pages (KOReader setting)"), n)
+    end
+    local items = {}
+    for _, choice in ipairs(Refresh.CHOICES) do
+        table.insert(items, {
+            text_func = function()
+                if choice == Refresh.SETTING then return everyLabel() end
+                return names[choice]
+            end,
+            radio = true,
+            checked_func = function()
+                return Refresh.choice(self.settings.flash_ghosting) == choice
+            end,
+            callback = function()
+                self.settings.flash_ghosting = choice
+                self:saveSettings()
+            end,
+        })
+    end
+    return {
+        text_func = function()
+            local current = Refresh.choice(self.settings.flash_ghosting)
+            local label = current == Refresh.SETTING and everyLabel() or names[current]
+            return T(_("Flash to clear ghosting: %1"), label)
+        end,
+        help_text = _("On e-ink, a flashing refresh clears leftover cover images. By default this follows KOReader's own full-refresh setting (every 6 pages unless you changed that): the Library flashes every N page turns, and whenever you switch tabs, open a shelf, or close the details card, Controls, keyboard or a picker over the cover grid. Choose every page, KOReader's setting, or never. Does nothing on LCD screens or the emulator. Dragging the A–Z strip keeps its fast refresh."),
+        enabled_func = function()
+            return Device and type(Device.hasEinkScreen) == "function" and Device:hasEinkScreen() == true
+        end,
+        sub_item_table = items,
     }
 end
 
