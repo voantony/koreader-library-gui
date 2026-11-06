@@ -1876,10 +1876,46 @@ end
 -- which toggles it shows, slider maths and the layout.
 ----------------------------------------------------------------------------
 
---- The corner a downward swipe must start in: the top-right eighth of the
--- width and of the height (KOReader's own DTAP_ZONE_TOP_RIGHT size).
+--- The region a downward swipe must start in: the right half of the top
+-- eighth of the screen. KOReader's DTAP_ZONE_TOP_RIGHT is only the right
+-- eighth (on a 1264×1680 Colorsoft: 158×210 px), which sits under the
+-- raised bezel and overlaps the Series tab (and the top of the A–Z strip
+-- when filter chips are hidden). The right half (632×210 px there) is
+-- large enough to start without clipping the bezel corner.
+Core.CONTROLS_ZONE_LEFT = 1 / 2    -- fraction of width
+Core.CONTROLS_ZONE_HEIGHT = 1 / 8  -- fraction of height
+
 function Core.inControlsCorner(x, y, w, h)
-    return x >= w * 7 / 8 and y <= h / 8
+    x, y, w, h = tonumber(x), tonumber(y), tonumber(w), tonumber(h)
+    if not (x and y and w and h) or w <= 0 or h <= 0 then return false end
+    return x >= w * Core.CONTROLS_ZONE_LEFT and y <= h * Core.CONTROLS_ZONE_HEIGHT
+end
+
+--- Pixel rectangle { x, y, w, h } of that zone on a screen of `w` × `h`.
+function Core.controlsZonePx(w, h)
+    w, h = tonumber(w) or 0, tonumber(h) or 0
+    if w <= 0 or h <= 0 then return { x = 0, y = 0, w = 0, h = 0 } end
+    local x = w * Core.CONTROLS_ZONE_LEFT
+    local zh = h * Core.CONTROLS_ZONE_HEIGHT
+    return { x = x, y = 0, w = w - x, h = zh }
+end
+
+--- A pull that is downward, including a slightly diagonal one.
+-- KOReader classifies a swipe as southeast/southwest when it is between
+-- about 30° and 60° from the horizontal; only "south" was accepted before.
+function Core.isControlsSwipe(direction)
+    return direction == "south" or direction == "southeast" or direction == "southwest"
+end
+
+--- True when a "tap" that started in the Controls zone was really a
+-- downward flick. KOReader reports short moves as taps, which would
+-- otherwise hit the Series tab, search, or an A–Z letter under the finger.
+function Core.controlsTapIsSwipe(down, up, w, h, tol)
+    local start = down or up
+    if not (start and Core.inControlsCorner(start.x, start.y, w, h)) then
+        return false
+    end
+    return Core.isControlsSwipe(Core.shortSwipe(down or up, up or down, tol))
 end
 
 -- Row 1 is the screen (Light, Night, Refresh), row 2 the device (Wi-Fi, Rotate, Cover sleep).

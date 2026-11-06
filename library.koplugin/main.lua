@@ -623,8 +623,8 @@ end
 
 function Library:controlsMenu()
     return {
-        text = _("Controls panel (swipe down from top-right corner)"),
-        help_text = _("In the Library, swipe down from the top-right corner for brightness, warmth, Wi-Fi, night mode, the cover sleep screen, rotation and sleep. Swipe up or tap outside the panel to close it. Controls your device does not have are left out."),
+        text = _("Controls panel (swipe down from the top right)"),
+        help_text = _("In the Library, swipe down from the top right (the right half of the top of the screen) for brightness, warmth, Wi-Fi, night mode, the cover sleep screen, rotation and sleep. A slightly diagonal pull still opens it. You can also tap the clock or battery in the header, or choose Controls in the Library's ☰ menu. Swipe up or tap outside the panel to close it. Controls your device does not have are left out."),
         enabled_func = function() return Device:isTouchDevice() end,
         checked_func = function() return self.settings.controls_panel ~= false end,
         callback = function()
@@ -1077,6 +1077,14 @@ function Library:showLibraryMenu(view)
                 self.settings.show_scrubber = not Core.showScrubber(self.settings)
                 self:saveSettings()
                 if view.setShowScrubber then view:setShowScrubber(Core.showScrubber(self.settings)) end
+            end,
+        },
+        {
+            text = _("Controls"),
+            enabled = self:controlsEnabled(),
+            callback = function()
+                close()
+                self:openControls()
             end,
         },
     })

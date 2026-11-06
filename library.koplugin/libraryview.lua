@@ -133,6 +133,24 @@ function SearchInput:initKeyboard()
     return InputText.initKeyboard(self)
 end
 
+function SearchInput:onSwipeTextBox(arg, ges)
+    -- InputText flashes the whole screen on a diagonal swipe. A downward
+    -- swipe that started in the Controls zone should open the panel instead.
+    local parent = self.parent
+    if parent and parent.tryOpenControls and parent:tryOpenControls(ges) then
+        return true
+    end
+    return InputText.onSwipeTextBox(self, arg, ges)
+end
+
+function SearchInput:onTapTextBox(arg, ges)
+    local parent = self.parent
+    if parent and parent.tryOpenControlsFromTap and parent:tryOpenControlsFromTap(ges) then
+        return true
+    end
+    return InputText.onTapTextBox(self, arg, ges)
+end
+
 -- Typing: only the text box changes. KOReader's InputText marks its parent
 -- (this whole Library) dirty for each key, which repaints every tile and then
 -- the keyboard above them. When the screen is just as we left it (the
@@ -232,6 +250,39 @@ end
 
 function LibraryView:timeStart(name, armed)
     if self.timing then self.timing:start(name, armed) end
+end
+
+--- A tappable area around a widget. `min_w` / `min_h` grow the hit target
+-- without growing the widget inside it. `align = "center"` keeps that
+-- widget in the middle of the larger target.
+local TapArea = InputContainer:extend{ callback = nil, min_h = 0, min_w = 0, align = "left" }
+
+function TapArea:init()
+    local size = self[1]:getSize()
+    self.dimen = Geom:new{
+        x = 0, y = 0,
+        w = math.max(size.w, self.min_w or 0),
+        h = math.max(size.h, self.min_h or 0),
+    }
+    self.ges_events = { TapArea = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } } }
+    local box = Geom:new{ w = self.dimen.w, h = self.dimen.h }
+    if self.align == "center" then
+        self[1] = CenterContainer:new{ dimen = box, self[1] }
+    else
+        self[1] = LeftContainer:new{ dimen = box, self[1] }
+    end
+end
+
+function TapArea:getSize() return self.dimen end
+
+function TapArea:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    InputContainer.paintTo(self, bb, x, y)
+end
+
+function TapArea:onTapArea()
+    if self.callback then self.callback() end
+    return true
 end
 
 ----------------------------------------------------------------------------
@@ -401,7 +452,23 @@ function LibraryView:buildStatusWidget()
         dimen = Geom:new{ w = slot_w, h = slot_h },
         label,
     }
-    return self.status_box
+    -- Tap (not swipe) on the clock/battery opens Controls, so the panel
+    -- does not depend on the swipe alone. The search field to the left
+    -- keeps its own taps.
+    return TapArea:new{
+        callback = function() self:onStatusTap() end,
+        self.status_box,
+    }
+end
+
+--- Tap the header clock or battery: open Controls.
+function LibraryView:onStatusTap()
+    if not (self.plugin and self.plugin.openControls) then return false end
+    if self.plugin:openControls() then
+        self:keyboardGuard()
+        return true
+    end
+    return false
 end
 
 --- Swap the clock and battery text. Does not repaint.
@@ -668,6 +735,7 @@ function LibraryView:buildTabs()
             width = w,
             selected = self.group == nil and self.tab == tab.id,
             callback = function() self:setTab(tab.id) end,
+            show_parent = self,
         })
     end
     -- the tabs sit on a hairline, the selected one marked by a thick underline
@@ -682,39 +750,6 @@ function LibraryView:buildTabs()
 end
 
 local FILTER_SHORT = { barely = _("Barely") }
---- A tappable area around a widget. `min_w` / `min_h` grow the hit target
--- without growing the widget inside it. `align = "center"` keeps that
--- widget in the middle of the larger target.
-local TapArea = InputContainer:extend{ callback = nil, min_h = 0, min_w = 0, align = "left" }
-
-function TapArea:init()
-    local size = self[1]:getSize()
-    self.dimen = Geom:new{
-        x = 0, y = 0,
-        w = math.max(size.w, self.min_w or 0),
-        h = math.max(size.h, self.min_h or 0),
-    }
-    self.ges_events = { TapArea = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } } }
-    local box = Geom:new{ w = self.dimen.w, h = self.dimen.h }
-    if self.align == "center" then
-        self[1] = CenterContainer:new{ dimen = box, self[1] }
-    else
-        self[1] = LeftContainer:new{ dimen = box, self[1] }
-    end
-end
-
-function TapArea:getSize() return self.dimen end
-
-function TapArea:paintTo(bb, x, y)
-    self.dimen.x, self.dimen.y = x, y
-    InputContainer.paintTo(self, bb, x, y)
-end
-
-function TapArea:onTapArea()
-    if self.callback then self.callback() end
-    return true
-end
-
 local GROUP_COUNT = { authors = _("%1 authors"), series = _("%1 series"), collections = _("%1 collections"),
     genres = _("%1 genres") }
 
@@ -725,10 +760,10 @@ function LibraryView:buildCollectionsSwitch()
     local row = HorizontalGroup:new{
         align = "center",
         Tiles.Chip:new{ text = _("Collections"), selected = not genres,
-            callback = function() self:setCollectionsView("collections") end },
+            callback = function() self:setCollectionsView("collections") end, show_parent = self },
         HorizontalSpan:new{ width = Size.padding.default },
         Tiles.Chip:new{ text = _("Genres"), selected = genres,
-            callback = function() self:setCollectionsView("genres") end },
+            callback = function() self:setCollectionsView("genres") end, show_parent = self },
     }
     local pad = Size.padding.default
     return FrameContainer:new{
@@ -755,6 +790,7 @@ function LibraryView:buildChips(counts)
                 text = "\u{2190} " .. self.group.name,
                 max_text_w = math.floor(self.width * 0.22),
                 callback = function() self:closeGroup() end,
+                show_parent = self,
             })
             table.insert(row, HorizontalSpan:new{ width = Size.padding.large })
         end
@@ -767,6 +803,7 @@ function LibraryView:buildChips(counts)
                 text = text,
                 selected = selected,
                 callback = function() self:setFilter(f) end,
+                show_parent = self,
             })
         end
         if row:getSize().w <= avail then break end
@@ -1546,6 +1583,7 @@ end
 
 -- Tap on empty space with the keyboard up: hide it.
 function LibraryView:onTapOutside(_, ges)
+    if self:tryOpenControlsFromTap(ges) then return true end
     if self.search_input:isKeyboardVisible() then
         local kb = self.search_input.keyboard
         if not (kb.dimen and ges.pos:intersectWith(kb.dimen)) then
@@ -1821,6 +1859,40 @@ function LibraryView:gestureOnScrubber(ges)
     return inside(ges.pos) or inside(ges.start_pos)
 end
 
+--- Open Controls when this swipe started in the top-right zone and went
+-- downward (including a slight diagonal). Checked before the A–Z strip so
+-- a pull from the top of the strip does not jump to a letter.
+function LibraryView:tryOpenControls(ges)
+    if not (ges and self.plugin and self.plugin.openControls) then return false end
+    if not Core.isControlsSwipe(ges.direction) then return false end
+    local pos = ges.pos or ges.start_pos
+    if not (pos and pos.x and pos.y) then return false end
+    if not Core.inControlsCorner(pos.x, pos.y, self.dimen.w, self.dimen.h) then return false end
+    if self.plugin:openControls() then
+        self:keyboardGuard()
+        return true
+    end
+    return false
+end
+
+--- A "tap" that started in the Controls zone and moved downward: open
+-- Controls instead of the widget under the finger (Series tab, search, A–Z).
+function LibraryView:tryOpenControlsFromTap(ges)
+    if not (ges and self.plugin and self.plugin.openControls and self.dimen) then return false end
+    local down = self._touch or ges.start_pos
+    local up = ges.pos or down
+    local tol = Screen and Screen.scaleByDPI and Screen:scaleByDPI(20)
+    tol = tonumber(tol) or 20
+    if not Core.controlsTapIsSwipe(down, up, self.dimen.w, self.dimen.h, tol) then
+        return false
+    end
+    if self.plugin:openControls() then
+        self:keyboardGuard()
+        return true
+    end
+    return false
+end
+
 function LibraryView:onSwipe(_, ges)
     if self.scrubber and self.scrubber._drag then
         local pos = ges and (ges.end_pos or ges.pos)
@@ -1828,17 +1900,12 @@ function LibraryView:onSwipe(_, ges)
         self.scrubber:endDrag()
         return true
     end
+    if self:tryOpenControls(ges) then return true end
     if self.scrubber and self:gestureOnScrubber(ges) then
         self.scrubber:onSwipeScrubber(nil, ges)
         return true
     end
     local dir = ges.direction
-    if dir == "south" and self.plugin.openControls
-            and Core.inControlsCorner(ges.pos.x, ges.pos.y, self.dimen.w, self.dimen.h)
-            and self.plugin:openControls() then
-        self:keyboardGuard()
-        return true
-    end
     if dir == "west" or dir == "north" then
         self:turnPage(1, true)
     elseif dir == "east" or dir == "south" then

@@ -306,6 +306,9 @@ function Scrubber:endDrag()
 end
 
 function Scrubber:onTapScrubber(_, ges)
+    if self.view and self.view.tryOpenControlsFromTap and self.view:tryOpenControlsFromTap(ges) then
+        return true
+    end
     if self._drag then self:endDrag() end
     local letter = self:letterAt(ges and ges.pos and ges.pos.y)
     self:jumpTo(letter)
@@ -322,6 +325,12 @@ function Scrubber:onPanReleaseScrubber()
 end
 
 function Scrubber:onSwipeScrubber(_, ges)
+    -- A downward swipe from the top of the strip (inside the Controls zone)
+    -- opens Controls instead of jumping to a letter. LibraryView also checks
+    -- this, but a swipe that starts on the strip is delivered here first.
+    if not (self._drag) and self.view and self.view.tryOpenControls and self.view:tryOpenControls(ges) then
+        return true
+    end
     -- A quick flick is a swipe instead of a pan_release. Stay on the strip:
     -- do not also turn a page.
     local pos = ges and (ges.end_pos or ges.pos)

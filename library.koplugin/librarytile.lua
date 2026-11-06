@@ -953,7 +953,13 @@ function Chip:paintTo(bb, x, y)
     InputContainer.paintTo(self, bb, x, y)
 end
 
-function Chip:onTapChip()
+function Chip:onTapChip(_, ges)
+    -- A downward flick that started in the Controls zone must not switch
+    -- tabs (the Series tab sits under the top-right swipe) or change a filter.
+    local parent = self.show_parent
+    if parent and parent.tryOpenControlsFromTap and parent:tryOpenControlsFromTap(ges) then
+        return true
+    end
     if self.callback then self.callback() end
     return true
 end

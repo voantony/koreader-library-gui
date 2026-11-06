@@ -1,4 +1,4 @@
---- Controls panel: swipe down from the Library's top-right corner for
+--- Controls panel: swipe down from the Library's top right (or tap the clock) for
 -- brightness, warmth and a few round toggles. Loaded only when opened.
 -- The layout and hit-testing live in librarycore (Core.controlsLayout).
 local Blitbuffer = require("ffi/blitbuffer")

@@ -3,12 +3,38 @@
 local Core = require("librarycore")
 
 describe("Controls corner", function()
-    it("is the top-right eighth of the screen", function()
+    it("is the right half of the top eighth, 632×210 px on a Colorsoft", function()
+        local z = Core.controlsZonePx(1264, 1680)
+        eq(z.x, 632)
+        eq(z.y, 0)
+        eq(z.w, 632)
+        eq(z.h, 210)
         eq(Core.inControlsCorner(1200, 50, 1264, 1680), true)
-        eq(Core.inControlsCorner(1264 * 7 / 8, 1680 / 8, 1264, 1680), true)
-        eq(Core.inControlsCorner(1000, 50, 1264, 1680), false, "the title bar's middle keeps its swipe")
-        eq(Core.inControlsCorner(1200, 400, 1264, 1680), false, "the grid keeps its page swipe")
+        eq(Core.inControlsCorner(632, 210, 1264, 1680), true)
+        eq(Core.inControlsCorner(700, 50, 1264, 1680), true, "right half of the header")
+        eq(Core.inControlsCorner(1000, 50, 1264, 1680), true)
+        eq(Core.inControlsCorner(631, 50, 1264, 1680), false, "the left half keeps its page swipe")
+        eq(Core.inControlsCorner(600, 50, 1264, 1680), false, "the title bar's middle keeps its swipe")
+        eq(Core.inControlsCorner(1200, 400, 1264, 1680), false, "the grid below the zone keeps its page swipe")
         eq(Core.inControlsCorner(10, 10, 1264, 1680), false)
+        eq(Core.inControlsCorner(1200, 50, 0, 1680), false)
+    end)
+    it("treats a slightly diagonal downward swipe as opening Controls", function()
+        eq(Core.isControlsSwipe("south"), true)
+        eq(Core.isControlsSwipe("southeast"), true)
+        eq(Core.isControlsSwipe("southwest"), true)
+        eq(Core.isControlsSwipe("north"), false)
+        eq(Core.isControlsSwipe("east"), false)
+        eq(Core.isControlsSwipe("west"), false)
+        eq(Core.isControlsSwipe("northwest"), false)
+        eq(Core.isControlsSwipe(nil), false)
+    end)
+    it("treats a downward flick reported as a tap as a Controls swipe", function()
+        eq(Core.controlsTapIsSwipe({ x = 1100, y = 160 }, { x = 1100, y = 210 }, 1264, 1680, 20), true)
+        eq(Core.controlsTapIsSwipe({ x = 1100, y = 160 }, { x = 1100, y = 160 }, 1264, 1680, 20), false, "a still tap is a tap")
+        eq(Core.controlsTapIsSwipe({ x = 100, y = 50 }, { x = 100, y = 120 }, 1264, 1680, 20), false, "left of the zone")
+        eq(Core.controlsTapIsSwipe({ x = 1100, y = 400 }, { x = 1100, y = 480 }, 1264, 1680, 20), false, "below the zone")
+        eq(Core.controlsTapIsSwipe({ x = 1100, y = 160 }, { x = 1100, y = 100 }, 1264, 1680, 20), false, "upward")
     end)
 end)
 
@@ -171,6 +197,85 @@ describe("corner swipe in the Library", function()
             view:onSwipe(nil, swipe("west", 1220, 60))
             eq(opened, 0)
             same(view.turned, { -1, -1, 1 })
+        end)
+    end)
+    it("opens Controls on a slightly diagonal downward swipe", function()
+        withView(function(view)
+            local opened = 0
+            view.plugin = { openControls = function() opened = opened + 1; return true end }
+            eq(view:onSwipe(nil, swipe("southwest", 1200, 60)), true)
+            eq(view:onSwipe(nil, swipe("southeast", 900, 40)), true)
+            eq(opened, 2)
+            eq(#view.turned, 0)
+        end)
+    end)
+    it("opens Controls from the right half of the header, not only the far corner", function()
+        withView(function(view)
+            local opened = 0
+            view.plugin = { openControls = function() opened = opened + 1; return true end }
+            eq(view:onSwipe(nil, swipe("south", 700, 50)), true)
+            eq(opened, 1)
+            eq(#view.turned, 0)
+        end)
+    end)
+    it("wins over the A–Z strip when the swipe starts in the Controls zone", function()
+        withView(function(view)
+            local opened, scrubbed = 0, 0
+            view.plugin = { openControls = function() opened = opened + 1; return true end }
+            view.scrubber = {
+                dimen = { x = 1144, y = 80, w = 120, h = 1400 },
+                onSwipeScrubber = function() scrubbed = scrubbed + 1 end,
+            }
+            eq(view:onSwipe(nil, swipe("south", 1200, 90)), true)
+            eq(opened, 1)
+            eq(scrubbed, 0, "a downward swipe from the top of the strip opens Controls")
+            eq(#view.turned, 0)
+        end)
+    end)
+    it("still lets the A–Z strip handle a swipe that starts below the zone", function()
+        withView(function(view)
+            local opened, scrubbed = 0, 0
+            view.plugin = { openControls = function() opened = opened + 1; return true end }
+            view.scrubber = {
+                dimen = { x = 1144, y = 80, w = 120, h = 1400 },
+                onSwipeScrubber = function() scrubbed = scrubbed + 1 end,
+            }
+            eq(view:onSwipe(nil, swipe("south", 1200, 400)), true)
+            eq(opened, 0)
+            eq(scrubbed, 1)
+            eq(#view.turned, 0)
+        end)
+    end)
+    it("opens Controls from a tap on the header clock", function()
+        withView(function(view)
+            local opened = 0
+            view.plugin = { openControls = function() opened = opened + 1; return true end }
+            eq(view:onStatusTap(), true)
+            eq(opened, 1)
+        end)
+    end)
+    it("does not open Controls from the clock when the panel is turned off", function()
+        withView(function(view)
+            view.plugin = { openControls = function() return false end }
+            eq(view:onStatusTap(), false)
+        end)
+    end)
+    it("opens Controls from a downward flick that KOReader reported as a tap", function()
+        withView(function(view)
+            local opened = 0
+            view.plugin = { openControls = function() opened = opened + 1; return true end }
+            view._touch = { x = 1100, y = 160 }
+            eq(view:tryOpenControlsFromTap({ pos = { x = 1100, y = 210 } }), true)
+            eq(opened, 1)
+        end)
+    end)
+    it("leaves a still tap alone so the Series tab and search keep working", function()
+        withView(function(view)
+            local opened = 0
+            view.plugin = { openControls = function() opened = opened + 1; return true end }
+            view._touch = { x = 1100, y = 160 }
+            eq(view:tryOpenControlsFromTap({ pos = { x = 1100, y = 160 } }), false)
+            eq(opened, 0)
         end)
     end)
 end)
