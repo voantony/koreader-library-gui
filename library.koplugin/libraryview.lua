@@ -1164,23 +1164,26 @@ function LibraryView:buildBody()
     if suggest_row then fixed = fixed + suggest_row:getSize().h end
     local grid_h = math.max(self.label_h + 20, self.dimen.h - fixed - keyboard_h)
 
-    -- Continue reading: pinned above the books, on every page, so a page
-    -- always holds the same number of books.
+    -- Continue reading / Recently opened: shown only on page 1 of the Books
+    -- tab (no search, no filter, no group). Later pages use the full body
+    -- so more books fit. Compact and two-column Compact never show the
+    -- strip. Books already in the strip stay out of the paged rows on
+    -- every page so a title never appears twice.
     local strip
     self.continue_tiles = nil
     self.continue_books = nil
+    local continue_books, continue_layout
+    local full_h = grid_h
     if data.kind == "books" and not Core.isCompact(self.view_mode) and Core.showContinue{
             enabled = self.show_continue, tab = self.tab, group = self.group,
             query = self.query, filter = self.filter, keyboard = keyboard_h > 0 } then
         local cbooks = Core.topRowBooks(self.top_row, self.all_books, self.continue_slots, fileExists)
         local min_rest = self.view_mode == "list" and 3 * self.list_row_h or (self.label_h + 100)
-        local cl = Core.continueLayout(self.width, grid_h, #cbooks, self.continue_label_h,
+        local cl = Core.continueLayout(self.width, full_h, #cbooks, self.continue_label_h,
             self:continueHeaderHeight(), self.gap, { slots = self.continue_slots, min_rest = min_rest, frac = 0.3 })
         if cl then
-            self.continue_books = cbooks
-            self.continue_layout = cl
-            grid_h = grid_h - cl.height
-            strip = cl
+            continue_books = cbooks
+            continue_layout = cl
         end
     end
 
@@ -1201,29 +1204,46 @@ function LibraryView:buildBody()
         letter_w = self.width - grid_w
     end
 
-    local layout
-    if Core.isCompact(self.view_mode) then
-        layout = Core.listLayout(grid_h, Tiles.compactRowHeight(), 0, { max_rows = 40 })
-        local ncols = Core.listColumns(self.view_mode)
-        layout.cols, layout.per_page = ncols, layout.rows * ncols
-    elseif Core.textRows(self.view_mode, data.kind, self.tab) then
-        -- Authors: one line per row; Series: the name over its authors.
-        layout = Core.listLayout(grid_h, Tiles.textRowHeight(self.tab == "series" and 2 or 1), 0, { max_rows = 24 })
-    elseif self.view_mode == "list" then
-        layout = Core.listLayout(grid_h, self.list_row_h, Size.padding.small, { max_rows = 10 })
-    else
-        -- Under the Continue reading strip, accept smaller covers for a second row.
-        layout = Core.gridLayout(grid_w, grid_h, self.cols, self.label_h, self.gap, strip and 0.6 or nil)
+    local function layoutFor(h, under_strip)
+        if Core.isCompact(self.view_mode) then
+            local layout = Core.listLayout(h, Tiles.compactRowHeight(), 0, { max_rows = 40 })
+            local ncols = Core.listColumns(self.view_mode)
+            layout.cols, layout.per_page = ncols, layout.rows * ncols
+            return layout
+        elseif Core.textRows(self.view_mode, data.kind, self.tab) then
+            -- Authors: one line per row; Series: the name over its authors.
+            return Core.listLayout(h, Tiles.textRowHeight(self.tab == "series" and 2 or 1), 0, { max_rows = 24 })
+        elseif self.view_mode == "list" then
+            return Core.listLayout(h, self.list_row_h, Size.padding.small, { max_rows = 10 })
+        else
+            -- Under the Continue reading strip, accept smaller covers for a second row.
+            return Core.gridLayout(grid_w, h, self.cols, self.label_h, self.gap, under_strip and 0.6 or nil)
+        end
     end
-    self.layout = layout
 
-    -- Books in the strip are pinned on every page, so leave them out of the
-    -- grid below it: each book is on screen once. The footer still counts all.
-    local grid_items = strip and Core.withoutShown(data.items, self.continue_books) or data.items
-    local page_items, page, pages = Core.page(grid_items, layout.per_page, self.page)
+    local later_layout = layoutFor(full_h, false)
+    local page1_h = continue_layout and (full_h - continue_layout.height) or full_h
+    local page1_layout = continue_layout and layoutFor(page1_h, true) or later_layout
+    local first_per, later_per = page1_layout.per_page, later_layout.per_page
+
+    -- Books in the strip appear only there (page 1), so leave them out of
+    -- the paged rows on every page: each title is on screen once. The
+    -- footer still counts all books.
+    local grid_items = continue_books and Core.withoutShown(data.items, continue_books) or data.items
+    local page_items, page, pages = Core.page(grid_items, first_per, self.page, later_per)
     self.page, self.pages = page, pages
     self.current = data
     self.missing_covers = {}
+
+    local on_first = page == 1 and continue_layout ~= nil
+    local layout = on_first and page1_layout or later_layout
+    grid_h = on_first and page1_h or full_h
+    if on_first then
+        strip = continue_layout
+        self.continue_books = continue_books
+    end
+    self.layout = layout
+
     local strip_widget = strip and self:buildContinue(self.continue_books, strip)
     local continue_missing = self.missing_covers
     local grid
@@ -1237,7 +1257,7 @@ function LibraryView:buildBody()
     if letter_mode and letter_w > 0 then
         local anchor_item = page_items[1]
         local anchor = anchor_item and Core.scrubberBucket(Core.scrubberItemKey(anchor_item, letter_mode)) or nil
-        self.scrubber = self:buildScrubber(grid_items, layout.per_page, letter_mode, letter_w, grid_h, anchor)
+        self.scrubber = self:buildScrubber(grid_items, first_per, letter_mode, letter_w, grid_h, anchor, later_per)
         grid = HorizontalGroup:new{ align = "top", grid, self.scrubber }
     end
     for _, p in ipairs(continue_missing) do table.insert(self.missing_covers, p) end
@@ -1830,10 +1850,10 @@ function LibraryView:scrubberPlan(kind, n_items)
     return { mode = mode, width = width - content_w, content_w = content_w }
 end
 
-function LibraryView:buildScrubber(items, per_page, mode, width, height, anchor)
+function LibraryView:buildScrubber(items, per_page, mode, width, height, anchor, later_per_page)
     local index = Core.scrubberIndex(items, per_page, function(item)
         return Core.scrubberItemKey(item, mode)
-    end)
+    end, later_per_page)
     return Scrubber:new{
         view = self,
         index = index,

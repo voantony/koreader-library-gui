@@ -1039,13 +1039,45 @@ end
 -- Paging
 ----------------------------------------------------------------------------
 
+--- How many pages a list of `n` items needs when page 1 holds
+-- `first_per_page` and every later page holds `later_per_page`.
+-- Omit `later_per_page` (or pass the same value) for even pages.
+function Core.pageCount(n, first_per_page, later_per_page)
+    n = math.max(0, math.floor(tonumber(n) or 0))
+    local first = math.max(1, math.floor(tonumber(first_per_page) or 1))
+    local later = math.max(1, math.floor(tonumber(later_per_page) or first))
+    if n <= first then return 1 end
+    return 1 + math.ceil((n - first) / later)
+end
+
+--- 1-based page that holds the item at 1-based index `i`.
+function Core.pageOfIndex(i, first_per_page, later_per_page)
+    i = math.floor(tonumber(i) or 0)
+    local first = math.max(1, math.floor(tonumber(first_per_page) or 1))
+    local later = math.max(1, math.floor(tonumber(later_per_page) or first))
+    if i <= first then return 1 end
+    return 2 + math.floor((i - first - 1) / later)
+end
+
 --- Return the slice for `page` (1-based) and the clamped page and page count.
-function Core.page(list, per_page, page)
-    local pages = math.max(1, math.ceil(#list / per_page))
-    page = math.max(1, math.min(page or 1, pages))
+-- Page 1 holds `per_page` items. When `later_per_page` is set, pages 2+
+-- hold that many instead (the Books tab uses this so page 1 can leave
+-- room for the Continue reading strip while later pages use the full body).
+function Core.page(list, per_page, page, later_per_page)
+    list = list or {}
+    local n = #list
+    local first = math.max(1, math.floor(tonumber(per_page) or 1))
+    local later = math.max(1, math.floor(tonumber(later_per_page) or first))
+    local pages = Core.pageCount(n, first, later)
+    page = math.max(1, math.min(pages, math.floor(tonumber(page) or 1)))
+    local start, size
+    if page == 1 then
+        start, size = 1, first
+    else
+        start, size = first + (page - 2) * later + 1, later
+    end
     local out = {}
-    local first = (page - 1) * per_page + 1
-    for i = first, math.min(#list, first + per_page - 1) do
+    for i = start, math.min(n, start + size - 1) do
         out[#out + 1] = list[i]
     end
     return out, page, pages
@@ -2769,10 +2801,11 @@ function Core.scrubberMode(state)
 end
 
 --- First page (1-based) whose item falls under each letter.
--- `items` is already in the order on screen. `per_page` is how many of them
--- one page holds. Letters with no item are absent from `page` and false in
--- `active`.
-function Core.scrubberIndex(items, per_page, key_fn)
+-- `items` is already in the order on screen. `per_page` is how many of
+-- them page 1 holds; `later_per_page` (optional) is how many pages 2+
+-- hold, matching Core.page. Letters with no item are absent from `page`
+-- and false in `active`.
+function Core.scrubberIndex(items, per_page, key_fn, later_per_page)
     per_page = math.floor(tonumber(per_page) or 1)
     if per_page < 1 then per_page = 1 end
     if type(key_fn) ~= "function" then
@@ -2783,7 +2816,7 @@ function Core.scrubberIndex(items, per_page, key_fn)
         for i, item in ipairs(items) do
             local letter = Core.scrubberBucket(key_fn(item))
             if page_of[letter] == nil then
-                page_of[letter] = math.floor((i - 1) / per_page) + 1
+                page_of[letter] = Core.pageOfIndex(i, per_page, later_per_page)
             end
         end
     end

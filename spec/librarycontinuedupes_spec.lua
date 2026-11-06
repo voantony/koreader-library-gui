@@ -1,5 +1,5 @@
--- The Continue reading strip is pinned above the grid on every page, so the
--- grid leaves its books out: no book shows twice, none goes missing.
+-- The Continue reading strip sits above the grid on page 1 only. Its books
+-- stay out of the paged rows on every page: no book shows twice, none goes missing.
 local Core = require("librarycore")
 
 local function book(path, status, opened)
@@ -52,6 +52,38 @@ describe("Grid under the Continue reading strip", function()
             for path, c in pairs(seen) do eq(c, 1, sort .. " " .. path); n = n + 1 end
             eq(n, 30, sort)
             eq(pages, math.ceil(27 / 8), sort)
+        end
+    end)
+
+
+    it("page 1 holds fewer slots than later pages; every book still shows once", function()
+        local items = library()
+        table.sort(items, Core.comparator("recent"))
+        local strip = Core.continueReading(items, 5)
+        local grid = Core.withoutShown(items, strip)
+        local first, later = 5, 10
+        local seen = {}
+        for _, b in ipairs(strip) do seen[b.path] = (seen[b.path] or 0) + 1 end
+        local p1, page, pages = Core.page(grid, first, 1, later)
+        eq(page, 1)
+        eq(#p1, first)
+        eq(pages, Core.pageCount(#grid, first, later))
+        eq(pages, 1 + math.ceil((#grid - first) / later))
+        for p = 1, pages do
+            local slice = Core.page(grid, first, p, later)
+            local expect = (p == 1) and first or math.min(later, #grid - first - (p - 2) * later)
+            eq(#slice, expect, "page " .. p)
+            for _, b in ipairs(slice) do seen[b.path] = (seen[b.path] or 0) + 1 end
+        end
+        local n = 0
+        for path, c in pairs(seen) do eq(c, 1, path); n = n + 1 end
+        eq(n, 30)
+        for _, b in ipairs(strip) do
+            for p = 1, pages do
+                for _, row in ipairs((Core.page(grid, first, p, later))) do
+                    eq(row.path ~= b.path, true, "strip book leaked onto page " .. p)
+                end
+            end
         end
     end)
 
