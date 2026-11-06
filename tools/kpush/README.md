@@ -64,7 +64,7 @@ that masks anything that looks like a Kindle serial number (`G` followed by
 three or more capital letters or digits), so output is safe to paste.
 
 Want the Kindle as a normal drive in Finder instead? See
-[kindle-mtp-mount](https://github.com/voantony/kindle-mtp-mount).
+[kindle-mtp-mount](https://gitlab.com/antonyvo/kindle-mtp-mount).
 
 Exit codes: 0 ok, 1 some files failed, 2 usage error, 3 no device / busy,
 4 path not found or refused, 5 safety check failed, 6 wrong libmtp version.
