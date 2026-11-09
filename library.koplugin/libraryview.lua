@@ -1626,13 +1626,11 @@ function LibraryView:buildBody()
         if #data.items < 1 then return nil end
         return self:scrubberLetterMode(data.kind, pages)
     end
-    local function widthsFor(mode, columns)
+    local function widthsFor(mode)
         if not mode then return self.width, 0 end
         local strip_w = Core.scrubberWidth(self:screenDpi())
-        local n = math.max(1, columns or 1)
-        local content_w = Core.gridContentWidth(self.width, strip_w * n)
-        local reserved = math.max(0, self.width - content_w)
-        return content_w, math.floor(reserved / n)
+        local content_w = Core.gridContentWidth(self.width, strip_w)
+        return content_w, self.width - content_w
     end
     local letter_mode = letterMode(nil)
     local grid_w, letter_w = widthsFor(letter_mode)
@@ -1680,15 +1678,6 @@ function LibraryView:buildBody()
         grid_w, letter_w = widthsFor(letter_mode)
         later_layout, page1_layout, page1_h, first_per, later_per, grid_items, page_items, page, pages = pageSlice()
     end
-    -- Letters on both sides only while the shelf is the short page under
-    -- Continue reading (#5: "when the library uses only part of the screen").
-    local two = letter_mode and page == 1 and continue_layout ~= nil
-    if two then
-        grid_w, letter_w = widthsFor(letter_mode, 2)
-        later_layout, page1_layout, page1_h, first_per, later_per, grid_items, page_items, page, pages = pageSlice()
-        two = letter_mode and page == 1 and continue_layout ~= nil
-    end
-    self._scrub_two = two and true or false
     self.page, self.pages = page, pages
     self.current = data
     self.missing_covers = {}
@@ -1723,23 +1712,9 @@ function LibraryView:buildBody()
     if letter_mode and letter_w > 0 then
         local anchor_item = page_items[1]
         local anchor = anchor_item and Core.scrubberBucket(Core.scrubberItemKey(anchor_item, letter_mode)) or nil
-        local left_letters, right_letters = Core.scrubberSplit(Core.SCRUBBER_LETTERS, self._scrub_two)
-        local function column(letters, side)
-            return self:buildScrubber(grid_items, first_per, letter_mode, letter_w, grid_h, anchor, later_per, {
-                letters = letters, side = side,
-            })
-        end
-        if self._scrub_two then
-            local left = column(left_letters, "left")
-            local right = column(right_letters, "right")
-            self.scrubbers = { left, right }
-            self.scrubber = right
-            grid = HorizontalGroup:new{ align = "top", left, grid, right }
-        else
-            self.scrubber = column(right_letters, "right")
-            self.scrubbers = { self.scrubber }
-            grid = HorizontalGroup:new{ align = "top", grid, self.scrubber }
-        end
+        self.scrubber = self:buildScrubber(grid_items, first_per, letter_mode, letter_w, grid_h, anchor, later_per)
+        self.scrubbers = { self.scrubber }
+        grid = HorizontalGroup:new{ align = "top", grid, self.scrubber }
     end
     for _, p in ipairs(continue_missing) do table.insert(self.missing_covers, p) end
     local footer = self:buildFooter(page, pages, #data.items, data.kind)

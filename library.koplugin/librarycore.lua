@@ -2728,8 +2728,19 @@ end
 --- Width of the letter strip. Same 10 mm grab as a page button: the letters
 -- themselves stay a slim column inside it, and the grid gives up this width
 -- so covers never sit under the strip.
+--- Hit width of the A–Z strip. Wider than the 10 mm page button so the
+-- column is easy to hold; the painted letters stay a slim column inside it.
 function Core.scrubberWidth(dpi)
-    return Core.pageHitPx(dpi)
+    local hit = Core.pageHitPx(dpi)
+    return math.max(hit, math.floor(hit * 1.4 + 0.5))
+end
+
+--- Smallest slot that still holds a bold letter. A full-height shelf fits
+-- every letter above this; a shelf shortened by Continue reading does not.
+function Core.scrubberMinSlot(dpi)
+    dpi = tonumber(dpi)
+    if not dpi or dpi ~= dpi or dpi < 1 then dpi = 167 end
+    return math.max(22, math.floor(3.2 * dpi / 25.4 + 0.5))
 end
 
 --- Grid width once `strip_w` has been reserved on the right. Always leaves
@@ -2755,18 +2766,55 @@ function Core.filterScroll(offset, content_w, view_w, dx)
     }
 end
 
---- Split the alphabet into two columns when the book grid only has part
--- of the screen (#5, the mockup with letters on both sides). The left
--- column is the first half, including "#", so each letter is about twice
--- as tall. A full-height shelf keeps one column.
-function Core.scrubberSplit(letters, two_sides)
+--- What to paint down the single right-hand strip (#5). Every letter when
+-- `height` can give each one `min_slot`. Otherwise an iOS-style index:
+-- letters spread across the alphabet, with a dot between them. The finger
+-- still maps onto every letter; only the paint is compacted.
+function Core.scrubberMarks(letters, height, min_slot)
     letters = letters or Core.SCRUBBER_LETTERS
-    if not two_sides then return nil, letters end
-    local mid = math.ceil(#letters / 2)
-    local left, right = {}, {}
-    for i = 1, mid do left[#left + 1] = letters[i] end
-    for i = mid + 1, #letters do right[#right + 1] = letters[i] end
-    return left, right
+    local n = #letters
+    height = math.floor(tonumber(height) or 0)
+    min_slot = math.max(1, math.floor(tonumber(min_slot) or 1))
+    if n < 1 or height < 1 then return {} end
+    local capacity = math.max(1, math.floor(height / min_slot))
+    if capacity >= n then
+        local marks = {}
+        for i, letter in ipairs(letters) do
+            marks[i] = { text = letter, letter = letter }
+        end
+        return marks
+    end
+    -- k letters with a dot between each pair need 2k - 1 slots.
+    local shown = math.max(1, math.floor((capacity + 1) / 2))
+    if shown > n then shown = n end
+    if shown == 1 then
+        return { { text = letters[1], letter = letters[1] } }
+    end
+    local picks, used = {}, {}
+    for i = 1, shown do
+        local idx = math.floor((i - 1) * (n - 1) / (shown - 1) + 0.5) + 1
+        if idx < 1 then idx = 1 end
+        if idx > n then idx = n end
+        if not used[idx] then
+            used[idx] = true
+            picks[#picks + 1] = idx
+        end
+    end
+    if #picks < 2 then picks = { 1, n } end
+    local marks = {}
+    for i, idx in ipairs(picks) do
+        if i > 1 then marks[#marks + 1] = { text = "·", dot = true } end
+        marks[#marks + 1] = { text = letters[idx], letter = letters[idx] }
+    end
+    while #marks > capacity and #marks >= 3 do
+        local drop
+        for i = 2, #marks - 1 do
+            if marks[i].dot then drop = i break end
+        end
+        if not drop then break end
+        table.remove(marks, drop)
+    end
+    return marks
 end
 
 --- A vertical swipe that starts in a LiveLight edge (the outer eighth).
