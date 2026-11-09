@@ -23,7 +23,15 @@ local function load(file, extra)
     return mod
 end
 
-local Zones = load("libraryzones.lua", {})
+local warns = {}
+local logger = {
+    warn = function(...)
+        local parts = {}
+        for i = 1, select("#", ...) do parts[#parts + 1] = tostring(select(i, ...)) end
+        warns[#warns + 1] = table.concat(parts, " ")
+    end,
+}
+local Zones = load("libraryzones.lua", { logger = logger })
 
 local function fakeZone(id, match, handler)
     return {
@@ -119,6 +127,17 @@ describe("Library zones forwarding", function()
         local fm = fakeFM({}, { children = { menu } })
         eq(Zones.tryFMZones({ ges = "tap" }, fm), true)
         eq(fired, true)
+    end)
+
+    it("logs a zone handler error instead of crashing the library", function()
+        local fm = fakeFM({ fakeZone("filemanager_livelight_pan",
+            function() return true end,
+            function() error("frontlight missing") end) })
+        local before = #warns
+        eq(Zones.tryFMZones({ ges = "pan" }, fm), false)
+        eq(#warns, before + 1)
+        eq(warns[#warns]:find("frontlight missing") ~= nil, true)
+        eq(warns[#warns]:find("filemanager_livelight_pan") ~= nil, true)
     end)
 
     it("returns false when nothing matches and when there is no host", function()

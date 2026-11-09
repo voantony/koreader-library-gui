@@ -30,6 +30,8 @@ installer in main.lua) keeping broadcast events from being delivered
 twice. LiveLight needs none of this: it drives the frontlight directly.
 ]]
 
+local logger = require("logger")
+
 local Zones = {}
 
 -- Shared zone walk: the host's own _ordered_touch_zones plus every child
@@ -48,10 +50,19 @@ local function tryHostZones(ev, host, allowed, exclude_child)
     for _, zones in ipairs(zone_lists) do
         for _, tzone in ipairs(zones or {}) do
             local id = tzone.def and tzone.def.id
-            if id and allowed(id)
-               and tzone.gs_range:match(ev)
-               and tzone.handler(ev) then
-                return true
+            if id and allowed(id) and tzone.gs_range and tzone.handler then
+                -- A LiveLight (or other zone) error must not take the Library down.
+                local ok_match, matched = pcall(tzone.gs_range.match, tzone.gs_range, ev)
+                if not ok_match then
+                    logger.warn("Library: zone", id, "match failed:", matched)
+                elseif matched then
+                    local ok_call, consumed = pcall(tzone.handler, ev)
+                    if not ok_call then
+                        logger.warn("Library: zone", id, "failed:", consumed)
+                    elseif consumed then
+                        return true
+                    end
+                end
             end
         end
     end
