@@ -323,14 +323,14 @@ function LibraryView:buildSearchRow(text)
     local field_w = self.width - 2 * margin - status_w - (status_w > 0 and gap or 0)
     if field_w < Screen:scaleBySize(140) then field_w = Screen:scaleBySize(140) end
     -- What this row will show: what was passed, what the old box held, or
-    -- nothing yet. The clear button only exists while there is a query to
-    -- clear (issue #6); the text box takes the freed space.
+    -- nothing yet. The clear button is always in the row (issue #6). Showing
+    -- and hiding it does not rebuild this text box: that would drop the
+    -- keyboard. Its slot stays reserved so the field does not jump.
     if self.search_input then
         text = text or self.search_input:getText()
         self.search_input:onCloseWidget() -- frees its keyboard
     end
     text = text or ""
-    local has_text = text ~= ""
     local magnifier = IconButton:new{
         icon = "appbar.search",
         width = icon_size,
@@ -339,22 +339,18 @@ function LibraryView:buildSearchRow(text)
         callback = function() self:openKeyboard() end,
         show_parent = self,
     }
-    local clear
-    if has_text then
-        clear = IconButton:new{
-            icon = "close",
-            width = icon_size,
-            height = icon_size,
-            padding = Size.padding.small,
-            callback = function() self:clearSearch() end,
-            show_parent = self,
-        }
-    end
-    -- Spans in the row: one after the magnifier, and one before the clear
-    -- button when it is there.
-    local gaps = has_text and 2 or 1
+    local clear = IconButton:new{
+        icon = "close",
+        width = icon_size,
+        height = icon_size,
+        padding = Size.padding.small,
+        callback = function() self:clearSearch() end,
+        show_parent = self,
+    }
+    -- Spans in the row: one after the magnifier, and one before the clear button.
+    local gaps = 2
     local input_w = field_w - 2 * border - 2 * hpad - magnifier:getSize().w
-        - (clear and clear:getSize().w or 0) - gaps * Size.padding.default
+        - clear:getSize().w - gaps * Size.padding.default
     self._search_hint = self:searchHint()
     self.search_input = SearchInput:new{
         text = text,
@@ -380,11 +376,9 @@ function LibraryView:buildSearchRow(text)
         magnifier,
         HorizontalSpan:new{ width = Size.padding.default },
         self.search_input,
+        HorizontalSpan:new{ width = Size.padding.default },
+        clear,
     }
-    if clear then
-        row[#row + 1] = HorizontalSpan:new{ width = Size.padding.default }
-        row[#row + 1] = clear
-    end
     self.search_field = FrameContainer:new{
         padding = 0,
         padding_left = hpad,
@@ -399,8 +393,30 @@ function LibraryView:buildSearchRow(text)
         },
     }
     self._search_clear = clear
-    self._search_clear_visible = has_text
+    self._search_clear_visible = text ~= ""
+    self:setSearchClearShown(text ~= "")
     self:assembleHeader()
+end
+
+--- Paint the clear button only while there is a query. The text box and the
+-- keyboard stay as they are.
+function LibraryView:setSearchClearShown(on)
+    local clear = self._search_clear
+    if not clear then return end
+    on = on and true or false
+    if not clear._library_clear_saved then
+        clear._library_clear_saved = true
+        clear._library_paint = clear.paintTo
+        clear._library_callback = clear.callback
+    end
+    self._search_clear_visible = on
+    if on then
+        clear.paintTo = clear._library_paint
+        clear.callback = clear._library_callback
+    else
+        clear.paintTo = function() end
+        clear.callback = function() end
+    end
 end
 
 --- Width reserved for the clock and battery, from a wide sample so "9:59"
@@ -1604,16 +1620,13 @@ function LibraryView:applySearch(text)
 end
 
 --- Show the clear (X) button only while there is a query to clear, and hide
--- it again once the query is empty (issue #6). The row is rebuilt so the
--- text box takes the freed space; when the keyboard was up it is reopened,
--- so typing continues in the new box.
+-- it again once the query is empty (issue #6). The text box is not rebuilt
+-- and the keyboard is not reopened.
 function LibraryView:updateSearchClear()
-    if not self.search_input then return end
+    if not self.search_input or not self._search_clear then return end
     local want = self.search_input:getText() ~= ""
     if want == self._search_clear_visible then return end
-    local keyboard_open = self.search_input.isKeyboardVisible and self.search_input:isKeyboardVisible()
-    self:buildSearchRow()
-    if keyboard_open then self:openKeyboard() end
+    self:setSearchClearShown(want)
     if UIManager.setDirty then
         UIManager:setDirty(self, function() return "ui", self:headerRegion(), true end)
     end

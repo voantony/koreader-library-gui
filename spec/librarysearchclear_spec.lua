@@ -1,6 +1,6 @@
--- Issue #6: the search bar's clear (X) button only exists while there is a
--- query to clear. With an empty query the bar is just the magnifier and the
--- text box, and the box takes the freed space.
+-- Issue #6: the search bar's clear (X) button is hidden while the query is
+-- empty and shown once there is text. Crossing that line does not rebuild
+-- the text box or reopen the keyboard; the button's slot stays reserved.
 --
 -- LibraryView needs KOReader's UI modules, so they are stubbed here; only
 -- the class table is under test.
@@ -126,55 +126,64 @@ describe("search clear button (issue #6)", function()
     it("hides the clear button while the query is empty", function()
         local v = harness()
         v:buildSearchRow()
-        eq(v._search_clear, nil)
+        eq(v._search_clear ~= nil, true, "the button stays in the row")
         eq(v._search_clear_visible, false)
         eq(v.search_input:getText(), "")
-        eq(has_clear(last_group), false)
-        -- the box takes the freed space: 770 - 2*1 - 2*10 - 22 - 1*5
-        eq(v.search_input.width, 721)
-    end)
-
-    it("shows the clear button with a query, and the box is narrower", function()
-        local v = harness()
-        v:buildSearchRow("austen")
-        eq(v._search_clear ~= nil, true)
-        eq(v._search_clear_visible, true)
         eq(has_clear(last_group), true)
-        -- 770 - 2*1 - 2*10 - 22 - 22 - 2*5
+        eq(v._search_clear.paintTo ~= v._search_clear._library_paint, true, "it does not paint")
+        -- slot reserved: 770 - 2*1 - 2*10 - 22 - 22 - 2*5
         eq(v.search_input.width, 694)
     end)
 
-    it("appears on the first character and disappears on clear", function()
+    it("shows the clear button with a query", function()
         local v = harness()
-        v:buildSearchRow()
-        eq(v.header_built, 1)
-        v.search_input:setText("a")
-        v:applySearch("a")
+        v:buildSearchRow("austen")
         eq(v._search_clear_visible, true)
-        eq(v.header_built, 2, "the row is rebuilt when the button appears")
-        eq(dirty, 1, "the header is repainted")
-        v:clearSearch()
-        eq(v.search_input:getText(), "")
-        eq(v._search_clear_visible, false)
-        eq(v.header_built, 3, "the row is rebuilt when the button goes away")
-        -- nothing more to do while the state is unchanged
-        v:updateSearchClear()
-        eq(v.header_built, 3)
-        v.search_input:setText("a")
-        v:applySearch("a")
-        v:applySearch("a")
-        eq(v.header_built, 4, "a repeated query does not rebuild again")
+        eq(has_clear(last_group), true)
+        eq(v._search_clear.paintTo, v._search_clear._library_paint)
+        eq(v.search_input.width, 694)
     end)
 
-    it("reopens the keyboard when it was up, and leaves it alone when down", function()
+    it("appears on the first character and disappears on clear without a new text box", function()
+        local v = harness()
+        v:buildSearchRow()
+        local input = v.search_input
+        eq(v.header_built, 1)
+        input:setText("a")
+        v:applySearch("a")
+        eq(v.search_input, input, "the text box is not rebuilt")
+        eq(input.closed or 0, 0)
+        eq(v._search_clear_visible, true)
+        eq(v.header_built, 1)
+        eq(dirty, 1, "the header is repainted")
+        eq(opened_keyboard, 0)
+        v:clearSearch()
+        eq(v.search_input, input)
+        eq(v.search_input:getText(), "")
+        eq(v._search_clear_visible, false)
+        eq(v.header_built, 1)
+        eq(opened_keyboard, 0)
+        v:updateSearchClear()
+        eq(v.header_built, 1)
+        eq(dirty, 2, "an unchanged clear state does not repaint")
+        input:setText("a")
+        v:applySearch("a")
+        v:applySearch("a")
+        eq(v.header_built, 1)
+        eq(dirty, 3)
+    end)
+
+    it("leaves the keyboard up while the clear button comes and goes", function()
         local v = harness()
         v:buildSearchRow()
         v.search_input.keyboard_visible = true
         v.search_input:setText("a")
         v:applySearch("a")
-        eq(opened_keyboard, 1, "typing continues in the new box")
-        v.search_input.keyboard_visible = false
+        eq(opened_keyboard, 0, "the keyboard is not reopened")
+        eq(v.search_input.keyboard_visible, true)
         v:clearSearch()
-        eq(opened_keyboard, 1, "no keyboard to reopen when it was down")
+        eq(opened_keyboard, 0)
+        eq(v.search_input.keyboard_visible, true, "clearing does not close it either")
+        eq(v._search_clear_visible, false)
     end)
 end)
