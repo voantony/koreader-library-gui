@@ -66,16 +66,35 @@ Library GUI is MIT licensed. Code under the GPL or AGPL can't be copied into it,
 - **ZenOS** (GPL-3.0),
 - any other GPL or AGPL plugin.
 
-Using KOReader's APIs (requiring its modules and widgets) is fine; that's how every plugin works. Looking at how another project solves something and writing your own version from the idea is fine too. Copying or closely translating their code is not. If you're unsure, ask in the issue or PR.
+Using KOReader's APIs (requiring its modules and widgets) is fine; that's how every plugin works. Looking at how another project solves something and writing your own version from the idea is fine too. Copying or closely translating their code is not. If you're unsure, ask in the issue or the merge request.
 
-## Pull requests
+## Fork and merge requests
 
-1. Fork the repository and create a branch from `main`.
-2. Keep each PR to one change, and explain what it does and why in the description. Screenshots help for anything visual.
-3. Add or update specs for any behaviour you change, and make sure `luajit spec/run.lua` passes.
-4. Only the files in `library.koplugin/` go on the device (19 right now). Keep runtime code in that folder, and if you add a file there, add it to `FILES` in the `Makefile`.
-5. Don't commit books, `.sdr` folders, KOReader settings or anything from your own device. `.gitignore` blocks the usual ones.
-6. Open the PR. I'll review it, may ask for changes, and merge it when it's ready.
+The project lives on GitLab. Issues and merge requests use GitLab's `#` numbers (`#1`, `!4`).
+
+1. Fork the repository and create a branch from `main`. One branch, one change.
+2. Commit in the [conventional](https://www.conventionalcommits.org/) form: `feat`, `fix`, `test`, `docs`, `refactor`, or `chore`, and name the issue when there is one (`feat: remember a widget's page (#1)`).
+3. Add or update specs for any behaviour you change, and make sure `luajit spec/run.lua` passes with 0 failures.
+4. Open a merge request into `main`. Say what changed and why. For anything on screen, attach emulator screenshots. `Closes #N` in the description closes that issue when the merge request is merged.
+5. Only the files in `library.koplugin/` go on the device. Keep runtime code in that folder, and if you add a file there, add it to `FILES` in the `Makefile`.
+6. Don't commit books, `.sdr` folders, KOReader settings or anything from your own device. `.gitignore` blocks the usual ones.
+
+A stacked change should target the branch it builds on, so the diff is only the new commits.
+
+## Code style
+
+Match the Lua already in `library.koplugin/`.
+
+- Indent with 4 spaces. Keep lines readable; wrap a long call rather than inventing a one-letter name.
+- LuaJIT / Lua 5.1. No `goto`, and no features newer than that.
+- A comment says why, not what the next line already says. `---` on a function is the note for the next reader.
+- Strings a person sees go through gettext: `_("Continue reading")`, and `T()` when the string has a `%1` placeholder. Do not use `_` as a loop variable. It is gettext, and `for _, item` makes `_("...")` crash.
+- Pure decisions (what page, which books, which gesture wins) live in `librarycore.lua` or `librarywidgets.lua`, where a spec can call them without KOReader. The view paints and forwards.
+- Specs use `describe` / `it` / `eq` / `same` and are listed in `spec/run.lua`. A new file does not run until it is added there.
+
+## Credits
+
+@drkhn1234 is the first outside contributor. The home-screen issues, the mockups, and the requests this library is being built around came from him.
 
 ## Building the release zip
 
