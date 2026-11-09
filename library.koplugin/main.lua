@@ -1332,10 +1332,26 @@ function Library:showLibraryMenu(view)
             end,
         },
     })
+    -- The mockup draws this menu at the bottom-left hamburger and does not
+    -- draw the open panel. Pop it up from that button. A tap on the button
+    -- opens it; holds and edge swipes in the corner are left to the zones.
     dialog = ButtonDialog:new{
         title = title,
         title_align = "center",
         buttons = buttons,
+        anchor = function()
+            local d = view.footer_menu and view.footer_menu.dimen
+            if type(d) == "table" and tonumber(d.x) and tonumber(d.y)
+                and tonumber(d.w) and tonumber(d.h) then
+                return d
+            end
+            local screen = Device.screen
+            local ok_w, w = pcall(function() return screen:getWidth() end)
+            local ok_h, h = pcall(function() return screen:getHeight() end)
+            w = (ok_w and tonumber(w)) or 0
+            h = (ok_h and tonumber(h)) or 0
+            return { x = 0, y = h, w = math.max(1, math.floor(w / 8)), h = 1 }
+        end,
         tap_close_callback = function() self:flashLibraryOverlay(view) end,
     }
     UIManager:show(dialog)

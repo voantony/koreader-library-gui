@@ -246,4 +246,15 @@ describe("Footer size and view controls", function()
         eq(findButton("zoom.page") ~= nil, true)
         eq(findButton("column.three") ~= nil, true)
     end)
+
+    it("the bottom-left menu opens on a tap and does not keep a hold", function()
+        local v = footer({})
+        local menu = findButton("appbar.menu")
+        eq(menu, v.footer_menu)
+        eq(menu.hold_callback, nil)
+        local opened
+        v.plugin.showLibraryMenu = function(_, view) opened = view end
+        menu.callback()
+        eq(opened, v)
+    end)
 end)

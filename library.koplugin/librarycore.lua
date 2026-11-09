@@ -1970,6 +1970,16 @@ function Core.edgeStrip(x, w)
     return nil
 end
 
+--- Bottom-left corner: KOReader's DTAP_ZONE_BOTTOM_LEFT, the outer eighth
+-- of the width and of the height. Hold, double-tap and the left-edge
+-- slide live here. The footer's menu button sits inside it; a tap on
+-- that button still opens the menu.
+function Core.inBottomLeftCorner(x, y, w, h)
+    x, y, w, h = tonumber(x), tonumber(y), tonumber(w), tonumber(h)
+    if not (x and y and w and h) or w <= 0 or h <= 0 then return false end
+    return x < w / 8 and y >= h * 7 / 8
+end
+
 --- Pixel rectangle { x, y, w, h } of that zone on a screen of `w` × `h`.
 function Core.controlsZonePx(w, h)
     w, h = tonumber(w) or 0, tonumber(h) or 0

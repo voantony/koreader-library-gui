@@ -1045,8 +1045,11 @@ function LibraryView:buildFooter(page, pages, total, kind)
         local enabled = item.enabled ~= false
         local callback, hold
         if item.id == "menu" then
+            -- A tap opens the menu (#1). A hold does not: the button sits
+            -- in the bottom-left corner, and a hold there is that corner's
+            -- gesture. Swipes are not claimed by the button at all.
             callback = function() self:onLeftIcon() end
-            hold = callback
+            hold = nil
         else
             callback = function() if self.last_book then self:onResume() end end
             hold = function() if self.last_book then self:showResumeHint() end end
@@ -1084,6 +1087,12 @@ function LibraryView:buildFooter(page, pages, total, kind)
         if item.id == "menu" then menu_btn = btn else resume_btn = btn end
     end
     self.footer_menu, self.footer_resume = menu_btn, resume_btn
+    -- Button:onHoldSelectButton returns true even with no hold callback,
+    -- which would swallow a hold in the bottom-left corner.
+    if menu_btn.ges_events then
+        menu_btn.ges_events.HoldSelectButton = nil
+        menu_btn.ges_events.HoldReleaseSelectButton = nil
+    end
     local button_gap = Size.padding.small
     local buttons_w = menu_btn:getSize().w + button_gap + resume_btn:getSize().w + Size.padding.default
     -- Size steps the cover size, view steps the form factor; a long-press
@@ -2564,11 +2573,25 @@ end
 -- the Library is showing. The view's own widgets and handlers run first;
 -- only what they leave is offered on. A gesture-lock screensaver is left
 -- alone so its wake gesture still reaches it.
+-- Hold and double-tap in the bottom-left corner belong to the file
+-- browser's corner gestures, not to the menu button that sits there.
+-- A tap is not in this set: a tap on the button opens the menu (#1).
+local CORNER_GESTURE = { hold = true, hold_release = true, double_tap = true }
+
+function LibraryView:cornerGestureFirst(ev)
+    if not (ev and CORNER_GESTURE[ev.ges] and ev.pos and self.dimen) then return false end
+    if not Core.inBottomLeftCorner(ev.pos.x, ev.pos.y, self.dimen.w, self.dimen.h) then
+        return false
+    end
+    return Zones.tryLiveZones(ev) and true or false
+end
+
 function LibraryView:handleEvent(event)
     if event.handler == "onGesture" then
         if Device.screen_saver_lock then return false end
-        if InputContainer.handleEvent(self, event) then return true end
         local ev = event.args and event.args[1]
+        if ev and self:cornerGestureFirst(ev) then return true end
+        if InputContainer.handleEvent(self, event) then return true end
         if ev and Zones.tryLiveZones(ev) then return true end
         return false
     end
