@@ -51,6 +51,10 @@ local function widget(w, h)
     end }
 end
 
+local shelf_size = {
+    margin = { default = 10 }, padding = { default = 8, small = 4, large = 16 },
+    line = { thin = 1 },
+}
 local buttons, groups, vgroups, lines
 local function clsInit()
     local base = cls()
@@ -99,8 +103,7 @@ local function loadShelfView()
         ["ui/geometry"] = { new = function(_, o) o.x = o.x or 0; o.y = o.y or 0; return o end },
         ["ui/gesturerange"] = { new = function() return {} end },
         ["ui/widget/container/leftcontainer"] = { new = function(_, o) return o end },
-        ["ui/size"] = { margin = { default = 10 }, padding = { default = 8, small = 4, large = 16 },
-            line = { thin = 1 } },
+        ["ui/size"] = shelf_size,
         ["ui/font"] = { getFace = function() return {} end },
         ["ui/time"] = {
             now = function() return _G.__now_ms or 0 end,
@@ -171,7 +174,10 @@ local function shelfView(View, opts)
         built_strip = { books = cbooks, layout = layout }
         return sized(1264, 200)
     end
-    v.buildGrid = function() return sized(1264, 800) end
+    v.buildGrid = function(self, _items, _kind, _layout, height)
+        self._grid_h = height
+        return sized(1264, 800)
+    end
     v.scheduleCoverExtraction = function() end
     v.refreshBody = function(self, full, reason)
         self.refreshed = (self.refreshed or 0) + 1
@@ -282,6 +288,29 @@ describe("Swipe to expand the bookshelf", function()
         eq(v:onSwipe(nil, { direction = "northeast", pos = { x = 600, y = 500 }, end_pos = { x = 700, y = 400 } }), false)
         eq(v._shelf_expanded, nil)
         eq(v.refreshed, nil)
+    end)
+
+    it("reserves the hairline in the grid height", function()
+        local v = body({})
+        swipeUp(v)
+        local with_one = v._grid_h
+        shelf_size.line.thin = 7
+        v:buildBody()
+        eq(v._grid_h, with_one - 6, "a taller hairline leaves that much less for the grid")
+        shelf_size.line.thin = 1
+        eq(#lines >= 1, true)
+    end)
+
+    it("turning the page clears the expanded flag", function()
+        local v = body({ books = 40 })
+        swipeUp(v)
+        eq(v._shelf_expanded, true)
+        eq(v.pages >= 2, true)
+        lines = {}
+        v:goToPage(2)
+        eq(v.page, 2)
+        eq(v._shelf_expanded, nil)
+        eq(#lines, 0, "page 2 is not marked as a temporary hide")
     end)
 
     it("the expanded state clears itself when the strip would not show anyway", function()

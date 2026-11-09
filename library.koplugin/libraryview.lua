@@ -1241,7 +1241,10 @@ function LibraryView:buildBody()
     local sep = VerticalSpan:new{ width = Size.padding.small }
     local footer_probe = self:buildFooter(1, 1, 0, data.kind)
     local header_h = self.header and self.header:getSize().h or 0
-    local fixed = header_h + Size.padding.small
+    -- The expand hairline sits between the search bar and the padding under
+    -- it. Count it here so the grid does not run past the bottom of the screen.
+    local rule_h = self._shelf_expanded and (Size.line.thin or 1) or 0
+    local fixed = header_h + rule_h + Size.padding.small
         + tabs:getSize().h + (chips and chips:getSize().h or 0) + sep:getSize().h
         + footer_probe:getSize().h
     local keyboard_h = self:keyboardHeight()
@@ -1949,6 +1952,7 @@ function LibraryView:_turnAnchoredPage(dir, wrap)
     local later_per = math.max(1, math.floor(tonumber(anchor.later_per) or first_per))
     local function leave()
         self._jump_anchor = nil
+        self._shelf_expanded = nil
         if self.inSeries and self:inSeries() and self:stepSeries(dir) then return true end
         if wrap then self:goToPage(dir > 0 and 1 or self.pages) end
         return true
@@ -1973,6 +1977,7 @@ function LibraryView:_turnAnchoredPage(dir, wrap)
     end
     anchor.index = next_index
     anchor.count = count
+    self._shelf_expanded = nil
     -- The footer page is the fixed page that holds the first book on screen.
     -- A window that reaches the last book is the last page, so Next does not
     -- look like it has another page of the same books.
@@ -1988,6 +1993,9 @@ function LibraryView:goToPage(page, anchor)
     if not self.pages then return end
     page = math.max(1, math.min(page, self.pages))
     if page == self.page and anchor == nil and self._jump_anchor == nil then return end
+    -- The expand is for the page that was showing. Another page draws its
+    -- own layout, and page 2+ never had the Continue strip.
+    if page ~= self.page then self._shelf_expanded = nil end
     -- A letter jump carries its first matching book: the page is shown from
     -- that book, so its books start at the top (issue #7). A direct page
     -- request (the footer number, a long-press) clears the anchor and
