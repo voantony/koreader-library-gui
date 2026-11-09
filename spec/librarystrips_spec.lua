@@ -175,3 +175,56 @@ describe("LiveLight overlap with the A–Z strip", function()
         eq(#jumped, 2, "LiveLight left the swipe, so the strip jumped")
     end)
 end)
+
+describe("centered letter preview", function()
+    it("a hold shows a large letter in the middle, and release hides it", function()
+        local jumped = {}
+        local Scrubber = loadScrubber({})
+        local sc = Scrubber:new{
+            letters = Core.SCRUBBER_LETTERS,
+            width = 168, height = 1200, dpi = 300,
+            screen_w = 1264, screen_h = 1680,
+            view = { dimen = { w = 1264, h = 1680 }, jumpToLetter = function(_, letter)
+                jumped[#jumped + 1] = letter
+                return true
+            end },
+        }
+        sc:init()
+        sc.dimen.x, sc.dimen.y = 1096, 200
+        eq(sc:onHoldScrubber(nil, { pos = { x = 1140, y = 800 } }), true)
+        eq(sc.bubble_letter ~= nil, true)
+        local side = sc.bubble.w
+        eq(side >= 220, true)
+        eq(sc.bubble.h, side)
+        eq(sc.bubble.x, math.floor((1264 - side) / 2))
+        eq(sc.bubble.y, math.floor((1680 - side) / 2))
+        eq(sc.last_refresh.mode, "fast")
+        for _, region in ipairs(sc.last_refresh.regions) do
+            eq(region.w < 1264 or region.h < 1680, true)
+        end
+        eq(sc:onHoldReleaseScrubber(), true)
+        eq(sc.bubble_letter, nil)
+        eq(#jumped, 1)
+    end)
+
+    it("a drag keeps the fast refresh and never asks for a full flash", function()
+        local Scrubber = loadScrubber({})
+        local sc = Scrubber:new{
+            letters = { "A", "M", "Z" },
+            width = 168, height = 900, dpi = 300,
+            screen_w = 1264, screen_h = 1680,
+        }
+        sc:init()
+        sc.dimen.x, sc.dimen.y = 0, 0
+        sc:onPanScrubber(nil, { pos = { x = 40, y = 100 } })
+        eq(sc.bubble_letter, "A")
+        eq(sc.last_refresh.mode, "fast")
+        sc._tick = nil
+        sc:onPanScrubber(nil, { pos = { x = 40, y = 800 } })
+        eq(sc.bubble_letter, "Z")
+        eq(sc.last_refresh.mode, "fast")
+        sc:onPanReleaseScrubber()
+        eq(sc.bubble_letter, nil)
+        eq(sc.last_refresh.mode, "ui")
+    end)
+end)
