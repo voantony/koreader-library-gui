@@ -114,7 +114,7 @@ describe("Library item in the reader menu", function()
         local Library = mainLib()
         Library.shared.view = nil
         Library.shared.after_book = "show"
-        _G.G_reader_settings = { readSetting = function() return { start_with_library = false } end }
+        _G.G_reader_settings = { readSetting = function() return {} end }
         local opened = {}
         local fm = setmetatable({ ui = { menu = { registerToMainMenu = function() end } } }, { __index = Library })
         fm.onShowLibrary = function(_, search) opened[#opened + 1] = search and "search" or "show" end

@@ -1,0 +1,145 @@
+-- Issue #7: a jump on the A–Z strip shows the letter's first matching book
+-- at the top of the grid, instead of wherever the page boundary falls.
+-- The page is anchored at that book; any other page turn, or a change to
+-- the list, drops back to fixed pages.
+--
+-- LibraryView needs KOReader's UI modules, so they are stubbed here; only
+-- the class table is under test.
+
+local Core = require("librarycore")
+
+local function stub()
+    return setmetatable({}, {
+        __index = function() return stub() end,
+        __call = function() return stub() end,
+    })
+end
+
+local function cls()
+    local base = {}
+    base.__index = base
+    function base:extend(o) o = o or {}; o.__index = o; return setmetatable(o, self) end
+    function base:new(o) o = o or {}; return setmetatable(o, self) end
+    return base
+end
+
+local function load(file, extra)
+    local old_require = require
+    local real = { librarycore = true, libraryzones = true, libraryindex = true, string = true, table = true, math = true, io = true, os = true }
+    _G.require = function(name)
+        if extra[name] ~= nil then return extra[name] end
+        if real[name] then return old_require(name) end
+        if name == "gettext" then return function(s) return s end end
+        if name == "ffi/util" then
+            return { template = function(s, ...)
+                local a = { ... }
+                return (s:gsub("%%(%d)", function(i) return tostring(a[tonumber(i)]) end))
+            end }
+        end
+        return stub()
+    end
+    local ok, mod = pcall(dofile, "library.koplugin/" .. file)
+    _G.require = old_require
+    if not ok then error(mod, 0) end
+    return mod
+end
+
+describe("letter jump (issue #7)", function()
+    local function books()
+        local out = {}
+        for _, letter in ipairs({ "A", "B", "C", "D", "E", "F" }) do
+            for i = 1, 5 do out[#out + 1] = { title = letter .. " book " .. i } end
+        end
+        return out
+    end
+
+    local refreshed
+    local function harness()
+        refreshed = 0
+        local View = load("libraryview.lua", {
+            ["ui/uimanager"] = { scheduleIn = function() end, unschedule = function() end, setDirty = function() end },
+            ["ui/widget/container/inputcontainer"] = cls(),
+            ["ui/widget/inputtext"] = cls(),
+            ["ui/time"] = { now = function() return 0 end, to_ms = function() return 0 end, to_s = function() return "0" end },
+        })
+        local grid = books()
+        local v = setmetatable({
+            tab = "books",
+            sort = "title",
+            filter = nil,
+            query = "",
+            show_continue = false,
+            group = nil,
+            page = 1,
+            pages = 4,
+            scrubber = { index = Core.scrubberIndex(grid, 9, nil, 9) },
+        }, { __index = View })
+        v.timeStart = function() end
+        v.refreshBody = function() refreshed = refreshed + 1 end
+        return v, grid
+    end
+
+    it("shows the letter's first book at the top, not mid-page", function()
+        local v, grid = harness()
+        -- full height: 9 a page. D starts at index 16, so the fixed page 2
+        -- (books 10-18) shows it seventh, in the bottom row.
+        local fixed = Core.page(grid, 9, 2, 9)
+        eq(fixed[1].title, "B book 5")
+        eq(fixed[7].title, "D book 1")
+        eq(v:jumpToLetter("D"), true)
+        eq(v.page, 2)
+        eq(v._jump_anchor.index, 16)
+        eq(v._jump_anchor.letter, "D")
+        local shown = v:anchoredPageItems(grid, fixed, 2, 9, 9, "title")
+        eq(#shown, 9)
+        eq(shown[1].title, "D book 1")
+        eq(shown[5].title, "D book 5")
+        eq(shown[9].title, "E book 4")
+    end)
+
+    it("a plain page turn clears the anchor", function()
+        local v = harness()
+        v:jumpToLetter("D")
+        eq(v._jump_anchor ~= nil, true)
+        v:goToPage(3)
+        eq(v.page, 3)
+        eq(v._jump_anchor, nil)
+    end)
+
+    it("repeating the same jump is a no-op", function()
+        local v = harness()
+        eq(v:jumpToLetter("D"), true)
+        local after_first = refreshed
+        eq(v:jumpToLetter("D"), false)
+        eq(refreshed, after_first)
+    end)
+
+    it("an inactive letter jumps nowhere", function()
+        local v = harness()
+        eq(v:jumpToLetter("Q"), false)
+        eq(v.page, 1)
+        eq(v._jump_anchor, nil)
+    end)
+
+    it("the anchor drops when the list changes", function()
+        local v, grid = harness()
+        v:jumpToLetter("D")
+        local fixed = Core.page(grid, 9, 2, 9)
+        v.query = "x"
+        local shown = v:anchoredPageItems(grid, fixed, 2, 9, 9, "title")
+        eq(shown, fixed)
+        eq(v._jump_anchor, nil)
+    end)
+
+    it("the anchor drops when the book at the anchor no longer matches", function()
+        local v, grid = harness()
+        v:jumpToLetter("D")
+        local shifted = {}
+        for i, b in ipairs(grid) do shifted[i] = b end
+        shifted[16] = { title = "C book 6" }
+        local fixed = Core.page(shifted, 9, 2, 9)
+        local shown = v:anchoredPageItems(shifted, fixed, 2, 9, 9, "title")
+        eq(shown, fixed)
+        eq(v._jump_anchor, nil)
+    end)
+end)

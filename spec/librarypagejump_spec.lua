@@ -9,7 +9,7 @@ end
 
 local function load(file, extra)
     local old_require = require
-    local real = { librarycore = true, libraryindex = true, string = true, table = true, math = true }
+    local real = { librarycore = true, libraryzones = true, libraryindex = true, string = true, table = true, math = true }
     _G.require = function(name)
         if extra[name] ~= nil then return extra[name] end
         if real[name] then return old_require(name) end

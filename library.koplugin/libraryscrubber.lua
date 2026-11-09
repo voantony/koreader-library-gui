@@ -274,8 +274,9 @@ function Scrubber:dragTo(pos)
 end
 
 function Scrubber:jumpTo(letter)
-    local page = Core.scrubberTargetPage(self.index, letter)
     local view = self.view
+    if view and view.jumpToLetter then return view:jumpToLetter(letter) end
+    local page = Core.scrubberTargetPage(self.index, letter)
     if page and view and view.goToPage and view.page ~= page then
         view:goToPage(page)
         return true
@@ -293,12 +294,9 @@ function Scrubber:endDrag()
     self._drag = nil
     self.bubble_letter = nil
     self:restoreSnap()
-    local page = Core.scrubberTargetPage(self.index, letter)
     local view = self.view
-    local changed = page and view and view.page ~= page
-    if changed then
-        view:goToPage(page)
-    else
+    local navigated = view and view.jumpToLetter and view:jumpToLetter(letter)
+    if not navigated then
         self:redrawDrag()
         self:pushRefresh(Core.scrubberReleaseRefresh(false, nil, strip, bubble))
     end

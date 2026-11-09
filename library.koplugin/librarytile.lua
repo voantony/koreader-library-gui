@@ -331,7 +331,8 @@ end
 
 --- The cover (or placeholder) of `book` in a (w, h) box with a 2:3 shape.
 -- Returns the widget, its width and whether the cover is still to be made.
-local function bookCover(tile, book, box_w, box_h, title, sub)
+-- Shared with the footer's current-book button (LibraryView).
+function M.bookCover(tile, book, box_w, box_h, title, sub)
     local b = Size.border.thin
     local w = math.min(box_w, math.floor(box_h * 2 / 3 + 0.5))
     local h = math.min(box_h, math.floor(w * 3 / 2 + 0.5))
@@ -555,7 +556,7 @@ function Tile:init()
         title = book.title
         sub = book.authors and table.concat(book.authors, ", ")
     end
-    local cover, cover_w, cover_h, needs = bookCover(self, book, box_w, box_h, title, sub)
+    local cover, cover_w, cover_h, needs = M.bookCover(self, book, box_w, box_h, title, sub)
     self.needs_cover = needs
     if self.group then
         local p = pill(tostring(#self.group.books), true)
