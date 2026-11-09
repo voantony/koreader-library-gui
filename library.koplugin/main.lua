@@ -174,19 +174,37 @@ function Library:isHomeScreen()
     return G_reader_settings:readSetting("start_with") == "library"
 end
 
---- One-time migration from the plugin's own "Open Library at startup"
--- toggle (removed in favour of KOReader's Start with setting, issue #10):
--- a user who had it on gets Start with → library, unless they already
--- picked a different home in KOReader's setting.
+--- Migration from the plugin's own "Open Library at startup" toggle
+-- (removed in favour of KOReader's Start with setting, issue #10).
+-- A user who had it on, and whose Start with is still the file browser
+-- (unset or "filemanager"), moves to Start with → library. The old key
+-- is removed only once Start with is library, including when it was
+-- already library. An explicit choice such as history, last, or
+-- favorites is left as it is, and the old key is kept: it is not
+-- thrown away, and if Start with is later put back to the file browser
+-- the next start can still migrate.
 function Library:migrateStartupSetting()
     if not self.settings.start_with_library then return end
     local start_with = G_reader_settings:readSetting("start_with")
     if start_with == nil or start_with == "filemanager" then
         G_reader_settings:saveSetting("start_with", "library")
         if G_reader_settings.flush then G_reader_settings:flush() end
+        start_with = "library"
     end
+    if start_with ~= "library" then return end
     self.settings.start_with_library = nil
     self:saveSettings()
+end
+
+--- The Library plugin on the file browser that is open now. The Start
+-- with menu is patched once, from whichever instance inits first, so the
+-- callback must not keep that instance: a reader that loaded first would
+-- show the Library through a UI that has already closed.
+local function liveLibrary()
+    local FM = package.loaded["apps/filemanager/filemanager"]
+    local ui = FM and FM.instance
+    local plugin = ui and ui.library
+    if plugin and plugin.onShowLibrary then return plugin end
 end
 
 --- Offer the Library in KOReader's file-browser "Start with" menu, the way
@@ -204,7 +222,6 @@ function Library:registerStartWithMenu()
     if FMMenu._library_patched then return end
     FMMenu._library_patched = true
     local orig_fn = FMMenu.getStartWithMenuTable
-    local plugin = self
     FMMenu.getStartWithMenuTable = function(self_fm)
         local result = orig_fn(self_fm)
         if type(result) ~= "table" or type(result.sub_item_table) ~= "table" then
@@ -226,8 +243,10 @@ function Library:registerStartWithMenu()
                     if G_reader_settings.flush then G_reader_settings:flush() end
                     if touchmenu_instance then touchmenu_instance:closeMenu() end
                     -- Show the Library now (onShowLibrary just refocuses
-                    -- when it is already up).
-                    plugin:onShowLibrary()
+                    -- when it is already up). The live file browser's
+                    -- plugin, not the instance that first patched the menu.
+                    local plugin = liveLibrary()
+                    if plugin then plugin:onShowLibrary() end
                 end,
             })
         end

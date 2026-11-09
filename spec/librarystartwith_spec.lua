@@ -152,12 +152,33 @@ describe("Start with menu registration", function()
         local shown, closed = {}, false
         fm.onShowLibrary = function() shown[#shown + 1] = true end
         Library.init(fm)
+        package.loaded["apps/filemanager/filemanager"] = { instance = { library = fm } }
         local entry = findEntry(startWithTable(fmmenu), "library")
         entry.callback({ closeMenu = function() closed = true end })
         eq(store.start_with, "library")
         eq(closed, true)
         eq(#shown, 1)
         eq(entry.checked_func(), true)
+        package.loaded["apps/filemanager/filemanager"] = nil
+        _G.G_reader_settings = nil
+    end)
+
+    it("shows the Library on the live file browser, not the instance that patched the menu", function()
+        local fmmenu = fakeFMMenu()
+        local Library = mainLib(fmmenu)
+        local store = {}
+        local first = fmSelf(Library, store)
+        local shown = {}
+        first.onShowLibrary = function() shown[#shown + 1] = "first" end
+        Library.init(first)
+        local second = setmetatable({ ui = { menu = { registerToMainMenu = function() end } } }, { __index = Library })
+        second.onShowLibrary = function() shown[#shown + 1] = "second" end
+        package.loaded["apps/filemanager/filemanager"] = { instance = { library = second } }
+        local entry = findEntry(startWithTable(fmmenu), "library")
+        entry.callback({ closeMenu = function() end })
+        eq(shown[1], "second")
+        eq(#shown, 1)
+        package.loaded["apps/filemanager/filemanager"] = nil
         _G.G_reader_settings = nil
     end)
 
@@ -244,12 +265,37 @@ describe("Migration from the old startup toggle", function()
         _G.G_reader_settings = nil
     end)
 
-    it("does not overwrite an explicit Start with choice", function()
+    it("keeps an explicit Start with and does not delete the old toggle", function()
+        local Library = mainLib()
+        for _, choice in ipairs({ "history", "last", "favorites" }) do
+            local store = { start_with = choice, library_plugin = { start_with_library = true } }
+            local fm = fmSelf(Library, store)
+            Library.init(fm)
+            eq(store.start_with, choice)
+            eq(store.library_plugin.start_with_library, true)
+        end
+        _G.G_reader_settings = nil
+    end)
+
+    it("drops the old toggle once Start with is already library", function()
+        local Library = mainLib()
+        local store = { start_with = "library", library_plugin = { start_with_library = true } }
+        local fm = fmSelf(Library, store)
+        Library.init(fm)
+        eq(store.start_with, "library")
+        eq(store.library_plugin.start_with_library, nil)
+        _G.G_reader_settings = nil
+    end)
+
+    it("migrates a kept toggle once Start with is back to the file browser", function()
         local Library = mainLib()
         local store = { start_with = "history", library_plugin = { start_with_library = true } }
         local fm = fmSelf(Library, store)
         Library.init(fm)
-        eq(store.start_with, "history")
+        eq(store.library_plugin.start_with_library, true)
+        store.start_with = "filemanager"
+        Library.init(fm)
+        eq(store.start_with, "library")
         eq(store.library_plugin.start_with_library, nil)
         _G.G_reader_settings = nil
     end)
