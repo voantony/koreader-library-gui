@@ -170,6 +170,46 @@ function Widgets.accordion(n_slots, expanded, tapped)
     return tapped
 end
 
+--- Stable key for one widget's saved page. Two folders do not share a page;
+-- two slots showing the same series do.
+function Widgets.pageKey(spec)
+    if type(spec) ~= "table" or type(spec.kind) ~= "string" or spec.kind == "" or spec.kind == "none" then
+        return nil
+    end
+    if spec.kind == "series" or spec.kind == "collection" then
+        return spec.kind .. "\0" .. (type(spec.name) == "string" and spec.name or "")
+    end
+    if spec.kind == "folder" then
+        return "folder\0" .. (type(spec.path) == "string" and spec.path or "")
+    end
+    return spec.kind
+end
+
+--- Page last shown for this widget, or nil when nothing was saved.
+function Widgets.storedPage(pages, spec)
+    if type(pages) ~= "table" then return nil end
+    local key = Widgets.pageKey(spec)
+    local n = key and tonumber(pages[key])
+    if not n then return nil end
+    n = math.floor(n)
+    if n < 1 then return nil end
+    return n
+end
+
+--- A new page map with this widget's page set. Does not mutate `pages`.
+function Widgets.rememberPage(pages, spec, page)
+    local out = {}
+    if type(pages) == "table" then
+        for k, v in pairs(pages) do out[k] = v end
+    end
+    local key = Widgets.pageKey(spec)
+    if not key then return out end
+    page = math.floor(tonumber(page) or 1)
+    if page < 1 then page = 1 end
+    out[key] = page
+    return out
+end
+
 function Widgets.names(groups)
     local out = {}
     for _, g in ipairs(groups or {}) do

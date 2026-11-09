@@ -1331,6 +1331,27 @@ function LibraryView:setHomeWidgets(slots)
     self:refreshBody(true)
 end
 
+--- Pages remembered per widget. The view's copy wins for this session;
+-- settings keep them across a book (the plugin is recreated) and a restart.
+function LibraryView:widgetPages()
+    if type(self._widget_pages) == "table" then return self._widget_pages end
+    local settings = self.plugin and self.plugin.settings
+    local pages = settings and settings.widget_pages
+    if type(pages) == "table" then return pages end
+    return {}
+end
+
+function LibraryView:setWidgetPage(spec, page)
+    local Widgets = require("librarywidgets")
+    local pages = Widgets.rememberPage(self:widgetPages(), spec, page)
+    self._widget_pages = pages
+    local settings = self.plugin and self.plugin.settings
+    if type(settings) == "table" then
+        settings.widget_pages = pages
+        if self.plugin.saveSettings then self.plugin:saveSettings() end
+    end
+end
+
 function LibraryView:widgetBookContext()
     local favorites, collections, series = {}, {}, {}
     if self.plugin and self.plugin.getCollections then
@@ -1357,7 +1378,6 @@ end
 
 function LibraryView:buildOneWidget(spec, index, col_w, header_h, body_h, Widgets, ctx)
     local books = Widgets.books(spec, ctx)
-    self._wpage = self._wpage or {}
     local gap = self.gap or 8
     -- Three covers across, and the tile must fit under the title inside
     -- the height reserved for the band so it does not paint over the grid.
@@ -1368,10 +1388,9 @@ function LibraryView:buildOneWidget(spec, index, col_w, header_h, body_h, Widget
     local cover_h = math.min(120, math.floor(slot_w * 1.5), math.max(48, body_h - label_h))
     local pages = math.max(1, math.ceil(math.max(#books, 1) / per))
     if #books == 0 then pages = 1 end
-    local page = self._wpage[index] or 1
+    local page = Widgets.storedPage(self:widgetPages(), spec) or 1
     if page > pages then page = pages end
     if page < 1 then page = 1 end
-    self._wpage[index] = page
     local face = Font:getFace("cfont", 16)
     local title = WidgetTitle:new{
         min_h = header_h,
@@ -1380,7 +1399,7 @@ function LibraryView:buildOneWidget(spec, index, col_w, header_h, body_h, Widget
         TextWidget:new{ text = Widgets.label(spec), face = face, bold = true },
     }
     local function step(dir)
-        self._wpage[index] = page + dir
+        self:setWidgetPage(spec, page + dir)
         self:refreshBody(true)
     end
     local function chevron(glyph, dir, enabled)
@@ -2864,6 +2883,7 @@ function LibraryView:returnState(book_path)
         sort = self.sort,
         view_mode = self.view_mode,
         book = book_path,
+        widget_pages = self:widgetPages(),
     }
 end
 
@@ -2896,6 +2916,11 @@ function LibraryView:restoreReturn(spot)
     if spot.query then
         self.query = spot.query
         if self.search_input then self.search_input:setText(spot.query) end
+    end
+    if type(spot.widget_pages) == "table" then
+        self._widget_pages = spot.widget_pages
+        local settings = self.plugin and self.plugin.settings
+        if type(settings) == "table" then settings.widget_pages = spot.widget_pages end
     end
     self.page = spot.page or 1 -- buildBody clamps it to the pages there are
     self:updateSearchHint()

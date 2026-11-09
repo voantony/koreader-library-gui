@@ -11,7 +11,7 @@ end
 
 local function load(file, extra)
     local old_require = require
-    local real = { librarycore = true, libraryzones = true, libraryindex = true, string = true, table = true, math = true }
+    local real = { librarycore = true, libraryzones = true, libraryindex = true, librarywidgets = true, string = true, table = true, math = true }
     _G.require = function(name)
         if extra[name] ~= nil then return extra[name] end
         if real[name] then return old_require(name) end
@@ -153,6 +153,25 @@ describe("view: back from a book", function()
         local w = newView(View)
         w:restoreReturn({ tab = "books", page = 9 })
         eq(w.page, 4)
+    end)
+
+    it("remembers each widget's page across the book and a new view", function()
+        local W = require("librarywidgets")
+        local v, _opened = newView(View, {})
+        local saved = 0
+        v.plugin.saveSettings = function() saved = saved + 1 end
+        v:setWidgetPage({ kind = "continue" }, 2)
+        v:setWidgetPage({ kind = "folder", path = "/books/Novels" }, 4)
+        eq(saved, 2)
+        eq(v.plugin.settings.widget_pages[W.pageKey({ kind = "continue" })], 2)
+        local spot = Core.returnSpot(v:returnState("/emma"), 1)
+        eq(spot.widget_pages[W.pageKey({ kind = "folder", path = "/books/Novels" })], 4)
+        local w = newView(View, {})
+        w._widget_pages = nil
+        w:restoreReturn(spot)
+        eq(W.storedPage(w:widgetPages(), { kind = "continue" }), 2)
+        eq(W.storedPage(w:widgetPages(), { kind = "folder", path = "/books/Novels" }), 4)
+        eq(W.storedPage(w.plugin.settings.widget_pages, { kind = "continue" }), 2)
     end)
 
     it("brings back the search only when the book was picked from results", function()
