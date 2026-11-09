@@ -131,6 +131,61 @@ describe("letter jump (issue #7)", function()
         eq(v._jump_anchor, nil)
     end)
 
+    it("paging continues from the anchor without repeating or skipping books", function()
+        local v, grid = harness()
+        v:jumpToLetter("D")
+        local fixed = Core.page(grid, 9, 2, 9)
+        local shown = v:anchoredPageItems(grid, fixed, v.page, 9, 9, "title")
+        eq(shown[1].title, "D book 1")
+        eq(shown[9].title, "E book 4")
+        eq(v.page, 2)
+        eq(v.page >= 1 and v.page <= v.pages, true)
+
+        v:turnPage(1)
+        local nxt = v:anchoredPageItems(grid, fixed, v.page, 9, 9, "title")
+        eq(nxt[1].title, "E book 5", "the next window starts on the following book")
+        eq(nxt[#nxt].title, "F book 5", "and runs through the end of the list")
+        eq(v.page, v.pages, "a window that reaches the last book is the last page")
+        local seen = {}
+        for _, b in ipairs(shown) do seen[b.title] = true end
+        for _, b in ipairs(nxt) do
+            eq(seen[b.title], nil, "no title from the jump window is repeated")
+        end
+
+        v:turnPage(-1)
+        local back = v:anchoredPageItems(grid, fixed, v.page, 9, 9, "title")
+        eq(back[1].title, "D book 1")
+        eq(back[9].title, "E book 4")
+        eq(v.page, 2)
+
+        v:turnPage(-1)
+        local prev = v:anchoredPageItems(grid, fixed, v.page, 9, 9, "title")
+        eq(#prev, 9)
+        eq(prev[1].title, "B book 2")
+        eq(prev[9].title, "C book 5", "the previous window ends on the book before the jump")
+        eq(v.page, 1)
+        eq(v.page >= 1 and v.page <= v.pages, true)
+        for _, b in ipairs(prev) do
+            eq(seen[b.title], nil, "no title from the jump window is skipped into the previous page")
+        end
+    end)
+
+    it("a forward step that is not the end of the list advances the page number", function()
+        local v, grid = harness()
+        v.scrubber = { index = Core.scrubberIndex(grid, 5, nil, 5) }
+        v.pages = Core.pageCount(#grid, 5, 5)
+        v:jumpToLetter("D")
+        v:anchoredPageItems(grid, {}, v.page, 5, 5, "title")
+        local before = v.page
+        eq(before, Core.pageOfIndex(16, 5, 5))
+        v:turnPage(1)
+        local nxt = v:anchoredPageItems(grid, {}, v.page, 5, 5, "title")
+        eq(nxt[1].title, "E book 1")
+        eq(#nxt, 5)
+        eq(v.page, before + 1)
+        eq(v.page < v.pages, true)
+    end)
+
     it("the anchor drops when the book at the anchor no longer matches", function()
         local v, grid = harness()
         v:jumpToLetter("D")

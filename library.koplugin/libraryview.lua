@@ -1923,10 +1923,65 @@ end
 -- neighbouring series instead of wrapping.
 function LibraryView:turnPage(dir, wrap)
     if not self.pages then return end
+    -- A letter jump keeps its own windows: the next page starts where this
+    -- one ended, and the previous page ends where this one starts (#7).
+    if self:_turnAnchoredPage(dir, wrap) then return end
     local target = self.page + dir
     if target >= 1 and target <= self.pages then return self:goToPage(target) end
     if self:inSeries() and self:stepSeries(dir) then return end
     if wrap then self:goToPage(dir > 0 and 1 or self.pages) end
+end
+
+--- Step the letter-jump window by one page. True when the anchor handled
+-- the turn (including a wrap off either end, which drops back to fixed pages).
+function LibraryView:_turnAnchoredPage(dir, wrap)
+    local anchor = self._jump_anchor
+    if not anchor or type(anchor.index) ~= "number" or type(anchor.count) ~= "number" then
+        return false
+    end
+    if anchor.key ~= self:_jumpAnchorKey() then
+        self._jump_anchor = nil
+        return false
+    end
+    local n = math.floor(tonumber(anchor.n) or 0)
+    if n < 1 then return false end
+    local first_per = math.max(1, math.floor(tonumber(anchor.first_per) or anchor.count))
+    local later_per = math.max(1, math.floor(tonumber(anchor.later_per) or first_per))
+    local function leave()
+        self._jump_anchor = nil
+        if self.inSeries and self:inSeries() and self:stepSeries(dir) then return true end
+        if wrap then self:goToPage(dir > 0 and 1 or self.pages) end
+        return true
+    end
+    local next_index, count, page
+    if dir > 0 then
+        next_index = anchor.index + anchor.count
+        if next_index > n then return leave() end
+        page = Core.pageOfIndex(next_index, first_per, later_per)
+        local cap = (page == 1) and first_per or later_per
+        count = math.min(cap, n - next_index + 1)
+    else
+        if anchor.index <= 1 then return leave() end
+        local back = math.min(later_per, anchor.index - 1)
+        next_index = anchor.index - back
+        if Core.pageOfIndex(next_index, first_per, later_per) == 1 then
+            back = math.min(first_per, anchor.index - 1)
+            next_index = anchor.index - back
+        end
+        count = back
+        page = Core.pageOfIndex(next_index, first_per, later_per)
+    end
+    anchor.index = next_index
+    anchor.count = count
+    -- The footer page is the fixed page that holds the first book on screen.
+    -- A window that reaches the last book is the last page, so Next does not
+    -- look like it has another page of the same books.
+    if next_index + count - 1 >= n then page = self.pages end
+    self:timeStart("page", true)
+    self.page = math.max(1, math.min(page, self.pages))
+    self._turned_ms = time.to_ms(time.now())
+    self:refreshBody(nil, "page")
+    return true
 end
 
 function LibraryView:goToPage(page, anchor)
@@ -1934,10 +1989,15 @@ function LibraryView:goToPage(page, anchor)
     page = math.max(1, math.min(page, self.pages))
     if page == self.page and anchor == nil and self._jump_anchor == nil then return end
     -- A letter jump carries its first matching book: the page is shown from
-    -- that book, so its books start at the top (issue #7). Any other turn
-    -- clears the anchor and returns to fixed pages.
+    -- that book, so its books start at the top (issue #7). A direct page
+    -- request (the footer number, a long-press) clears the anchor and
+    -- returns to fixed pages. Paging with the arrows keeps the window;
+    -- see _turnAnchoredPage.
     if anchor then
-        self._jump_anchor = { index = anchor.index, letter = anchor.letter, key = self:_jumpAnchorKey() }
+        self._jump_anchor = {
+            index = anchor.index, origin = anchor.index, letter = anchor.letter,
+            key = self:_jumpAnchorKey(),
+        }
     else
         self._jump_anchor = nil
     end
@@ -1971,22 +2031,40 @@ function LibraryView:_jumpAnchorKey()
     }, "|")
 end
 
---- The page's items when a letter jump is holding the view at its first
--- matching book (#7): the page starts at that book instead of at the page
--- boundary. Returns `page_items` unchanged when there is no jump, the list
--- has changed since the jump, or the book at the anchor no longer falls
--- under the jumped letter (a rescan moved the list under it).
+--- The page's items when a letter jump is holding the view (#7): the page
+-- starts at the anchor instead of at the fixed page boundary. Paging keeps
+-- that window and continues from either end. Returns `page_items` unchanged
+-- when there is no jump, the list has changed since the jump, or the book
+-- the jump landed on no longer falls under that letter.
 function LibraryView:anchoredPageItems(grid_items, page_items, page, first_per, later_per, letter_mode)
     local anchor = self._jump_anchor
     if not anchor or type(anchor.index) ~= "number" or type(anchor.letter) ~= "string" then return page_items end
     if anchor.key ~= self:_jumpAnchorKey() then self._jump_anchor = nil; return page_items end
     if type(letter_mode) ~= "string" then self._jump_anchor = nil; return page_items end
-    local item = grid_items and grid_items[anchor.index]
+    grid_items = grid_items or {}
+    local origin = anchor.origin or anchor.index
+    local item = grid_items[origin]
     if not item or Core.scrubberBucket(Core.scrubberItemKey(item, letter_mode)) ~= anchor.letter then
         self._jump_anchor = nil
         return page_items
     end
-    local size = page == 1 and first_per or later_per
+    local first = math.max(1, math.floor(tonumber(first_per) or 1))
+    local later = math.max(1, math.floor(tonumber(later_per) or first))
+    local size = anchor.count
+    if type(size) ~= "number" then
+        size = (page == 1) and first or later
+    end
+    local n = #grid_items
+    if anchor.index > n then
+        self._jump_anchor = nil
+        return page_items
+    end
+    size = math.min(math.max(1, math.floor(size)), n - anchor.index + 1)
+    anchor.count = size
+    anchor.first_per = first
+    anchor.later_per = later
+    anchor.n = n
+    anchor.origin = origin
     return Core.pageFrom(grid_items, anchor.index, size)
 end
 
