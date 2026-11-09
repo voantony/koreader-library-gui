@@ -20,6 +20,14 @@ fire the first one that matches, for zones the file browser owns
 file chooser itself is skipped: its row-tap/row-hold zones cover the body
 area, so a tap in a gap of the Library's own layout could otherwise open
 an unintended file.
+
+A user-configured Gestures-plugin gesture fires its action as a separate
+Dispatcher event, sent to the top widget -- the Library view -- which does
+not handle it. That half of the circuit is closed by issue #9
+(forwardToLive below): non-gesture events the view does not handle are
+forwarded to the live host, with the broadcast tag (stamped by the
+installer in main.lua) keeping broadcast events from being delivered
+twice. LiveLight needs none of this: it drives the frontlight directly.
 ]]
 
 local Zones = {}
@@ -76,6 +84,84 @@ end
 function Zones.tryLiveZones(ev)
     if not ev then return false end
     return Zones.tryFMZones(ev, Zones.liveHost())
+end
+
+-- tryUserFirst(ev, fm) -> boolean
+-- A swipe the Library would otherwise turn into a page turn, but the reader
+-- gave their own action in KOReader's Gestures: swipes along the top and
+-- bottom edges. Those run BEFORE the Library's own use of the gesture
+-- (Bookshelf issue 476). Only a configured one fires: the zone's own range
+-- and direction checks still apply, so a mid-screen swipe falls through to
+-- the page turn untouched.
+local USER_FIRST_SWIPE = {
+    one_finger_swipe_top_edge_left = true, one_finger_swipe_top_edge_right = true,
+    one_finger_swipe_bottom_edge_left = true, one_finger_swipe_bottom_edge_right = true,
+}
+function Zones.tryUserFirst(ev, fm)
+    if not (fm and ev) or ev.ges ~= "swipe" then return false end
+    local user_gestures = (fm.gestures and fm.gestures.gestures) or {}
+    return tryHostZones(ev, fm, function(id)
+        return USER_FIRST_SWIPE[id] and user_gestures[id] ~= nil
+    end, fm.file_chooser)
+end
+
+-- ── Forwarding Dispatcher actions to the host (issue #9) ───────────────────
+-- A gesture the file browser's zones fire (a Gestures-plugin binding, a
+-- corner tap) runs its action as a separate Dispatcher event, sent to the
+-- top widget -- the Library view -- which does not handle it. So the zone
+-- fires and nothing happens. Forwarding what the view does not keep to the
+-- live host closes that half of the circuit, mirroring Bookshelf's
+-- forwardToLive. Guards, in the same order as there:
+--   * lifecycle events targeting the view itself are never forwarded;
+--   * broadcast events already reach the host directly, so forwarding them
+--     again would run toggle actions twice (the tag is stamped by the
+--     installer in main.lua);
+--   * a forwarded event must never be able to tear the host down (a swipe
+--     that reaches an open file-browser menu closes it, whose close
+--     callback quits KOReader), so the host's onClose is neutralised for
+--     the synchronous dispatch -- except for the intentional Exit/Restart
+--     actions, which need it intact. A gesture-carrying event can never
+--     take that bypass.
+local NEVER_FORWARD = {
+    onCloseWidget   = true,
+    onFlushSettings = true,
+    onShow          = true,
+    onClose         = true,
+}
+local ALLOW_TEARDOWN = {
+    onExit    = true,
+    onRestart = true,
+}
+
+local function carriesGesture(event)
+    local args = event.args
+    if type(args) ~= "table" then return false end
+    for i = 1, 3 do
+        local a = args[i]
+        if type(a) == "table" and a.ges then return true end
+    end
+    return false
+end
+
+local function forwardToHost(host, event, self_widget)
+    if NEVER_FORWARD[event.handler] then return false end
+    if event._library_from_broadcast then return false end
+    if not (host and host ~= self_widget) then return false end
+    if ALLOW_TEARDOWN[event.handler] and not carriesGesture(event) then
+        local ok, consumed = pcall(host.handleEvent, host, event)
+        return (ok and consumed) and true or false
+    end
+    local saved_onClose = rawget(host, "onClose")
+    host.onClose = function() return true end
+    local ok, consumed = pcall(host.handleEvent, host, event)
+    host.onClose = saved_onClose
+    return (ok and consumed) and true or false
+end
+
+-- forwardToLive(event, self_widget) -> boolean
+-- Hand a non-gesture event the view did not handle to the live host.
+function Zones.forwardToLive(event, self_widget)
+    return forwardToHost(Zones.liveHost(), event, self_widget)
 end
 
 return Zones

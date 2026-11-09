@@ -111,7 +111,28 @@ local function collate(a, b)
 end
 Library.collate = collate
 
+--- Tag broadcast events so the view's host-forwarding can tell them apart
+-- from events sent to the top widget only (issue #9): a broadcast already
+-- reaches the file browser directly, so forwarding it again would run
+-- toggle actions twice. Install is idempotent: init runs once per host
+-- context (file browser and reader). Mirrors Bookshelf's
+-- _installBroadcastTag, including the bare-string guard: some plugins call
+-- broadcastEvent with a string as the event name, and writing a field to
+-- a string crashes the VM.
+local function installBroadcastTag()
+    if UIManager._library_broadcast_wrapped then return end
+    UIManager._library_broadcast_wrapped = true
+    local orig = UIManager.broadcastEvent
+    UIManager.broadcastEvent = function(self_um, event, ...)
+        if type(event) == "table" then
+            event._library_from_broadcast = true
+        end
+        return orig(self_um, event, ...)
+    end
+end
+
 function Library:init()
+    installBroadcastTag()
     self.settings = G_reader_settings:readSetting(SETTINGS_KEY) or {}
     -- The old checkbox has to be read before the default writes top_tap = "bar".
     require("libraryreadermenu").migrateTopTap(self.settings)

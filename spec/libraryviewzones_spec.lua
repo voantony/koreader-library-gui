@@ -149,6 +149,23 @@ describe("Library view zone forwarding", function()
         eq(#live_calls, 1)
     end)
 
+    it("hands a non-gesture event the view did not handle to the host", function()
+        local View = loadView()
+        local v = swipeView(View, {})
+        local event = { handler = "onShowMenu", args = {} }
+        eq(v:handleEvent(event), true)
+        eq(#base_calls, 1)
+        eq(forward_calls[1], event)
+    end)
+
+    it("does not forward a non-gesture event the view handled", function()
+        local View = loadView()
+        base_handled = true
+        local v = swipeView(View, {})
+        eq(v:handleEvent({ handler = "onShowMenu", args = {} }), true)
+        eq(#forward_calls, 0)
+    end)
+
     it("leaves a gesture-lock screensaver alone", function()
         local View = loadView()
         device_stub.screen_saver_lock = true
@@ -194,6 +211,31 @@ describe("Library view zone forwarding", function()
         eq(v:onSwipe(nil, ges("west", 10, 500)), true)
         eq(#live_calls, 0)
         eq(v.turned, true, "a page turn, not the light")
+    end)
+
+    it("runs a user-configured edge swipe before turning the page", function()
+        local View = loadView()
+        userfirst_result = true
+        local v = swipeView(View, {})
+        eq(v:onSwipe(nil, ges("east", 600, 10)), true)
+        eq(#userfirst_calls, 1, "the top-edge swipe was offered first")
+        eq(v.turned, nil, "the page did not turn instead")
+    end)
+
+    it("turns the page when no user gesture takes the edge swipe", function()
+        local View = loadView()
+        local v = swipeView(View, {})
+        eq(v:onSwipe(nil, ges("east", 600, 10)), true)
+        eq(#userfirst_calls, 1)
+        eq(v.turned, true)
+    end)
+
+    it("does not offer a vertical swipe to the user-first check", function()
+        local View = loadView()
+        local v = swipeView(View, { continue_books = { {} } })
+        eq(v:onSwipe(nil, ges("north", 600, 500)), true)
+        eq(#userfirst_calls, 0, "vertical swipes go to the edge-slide check, not this one")
+        eq(v._shelf_expanded, true)
     end)
 
     it("keeps the A–Z strip's swipe when it starts on the strip", function()

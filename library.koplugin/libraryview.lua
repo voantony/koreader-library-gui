@@ -2126,7 +2126,11 @@ function LibraryView:handleEvent(event)
         if ev and Zones.tryLiveZones(ev) then return true end
         return false
     end
-    return InputContainer.handleEvent(self, event)
+    -- A Dispatcher action the view does not handle (a Gestures-plugin
+    -- binding fired by the zone walk above, issue #9) goes to the file
+    -- browser, which is the widget that can run it.
+    if InputContainer.handleEvent(self, event) then return true end
+    return Zones.forwardToLive(event, self)
 end
 
 function LibraryView:onSwipe(_, ges)
@@ -2141,12 +2145,19 @@ function LibraryView:onSwipe(_, ges)
         self.scrubber:onSwipeScrubber(nil, ges)
         return true
     end
+    -- A horizontal swipe the reader gave their own action in KOReader's
+    -- Gestures (top/bottom edge swipes, issue #9) runs that action before
+    -- the Library turns its page. Only a configured one fires; anything
+    -- else falls through to the page turn below.
+    local d = ges and ges.direction
+    if (d == "west" or d == "east") and Zones.tryUserFirst(ges, Zones.liveHost()) then
+        return true
+    end
     -- A vertical slide that starts on an edge strip is LiveLight's (issue #8):
     -- brightness on the left, warmth on the right. Offer it to the file
     -- browser's zones first; if nothing there takes it (LiveLight off, or
     -- the edge set to Off), it falls through to the shelf expand below. The
     -- A–Z strip and the Controls corner above keep their own gestures.
-    local d = ges and ges.direction
     if (d == "north" or d == "south") and ges.pos and Core.edgeStrip(ges.pos.x, self.dimen.w) then
         if Zones.tryLiveZones(ges) then return true end
     end
