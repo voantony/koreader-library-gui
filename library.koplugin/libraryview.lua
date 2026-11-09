@@ -1298,9 +1298,16 @@ function LibraryView:openWidgetMenu(index)
     end
 end
 
---- Tap on a title. The accordion (#2) uses this. With one widget it does nothing.
-function LibraryView:tapWidgetTitle()
-    return false
+--- Tap a title to expand that widget over the other (#2). The other
+-- becomes the tab on the right. Tap the title again, or the tab, to
+-- return to the side-by-side pair. One widget has nothing to expand over.
+function LibraryView:tapWidgetTitle(index)
+    local Widgets = require("librarywidgets")
+    local n = #self:currentWidgetSlots()
+    if n < 2 then return false end
+    self._widget_expanded = Widgets.accordion(n, self._widget_expanded, index)
+    self:refreshBody(true)
+    return true
 end
 
 function LibraryView:setHomeWidgets(slots)
@@ -1310,6 +1317,7 @@ function LibraryView:setHomeWidgets(slots)
         if self.plugin.saveSettings then self.plugin:saveSettings() end
     end
     self._wpage = {}
+    self._widget_expanded = nil
     self.page = 1
     self:refreshBody(true)
 end
@@ -1344,7 +1352,7 @@ function LibraryView:buildOneWidget(spec, index, col_w, header_h, body_h, Widget
     local gap = self.gap or 8
     -- Three covers across, and the tile must fit under the title inside
     -- the height reserved for the band so it does not paint over the grid.
-    local per = 3
+    local per = col_w > 800 and 5 or 3
     local slot_w = math.max(48, math.floor((col_w - gap * (per + 1)) / per))
     local label_h = 36
     -- Stay inside the band. A tile that paints past it covers the book grid.
@@ -1413,14 +1421,62 @@ function LibraryView:buildOneWidget(spec, index, col_w, header_h, body_h, Widget
     }
 end
 
+--- The other widget, written down the right edge. Tap it to restore the pair.
+function LibraryView:buildWidgetTab(spec, index, width, height, Widgets)
+    local name = Widgets.label(spec)
+    local face = Font:getFace("cfont", 14)
+    local col = VerticalGroup:new{ align = "center" }
+    for ch in name:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+        if ch == " " then
+            table.insert(col, VerticalSpan:new{ width = 8 })
+        else
+            table.insert(col, TextWidget:new{ text = ch, face = face, bold = true })
+        end
+    end
+    local hit = WidgetTitle:new{
+        min_w = width,
+        min_h = math.min(height, 280),
+        on_tap = function()
+            self._widget_expanded = nil
+            self:refreshBody(true)
+        end,
+        on_hold = function() self:openWidgetMenu(index) end,
+        col,
+    }
+    return FrameContainer:new{
+        padding = 2,
+        padding_top = Size.padding.default,
+        bordersize = Size.line.thin,
+        radius = 8,
+        width = width,
+        height = height,
+        hit,
+    }
+end
+
 function LibraryView:buildHomeWidgets(slots, width, height)
     local Widgets = require("librarywidgets")
     local ctx = self:widgetBookContext()
     local n = math.max(1, #slots)
     local gap = self.gap or 8
-    local col_w = math.floor((width - gap * (n + 1)) / n)
     local header_h = self:continueHeaderHeight()
     local body_h = math.max(48, height - header_h)
+    local expanded = self._widget_expanded
+    if expanded and slots[expanded] and n >= 2 then
+        local other = expanded == 1 and 2 or 1
+        local tab_w = 48
+        local main_w = width - tab_w - gap * 2
+        local main = self:buildOneWidget(slots[expanded], expanded, main_w, header_h, body_h, Widgets, ctx)
+        local tab = self:buildWidgetTab(slots[other], other, tab_w, height, Widgets)
+        local row = HorizontalGroup:new{
+            align = "top",
+            HorizontalSpan:new{ width = gap },
+            main,
+            tab,
+        }
+        return TopContainer:new{ dimen = Geom:new{ w = width, h = height }, row }
+    end
+    local col_w = math.floor((width - gap * (n + 1)) / n)
     local row = HorizontalGroup:new{ align = "top", HorizontalSpan:new{ width = gap } }
     for i, spec in ipairs(slots) do
         table.insert(row, self:buildOneWidget(spec, i, col_w, header_h, body_h, Widgets, ctx))
