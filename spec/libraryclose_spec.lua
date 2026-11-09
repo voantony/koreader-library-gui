@@ -158,6 +158,44 @@ describe("Library footer buttons", function()
     end)
 end)
 
+describe("bottom-left menu anchor", function()
+    it("pops the menu up from the hamburger when that button has a place", function()
+        local shown = {}
+        local UIManager = {
+            show = function(_, w) shown[#shown + 1] = w end,
+            close = function() end,
+            nextTick = function(_, f) f() end, scheduleIn = function() end,
+        }
+        local Library = load("main.lua", {
+            ["ui/uimanager"] = UIManager,
+            ["ui/widget/buttondialog"] = { new = function(_, o) return o end },
+            ["ui/widget/container/widgetcontainer"] = cls(),
+        })
+        local view = {
+            sort = "recent", view_mode = "grid",
+            placeName = function() return "Books" end,
+            viewKey = function() return "books" end,
+            hasRemembered = function() return false end,
+            footer_menu = { dimen = { x = 16, y = 1580, w = 64, h = 64 } },
+        }
+        local self = setmetatable({ settings = { columns = 4 }, saveSettings = function() end }, { __index = Library })
+        Library.showLibraryMenu(self, view)
+        local anchor = shown[1].anchor()
+        eq(anchor.x, 16)
+        eq(anchor.y, 1580)
+        eq(anchor.w, 64)
+        eq(anchor.h, 64)
+    end)
+
+    it("falls back to the bottom-left corner when the button has not been placed", function()
+        local dialog = menuFor()
+        local anchor = dialog.anchor()
+        eq(type(anchor.x), "number")
+        eq(anchor.x, 0)
+        eq(type(anchor.y), "number")
+    end)
+end)
+
 describe("Back key", function()
     it("still closes the Library, or leaves an open shelf first", function()
         local closed = {}
