@@ -11,6 +11,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local Core = require("librarycore")
+local Zones = require("libraryzones")
 local Screen = Device.screen
 
 local C = Blitbuffer
@@ -40,7 +41,10 @@ local function textSize(face, s, bold, color, bg)
 end
 
 function Scrubber:init()
-    self.letters = (self.index and self.index.letters) or Core.SCRUBBER_LETTERS
+    -- `letters` may be one side of a two-column strip. Otherwise the full alphabet.
+    if not self.letters then
+        self.letters = (self.index and self.index.letters) or Core.SCRUBBER_LETTERS
+    end
     self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
     local sw = self.screen_w
     local sh = self.screen_h
@@ -105,18 +109,20 @@ function Scrubber:paintStrip(bb, x, y)
     local d = self.dimen
     local w, h = d.w, d.h
     bb:paintRect(x, y, w, h, C.COLOR_WHITE)
-    -- Hairline where the covers stop. The letters sit in a slim column on
-    -- the right; the rest of the width is the touch margin.
+    -- Hairline where the covers stop. Right column: letters on the outer
+    -- edge, hairline on the left. Left column (two-sided strip): the mirror.
+    local line = math.max(1, math.floor((tonumber(self.dpi) or 300) / 167))
     if bb.paintRect then
-        local line = math.max(1, math.floor((tonumber(self.dpi) or 300) / 167))
-        bb:paintRect(x, y, line, h, C.COLOR_GRAY_B)
+        local lx = self.side == "left" and (x + w - line) or x
+        bb:paintRect(lx, y, line, h, C.COLOR_GRAY_B)
     end
     local n = #self.letters
     if n < 1 or h < 1 then return end
     local slot = math.floor(h / n)
     local glyph_w = math.min(w, math.max(math.floor(w * 0.42), math.min(w, 48)))
-    local glyph_x = x + w - glyph_w
-    local face_px = self:nominalSize(math.max(10, slot - 4), 11, 18)
+    local glyph_x = self.side == "left" and x or (x + w - glyph_w)
+    -- Half an alphabet in the same height: larger letters, taller slots (#5).
+    local face_px = self:nominalSize(math.max(10, slot - 4), 11, n <= 16 and 28 or 18)
     local face = Font:getFace("cfont", face_px)
     local highlight = self.bubble_letter
     for i, letter in ipairs(self.letters) do
@@ -322,6 +328,17 @@ function Scrubber:onPanReleaseScrubber()
     return self:endDrag() or true
 end
 
+--- A vertical swipe in the outer eighth is LiveLight's brightness or
+-- warmth slide, which overlaps this strip. Taps and drags still pick a letter.
+function Scrubber:offerLiveLight(ges)
+    local view = self.view
+    local w = view and view.dimen and view.dimen.w
+    if not Core.edgeVerticalSwipe(ges, w) then return false end
+    if not (Zones and Zones.tryLiveZones) then return false end
+    local ok, taken = pcall(Zones.tryLiveZones, ges)
+    return ok and taken == true
+end
+
 function Scrubber:onSwipeScrubber(_, ges)
     -- A downward swipe from the top of the strip (inside the Controls zone)
     -- opens Controls instead of jumping to a letter. LibraryView also checks
@@ -329,6 +346,7 @@ function Scrubber:onSwipeScrubber(_, ges)
     if not (self._drag) and self.view and self.view.tryOpenControls and self.view:tryOpenControls(ges) then
         return true
     end
+    if self:offerLiveLight(ges) then return true end
     -- A quick flick is a swipe instead of a pan_release. Stay on the strip:
     -- do not also turn a page.
     local pos = ges and (ges.end_pos or ges.pos)

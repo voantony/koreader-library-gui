@@ -784,7 +784,6 @@ function LibraryView:buildTabs()
     }
 end
 
-local FILTER_SHORT = { barely = _("Barely") }
 local GROUP_COUNT = { authors = _("%1 authors"), series = _("%1 series"), collections = _("%1 collections"),
     genres = _("%1 genres") }
 
@@ -812,46 +811,109 @@ function LibraryView:buildCollectionsSwitch()
     }
 end
 
+--- Horizontal filter row (#5). Chips keep their full labels. When they
+-- are wider than the screen the last one is cropped and a chevron marks
+-- that more sits past the edge. A sideways drag or swipe scrolls the row.
+local FilterStrip = InputContainer:extend{ name = "library_filter_strip" }
+
+function FilterStrip:init()
+    local row = self[1]
+    local h = (row and row.getSize and row:getSize().h or 0) + 2 * (self.pad or 0)
+    self.content_w = row and row.getSize and row:getSize().w or 0
+    self.dimen = Geom:new{ w = self.view_w or 0, h = h }
+    local scroll = Core.filterScroll(self.offset, self.content_w, self.dimen.w, 0)
+    self.offset = scroll.offset
+    self._scroll = scroll
+    local range = function() return self.dimen end
+    self.ges_events = {
+        PanFilter = { GestureRange:new{ ges = "pan", range = range } },
+        SwipeFilter = { GestureRange:new{ ges = "swipe", range = range } },
+    }
+end
+
+function FilterStrip:getSize()
+    return self.dimen
+end
+
+function FilterStrip:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    local row = self[1]
+    -- The framebuffer crops whatever passes the screen edge. That cropped
+    -- chip is the cue that more filters sit past the edge (#5).
+    if row then row:paintTo(bb, x - (self.offset or 0), y) end
+end
+
+function FilterStrip:applyScroll(dx)
+    local st = Core.filterScroll(self.offset, self.content_w, self.dimen.w, dx)
+    self.offset = st.offset
+    self._scroll = st
+    if self.on_offset then self.on_offset(st.offset) end
+    if UIManager.setDirty then
+        UIManager:setDirty(self, function() return "ui", self.dimen end)
+    end
+    return st.overflow
+end
+
+function FilterStrip:onPanFilter(_, ges)
+    if not (self._scroll and self._scroll.overflow) then return false end
+    local dx = ges and ges.relative and tonumber(ges.relative.x) or 0
+    self:applyScroll(dx)
+    return true
+end
+
+function FilterStrip:onSwipeFilter(_, ges)
+    if not (self._scroll and self._scroll.overflow) then return false end
+    local dir = ges and ges.direction
+    if dir ~= "west" and dir ~= "east" then return false end
+    local step = math.floor((self.dimen.w or 0) * 0.6)
+    -- A west swipe moves the row left, revealing what was past the right edge.
+    self:applyScroll(dir == "west" and -step or step)
+    return true
+end
+
 function LibraryView:buildChips(counts)
     local margin = Size.margin.default + Size.padding.default
     local gap = Size.padding.default
     local avail = self.width - 2 * margin
-    -- Narrow screens: drop the counts of unselected filters, then shorten names.
-    local row
-    for compact = 0, 2 do
-        row = HorizontalGroup:new{ align = "center" }
-        if self.group then
-            table.insert(row, Tiles.Chip:new{
-                text = "\u{2190} " .. self.group.name,
-                max_text_w = math.floor(self.width * 0.22),
-                callback = function() self:closeGroup() end,
-                show_parent = self,
-            })
-            table.insert(row, HorizontalSpan:new{ width = Size.padding.large })
-        end
-        for i, f in ipairs(Core.FILTERS) do
-            if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
-            local selected = self.filter == f
-            local text = (compact >= 2 and FILTER_SHORT[f]) or FILTER_NAMES[f]
-            if counts and (compact == 0 or selected) then text = text .. " " .. (counts[f] or 0) end
-            table.insert(row, Tiles.Chip:new{
-                text = text,
-                selected = selected,
-                callback = function() self:setFilter(f) end,
-                show_parent = self,
-            })
-        end
-        if row:getSize().w <= avail then break end
+    -- Full labels, even when that is wider than the screen (#5). The strip
+    -- scrolls; it does not drop counts or shorten names to squeeze in.
+    local row = HorizontalGroup:new{ align = "center" }
+    if self.group then
+        table.insert(row, Tiles.Chip:new{
+            text = "\u{2190} " .. self.group.name,
+            max_text_w = math.floor(self.width * 0.22),
+            callback = function() self:closeGroup() end,
+            show_parent = self,
+        })
+        table.insert(row, HorizontalSpan:new{ width = Size.padding.large })
+    end
+    for i, f in ipairs(Core.FILTERS) do
+        if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
+        local text = FILTER_NAMES[f] or f
+        if counts then text = text .. " " .. (counts[f] or 0) end
+        table.insert(row, Tiles.Chip:new{
+            text = text,
+            selected = self.filter == f,
+            callback = function() self:setFilter(f) end,
+            show_parent = self,
+        })
     end
     local pad = Size.padding.default
+    local strip = FilterStrip:new{
+        view_w = avail,
+        pad = 0,
+        offset = self._filter_offset or 0,
+        on_offset = function(off) self._filter_offset = off end,
+        row,
+    }
     return FrameContainer:new{
         padding = 0,
         padding_left = margin,
         padding_top = pad,
         bordersize = 0,
         width = self.width,
-        height = row:getSize().h + 2 * pad,
-        row,
+        height = strip:getSize().h + 2 * pad,
+        strip,
     }
 end
 
@@ -1309,11 +1371,13 @@ function LibraryView:buildBody()
         if #data.items < 1 then return nil end
         return self:scrubberLetterMode(data.kind, pages)
     end
-    local function widthsFor(mode)
+    local function widthsFor(mode, columns)
         if not mode then return self.width, 0 end
         local strip_w = Core.scrubberWidth(self:screenDpi())
-        local content_w = Core.gridContentWidth(self.width, strip_w)
-        return content_w, self.width - content_w
+        local n = math.max(1, columns or 1)
+        local content_w = Core.gridContentWidth(self.width, strip_w * n)
+        local reserved = math.max(0, self.width - content_w)
+        return content_w, math.floor(reserved / n)
     end
     local letter_mode = letterMode(nil)
     local grid_w, letter_w = widthsFor(letter_mode)
@@ -1361,6 +1425,15 @@ function LibraryView:buildBody()
         grid_w, letter_w = widthsFor(letter_mode)
         later_layout, page1_layout, page1_h, first_per, later_per, grid_items, page_items, page, pages = pageSlice()
     end
+    -- Letters on both sides only while the shelf is the short page under
+    -- Continue reading (#5: "when the library uses only part of the screen").
+    local two = letter_mode and page == 1 and continue_layout ~= nil
+    if two then
+        grid_w, letter_w = widthsFor(letter_mode, 2)
+        later_layout, page1_layout, page1_h, first_per, later_per, grid_items, page_items, page, pages = pageSlice()
+        two = letter_mode and page == 1 and continue_layout ~= nil
+    end
+    self._scrub_two = two and true or false
     self.page, self.pages = page, pages
     self.current = data
     self.missing_covers = {}
@@ -1382,13 +1455,31 @@ function LibraryView:buildBody()
     else
         grid = self:buildGrid(page_items, data.kind, layout, grid_h, grid_w)
     end
+    for _, sc in ipairs(self.scrubbers or {}) do
+        if sc.freeSnap then sc:freeSnap() end
+    end
     if self.scrubber and self.scrubber.freeSnap then self.scrubber:freeSnap() end
-    self.scrubber = nil
+    self.scrubber, self.scrubbers = nil, nil
     if letter_mode and letter_w > 0 then
         local anchor_item = page_items[1]
         local anchor = anchor_item and Core.scrubberBucket(Core.scrubberItemKey(anchor_item, letter_mode)) or nil
-        self.scrubber = self:buildScrubber(grid_items, first_per, letter_mode, letter_w, grid_h, anchor, later_per)
-        grid = HorizontalGroup:new{ align = "top", grid, self.scrubber }
+        local left_letters, right_letters = Core.scrubberSplit(Core.SCRUBBER_LETTERS, self._scrub_two)
+        local function column(letters, side)
+            return self:buildScrubber(grid_items, first_per, letter_mode, letter_w, grid_h, anchor, later_per, {
+                letters = letters, side = side,
+            })
+        end
+        if self._scrub_two then
+            local left = column(left_letters, "left")
+            local right = column(right_letters, "right")
+            self.scrubbers = { left, right }
+            self.scrubber = right
+            grid = HorizontalGroup:new{ align = "top", left, grid, right }
+        else
+            self.scrubber = column(right_letters, "right")
+            self.scrubbers = { self.scrubber }
+            grid = HorizontalGroup:new{ align = "top", grid, self.scrubber }
+        end
     end
     for _, p in ipairs(continue_missing) do table.insert(self.missing_covers, p) end
     local footer = self:buildFooter(page, pages, #data.items, data.kind)
@@ -2147,7 +2238,8 @@ function LibraryView:scrubberPlan(kind, n_items, pages)
     return { mode = mode, width = width - content_w, content_w = content_w }
 end
 
-function LibraryView:buildScrubber(items, per_page, mode, width, height, anchor, later_per_page)
+function LibraryView:buildScrubber(items, per_page, mode, width, height, anchor, later_per_page, extra)
+    extra = extra or {}
     local index = Core.scrubberIndex(items, per_page, function(item)
         return Core.scrubberItemKey(item, mode)
     end, later_per_page)
@@ -2155,6 +2247,8 @@ function LibraryView:buildScrubber(items, per_page, mode, width, height, anchor,
         view = self,
         index = index,
         anchor = anchor,
+        letters = extra.letters,
+        side = extra.side,
         width = width,
         height = height,
         dpi = self:screenDpi(),
@@ -2164,16 +2258,34 @@ function LibraryView:buildScrubber(items, per_page, mode, width, height, anchor,
     }
 end
 
---- True when a gesture began on the letter strip.
-function LibraryView:gestureOnScrubber(ges)
-    local d = self.scrubber and self.scrubber.dimen
-    if not d or not ges then return false end
-    local function inside(p)
-        return p and p.x and p.y
+function LibraryView:eachScrubber()
+    if self.scrubbers and #self.scrubbers > 0 then return self.scrubbers end
+    if self.scrubber then return { self.scrubber } end
+    return {}
+end
+
+function LibraryView:scrubberHit(ges)
+    local function inside(d, p)
+        return d and p and p.x and p.y
             and p.x >= d.x and p.y >= d.y
             and p.x < d.x + d.w and p.y < d.y + d.h
     end
-    return inside(ges.pos) or inside(ges.start_pos)
+    for _, sc in ipairs(self:eachScrubber()) do
+        if inside(sc.dimen, ges and ges.pos) or inside(sc.dimen, ges and ges.start_pos) then
+            return sc
+        end
+    end
+end
+
+--- True when a gesture began on a letter strip.
+function LibraryView:gestureOnScrubber(ges)
+    return self:scrubberHit(ges) ~= nil
+end
+
+function LibraryView:draggingScrubber()
+    for _, sc in ipairs(self:eachScrubber()) do
+        if sc._drag then return sc end
+    end
 end
 
 --- Open Controls when this swipe started in the top-right zone and went
@@ -2233,15 +2345,17 @@ function LibraryView:handleEvent(event)
 end
 
 function LibraryView:onSwipe(_, ges)
-    if self.scrubber and self.scrubber._drag then
+    local drag = self:draggingScrubber()
+    if drag then
         local pos = ges and (ges.end_pos or ges.pos)
-        if pos then self.scrubber._pending = pos end
-        self.scrubber:endDrag()
+        if pos then drag._pending = pos end
+        drag:endDrag()
         return true
     end
     if self:tryOpenControls(ges) then return true end
-    if self.scrubber and self:gestureOnScrubber(ges) then
-        self.scrubber:onSwipeScrubber(nil, ges)
+    local hit = self:scrubberHit(ges)
+    if hit then
+        hit:onSwipeScrubber(nil, ges)
         return true
     end
     -- A horizontal swipe the reader gave their own action in KOReader's
@@ -2302,32 +2416,36 @@ end
 --- A drag that has left the letter strip keeps driving it. Anywhere else, a
 -- pan is not a page turn.
 function LibraryView:onPan(_, ges)
-    if self.scrubber and self.scrubber._drag then
-        self.scrubber:dragTo(ges and ges.pos)
+    local drag = self:draggingScrubber()
+    if drag then
+        drag:dragTo(ges and ges.pos)
         return true
     end
     return false
 end
 
 function LibraryView:onHoldPan(_, ges)
-    if self.scrubber and self.scrubber._drag then
-        self.scrubber:dragTo(ges and ges.pos)
+    local drag = self:draggingScrubber()
+    if drag then
+        drag:dragTo(ges and ges.pos)
         return true
     end
     return false
 end
 
 function LibraryView:onPanRelease()
-    if self.scrubber and self.scrubber._drag then
-        self.scrubber:endDrag()
+    local drag = self:draggingScrubber()
+    if drag then
+        drag:endDrag()
         return true
     end
     return false
 end
 
 function LibraryView:onHoldRelease()
-    if self.scrubber and self.scrubber._drag then
-        self.scrubber:endDrag()
+    local drag = self:draggingScrubber()
+    if drag then
+        drag:endDrag()
         return true
     end
     return false
@@ -2427,6 +2545,9 @@ end
 
 function LibraryView:onCloseWidget()
     self._closed = true
+    for _, sc in ipairs(self.scrubbers or {}) do
+        if sc.freeSnap then sc:freeSnap() end
+    end
     if self.scrubber and self.scrubber.freeSnap then self.scrubber:freeSnap() end
     if self.timing then
         for _, name in ipairs({ "page", "filter", "search" }) do self.timing:cancel(name) end

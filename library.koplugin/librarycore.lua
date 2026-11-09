@@ -2734,6 +2734,52 @@ end
 
 --- Grid width once `strip_w` has been reserved on the right. Always leaves
 -- at least half the screen (or 1 px) for the covers.
+--- Scroll a filter row that is wider than the screen (#5). `dx` is how far
+-- the finger moved right since the last step. The last chip is cropped
+-- when there is more past the right edge; `more_left` is the same cue
+-- once the row has moved.
+function Core.filterScroll(offset, content_w, view_w, dx)
+    offset = math.floor(tonumber(offset) or 0)
+    content_w = math.max(0, math.floor(tonumber(content_w) or 0))
+    view_w = math.max(0, math.floor(tonumber(view_w) or 0))
+    dx = math.floor(tonumber(dx) or 0)
+    local max_off = math.max(0, content_w - view_w)
+    offset = offset - dx
+    if offset < 0 then offset = 0 end
+    if offset > max_off then offset = max_off end
+    return {
+        offset = offset,
+        overflow = max_off > 0,
+        more_right = offset < max_off,
+        more_left = offset > 0,
+    }
+end
+
+--- Split the alphabet into two columns when the book grid only has part
+-- of the screen (#5, the mockup with letters on both sides). The left
+-- column is the first half, including "#", so each letter is about twice
+-- as tall. A full-height shelf keeps one column.
+function Core.scrubberSplit(letters, two_sides)
+    letters = letters or Core.SCRUBBER_LETTERS
+    if not two_sides then return nil, letters end
+    local mid = math.ceil(#letters / 2)
+    local left, right = {}, {}
+    for i = 1, mid do left[#left + 1] = letters[i] end
+    for i = mid + 1, #letters do right[#right + 1] = letters[i] end
+    return left, right
+end
+
+--- A vertical swipe that starts in a LiveLight edge (the outer eighth).
+-- Taps and drags stay on the A–Z strip; this flick is the one that
+-- overlaps the warmth or brightness slide.
+function Core.edgeVerticalSwipe(ges, screen_w)
+    if type(ges) ~= "table" then return nil end
+    local dir = ges.direction
+    if dir ~= "north" and dir ~= "south" then return nil end
+    local x = ges.pos and tonumber(ges.pos.x)
+    return Core.edgeStrip(x, screen_w)
+end
+
 function Core.gridContentWidth(width, strip_w)
     width = math.floor(tonumber(width) or 0)
     strip_w = math.floor(tonumber(strip_w) or 0)
