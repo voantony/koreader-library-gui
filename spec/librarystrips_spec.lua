@@ -1,7 +1,8 @@
--- Issue #5: the filter row scrolls instead of shrinking, and the A–Z
--- strip splits to both sides when the shelf is only part of the screen.
--- A vertical swipe in the LiveLight edge is offered to that zone; a tap
--- or a drag on the strip still picks a letter.
+-- Issue #5: the filter row scrolls instead of shrinking. The A–Z strip
+-- is one right-hand column with a wide hit area. A short strip compacts
+-- to letters and dots instead of shrinking the type. A vertical swipe in
+-- the LiveLight edge is offered to that zone; a tap or a drag still picks
+-- a letter, including letters hidden behind a dot.
 local Core = require("librarycore")
 
 local function loadScrubber(zones)
@@ -61,21 +62,65 @@ describe("filter strip scroll", function()
     end)
 end)
 
-describe("two-sided A–Z", function()
-    it("keeps one column when the shelf is full height", function()
-        local left, right = Core.scrubberSplit(Core.SCRUBBER_LETTERS, false)
-        eq(left, nil)
-        eq(#right, #Core.SCRUBBER_LETTERS)
+describe("compact A–Z marks", function()
+    it("paints every letter when the strip is tall enough", function()
+        local slot = Core.scrubberMinSlot(300)
+        local marks = Core.scrubberMarks(Core.SCRUBBER_LETTERS, slot * #Core.SCRUBBER_LETTERS, slot)
+        eq(#marks, #Core.SCRUBBER_LETTERS)
+        eq(marks[1].letter, "#")
+        eq(marks[#marks].letter, "Z")
+        for _, mark in ipairs(marks) do eq(mark.dot or false, false) end
     end)
 
-    it("splits the alphabet so each side has about half the letters", function()
-        local left, right = Core.scrubberSplit(Core.SCRUBBER_LETTERS, true)
-        eq(left[1], "#")
-        eq(left[#left], "M")
-        eq(right[1], "N")
-        eq(right[#right], "Z")
-        eq(#left + #right, #Core.SCRUBBER_LETTERS)
-        eq(#left >= #right, true)
+    it("shows letters with dots when the strip is short, and keeps the ends", function()
+        local slot = Core.scrubberMinSlot(300)
+        local marks = Core.scrubberMarks(Core.SCRUBBER_LETTERS, slot * 15, slot)
+        eq(#marks <= 15, true)
+        eq(#marks < #Core.SCRUBBER_LETTERS, true)
+        eq(marks[1].letter, "#")
+        eq(marks[#marks].letter, "Z")
+        local dots, letters = 0, 0
+        for i, mark in ipairs(marks) do
+            if mark.dot then
+                dots = dots + 1
+                eq(mark.text, "·")
+                eq(i > 1 and i < #marks, true, "dots sit between letters")
+            else
+                letters = letters + 1
+            end
+        end
+        eq(dots > 0, true)
+        eq(letters >= 2, true)
+        -- A dot separates neighbouring shown letters.
+        eq(marks[2].dot, true)
+    end)
+
+    it("a drag on a short strip still reaches a letter that is only a dot", function()
+        local Scrubber = loadScrubber({})
+        local sc = Scrubber:new{
+            letters = Core.SCRUBBER_LETTERS,
+            width = 168, height = 400, dpi = 300,
+            screen_w = 1264, screen_h = 1680,
+            view = { dimen = { w = 1264, h = 1680 } },
+        }
+        sc:init()
+        sc.dimen.x, sc.dimen.y = 0, 0
+        local marks = Core.scrubberMarks(Core.SCRUBBER_LETTERS, 400, Core.scrubberMinSlot(300))
+        eq(#marks < #Core.SCRUBBER_LETTERS, true)
+        local shown = {}
+        for _, mark in ipairs(marks) do
+            if mark.letter then shown[mark.letter] = true end
+        end
+        local hidden
+        for _, letter in ipairs(Core.SCRUBBER_LETTERS) do
+            if not shown[letter] then hidden = letter break end
+        end
+        eq(hidden ~= nil, true)
+        local found = false
+        for y = 0, 399 do
+            if sc:letterAt(y) == hidden then found = true break end
+        end
+        eq(found, true, "dragging passes through " .. tostring(hidden))
     end)
 end)
 

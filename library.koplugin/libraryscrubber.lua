@@ -41,7 +41,8 @@ local function textSize(face, s, bold, color, bg)
 end
 
 function Scrubber:init()
-    -- `letters` may be one side of a two-column strip. Otherwise the full alphabet.
+    -- `letters` is the full alphabet the finger scrubs. Paint may show
+    -- only every few of them, with dots, when the column is short.
     if not self.letters then
         self.letters = (self.index and self.index.letters) or Core.SCRUBBER_LETTERS
     end
@@ -109,45 +110,51 @@ function Scrubber:paintStrip(bb, x, y)
     local d = self.dimen
     local w, h = d.w, d.h
     bb:paintRect(x, y, w, h, C.COLOR_WHITE)
-    -- Hairline where the covers stop. Right column: letters on the outer
-    -- edge, hairline on the left. Left column (two-sided strip): the mirror.
+    -- Hairline where the covers stop. Letters sit in a slim column on the
+    -- right; the rest of the wider strip is the touch margin.
     local line = math.max(1, math.floor((tonumber(self.dpi) or 300) / 167))
     if bb.paintRect then
-        local lx = self.side == "left" and (x + w - line) or x
-        bb:paintRect(lx, y, line, h, C.COLOR_GRAY_B)
+        bb:paintRect(x, y, line, h, C.COLOR_GRAY_B)
     end
-    local n = #self.letters
+    local marks = Core.scrubberMarks(self.letters, h, Core.scrubberMinSlot(self.dpi))
+    local n = #marks
     if n < 1 or h < 1 then return end
-    local slot = math.floor(h / n)
-    local glyph_w = math.min(w, math.max(math.floor(w * 0.42), math.min(w, 48)))
-    local glyph_x = self.side == "left" and x or (x + w - glyph_w)
-    -- Half an alphabet in the same height: larger letters, taller slots (#5).
-    local face_px = self:nominalSize(math.max(10, slot - 4), 11, n <= 16 and 28 or 18)
+    local glyph_w = math.min(56, math.max(28, math.floor(w * 0.34)))
+    local glyph_x = x + w - glyph_w
+    local face_px = self:nominalSize(math.max(14, math.floor(h / n) - 2), 16, 26)
     local face = Font:getFace("cfont", face_px)
+    local dot_face = Font:getFace("cfont", self:nominalSize(10, 10, 14))
     local highlight = self.bubble_letter
-    for i, letter in ipairs(self.letters) do
+    for i, mark in ipairs(marks) do
         local sy = y + math.floor((i - 1) * h / n)
         local sh = math.floor(i * h / n) - math.floor((i - 1) * h / n)
-        local on = self:active(letter)
-        local hot = highlight == letter
-        local bg = C.COLOR_WHITE
-        local fg = on and C.COLOR_BLACK or C.COLOR_GRAY_6
-        if hot then
-            bg = on and C.COLOR_BLACK or C.COLOR_GRAY_8
-            fg = C.COLOR_WHITE
-            local pad = math.max(1, math.floor(sh * 0.08))
-            bb:paintRoundedRect(glyph_x + 2, sy + pad, glyph_w - 6, math.max(1, sh - 2 * pad), bg,
-                math.floor(sh / 2))
-        end
-        local widget, sz = textSize(face, letter, on or hot, fg, hot and bg or C.COLOR_WHITE)
-        local tx = glyph_x + math.floor((glyph_w - sz.w) / 2)
-        local ty = sy + math.floor((sh - sz.h) / 2)
-        widget:paintTo(bb, tx, ty)
-        widget:free()
-        if not hot and letter == self.anchor and on then
-            local mark_w = math.max(4, math.floor(sz.w * 0.7))
-            local mx = glyph_x + math.floor((glyph_w - mark_w) / 2)
-            bb:paintRect(mx, ty + sz.h - 1, mark_w, math.max(1, math.floor(slot * 0.06)), C.COLOR_BLACK)
+        if mark.dot then
+            local widget, sz = textSize(dot_face, "·", true, C.COLOR_GRAY_6, C.COLOR_WHITE)
+            widget:paintTo(bb, glyph_x + math.floor((glyph_w - sz.w) / 2), sy + math.floor((sh - sz.h) / 2))
+            widget:free()
+        else
+            local letter = mark.letter
+            local on = self:active(letter)
+            local hot = highlight == letter
+            local bg = C.COLOR_WHITE
+            local fg = on and C.COLOR_BLACK or C.COLOR_GRAY_6
+            if hot then
+                bg = on and C.COLOR_BLACK or C.COLOR_GRAY_8
+                fg = C.COLOR_WHITE
+                local pad = math.max(1, math.floor(sh * 0.08))
+                bb:paintRoundedRect(glyph_x + 2, sy + pad, glyph_w - 6, math.max(1, sh - 2 * pad), bg,
+                    math.floor(sh / 2))
+            end
+            local widget, sz = textSize(face, letter, true, fg, hot and bg or C.COLOR_WHITE)
+            local tx = glyph_x + math.floor((glyph_w - sz.w) / 2)
+            local ty = sy + math.floor((sh - sz.h) / 2)
+            widget:paintTo(bb, tx, ty)
+            widget:free()
+            if not hot and letter == self.anchor and on then
+                local mark_w = math.max(4, math.floor(sz.w * 0.7))
+                local mx = glyph_x + math.floor((glyph_w - mark_w) / 2)
+                bb:paintRect(mx, ty + sz.h - 1, mark_w, math.max(1, math.floor(sh * 0.08)), C.COLOR_BLACK)
+            end
         end
     end
 end
