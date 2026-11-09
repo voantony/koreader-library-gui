@@ -2,7 +2,7 @@
 
 ## 0.5.0 (draft)
 
-Not tagged and not released. This is a draft of what would go in v0.5.0, from !4 through !10.
+Not tagged and not released. This is a draft of what would go in v0.5.0, from !4 through !11.
 
 Thanks to @drkhn1234, the first outside contributor, for the issues and the mockups. Thanks to Muse for the patch behind !4.
 
@@ -33,3 +33,7 @@ Muse's patch, plus the review fixes on the same branch. Closes #3, #4, #6, #7, #
 - LiveLight's brightness and warmth edge slides work while the Library is showing (#8).
 - Startup uses KOReader's Start with setting (#10).
 - File-browser gestures on the library home screen are the separate, droppable commit on !4. That does not close #9.
+
+### Docs
+
+- Contributing guide, GitLab issue templates, a merge request template, and this changelog (!11).
