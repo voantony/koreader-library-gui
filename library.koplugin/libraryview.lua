@@ -287,6 +287,38 @@ function TapArea:onTapArea()
     return true
 end
 
+--- A widget title. Long-press opens the widget menu (#1). Tap is left
+-- for the accordion (#2); with no tap handler the press is not eaten.
+local WidgetTitle = InputContainer:extend{}
+
+function WidgetTitle:init()
+    local label = self[1]
+    local sz = label and label.getSize and label:getSize() or { w = 40, h = 20 }
+    self.dimen = Geom:new{ x = 0, y = 0, w = math.max(sz.w, self.min_w or 0), h = math.max(sz.h, self.min_h or 24) }
+    local range = function() return self.dimen end
+    self.ges_events = {
+        TapWidgetTitle = { GestureRange:new{ ges = "tap", range = range } },
+        HoldWidgetTitle = { GestureRange:new{ ges = "hold", range = range } },
+    }
+end
+
+function WidgetTitle:getSize() return self.dimen end
+
+function WidgetTitle:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    InputContainer.paintTo(self, bb, x, y)
+end
+
+function WidgetTitle:onTapWidgetTitle()
+    if self.on_tap then self.on_tap(); return true end
+    return false
+end
+
+function WidgetTitle:onHoldWidgetTitle()
+    if self.on_hold then self.on_hold() end
+    return true
+end
+
 ----------------------------------------------------------------------------
 -- Header: search bar, with the clock and battery beside it
 ----------------------------------------------------------------------------
@@ -1254,11 +1286,160 @@ end
 
 --- The strip's heading: "Continue reading" or "Recently opened". (Resume
 -- is the button in the footer.)
+function LibraryView:currentWidgetSlots()
+    local Widgets = require("librarywidgets")
+    if self.home_widgets ~= nil then return Widgets.normalize(self.home_widgets) end
+    return Widgets.defaultFromContinue(self.show_continue ~= false)
+end
+
+function LibraryView:openWidgetMenu(index)
+    if self.plugin and self.plugin.showWidgetMenu then
+        self.plugin:showWidgetMenu(self, index)
+    end
+end
+
+--- Tap on a title. The accordion (#2) uses this. With one widget it does nothing.
+function LibraryView:tapWidgetTitle()
+    return false
+end
+
+function LibraryView:setHomeWidgets(slots)
+    self.home_widgets = slots
+    if self.plugin and self.plugin.settings then
+        self.plugin.settings.home_widgets = slots
+        if self.plugin.saveSettings then self.plugin:saveSettings() end
+    end
+    self._wpage = {}
+    self.page = 1
+    self:refreshBody(true)
+end
+
+function LibraryView:widgetBookContext()
+    local favorites, collections, series = {}, {}, {}
+    if self.plugin and self.plugin.getCollections then
+        local ok, groups = pcall(self.plugin.getCollections, self.plugin)
+        if ok and type(groups) == "table" then
+            collections = groups
+            for _, g in ipairs(groups) do
+                if g.name == "Favorites" then favorites = g.books or {} end
+            end
+        end
+    end
+    if self.groupsFor then
+        local ok, groups = pcall(self.groupsFor, self, "series")
+        if ok and type(groups) == "table" then series = groups end
+    end
+    return {
+        continue = Core.topRowBooks(self.top_row, self.all_books, 40, fileExists),
+        favorites = favorites,
+        collections = collections,
+        series = series,
+        all = self.all_books,
+    }
+end
+
+function LibraryView:buildOneWidget(spec, index, col_w, header_h, body_h, Widgets, ctx)
+    local books = Widgets.books(spec, ctx)
+    self._wpage = self._wpage or {}
+    local gap = self.gap or 8
+    -- Three covers across, and the tile must fit under the title inside
+    -- the height reserved for the band so it does not paint over the grid.
+    local per = 3
+    local slot_w = math.max(48, math.floor((col_w - gap * (per + 1)) / per))
+    local label_h = 36
+    -- Stay inside the band. A tile that paints past it covers the book grid.
+    local cover_h = math.min(120, math.floor(slot_w * 1.5), math.max(48, body_h - label_h))
+    local pages = math.max(1, math.ceil(math.max(#books, 1) / per))
+    if #books == 0 then pages = 1 end
+    local page = self._wpage[index] or 1
+    if page > pages then page = pages end
+    if page < 1 then page = 1 end
+    self._wpage[index] = page
+    local face = Font:getFace("cfont", 16)
+    local title = WidgetTitle:new{
+        min_h = header_h,
+        on_hold = function() self:openWidgetMenu(index) end,
+        on_tap = function() self:tapWidgetTitle(index) end,
+        TextWidget:new{ text = Widgets.label(spec), face = face, bold = true },
+    }
+    local function step(dir)
+        self._wpage[index] = page + dir
+        self:refreshBody(true)
+    end
+    local function chevron(glyph, dir, enabled)
+        return TapArea:new{
+            min_w = 32, min_h = header_h, align = "center",
+            callback = function() if enabled then step(dir) end end,
+            TextWidget:new{ text = glyph, face = face, bold = true,
+                fgcolor = enabled and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_8 },
+        }
+    end
+    local head = HorizontalGroup:new{
+        align = "center",
+        title,
+        HorizontalSpan:new{ width = gap },
+        chevron("<", -1, page > 1),
+        chevron(">", 1, page < pages),
+    }
+    local book_row = HorizontalGroup:new{ align = "top" }
+    if #books == 0 then
+        book_row = TextWidget:new{ text = _("Nothing here yet."), face = face }
+    else
+        local start = (page - 1) * per + 1
+        local now = os.time()
+        for i = start, math.min(#books, start + per - 1) do
+            local tile = Tiles.Tile:new{
+                width = slot_w,
+                height = cover_h + label_h,
+                cover_h = cover_h,
+                caption = self.resumeCaption and self:resumeCaption(books[i], now) or nil,
+                book = books[i],
+                covers = self.covers,
+                cover_cache = self.cover_cache,
+                on_tap = function(t, ges) self:onTileTap(t, ges) end,
+                on_hold = function(t) self:onTileHold(t) end,
+            }
+            if tile.needs_cover and self.missing_covers then
+                table.insert(self.missing_covers, books[i])
+            end
+            table.insert(book_row, tile)
+            table.insert(book_row, HorizontalSpan:new{ width = gap })
+        end
+    end
+    return VerticalGroup:new{
+        align = "left",
+        FrameContainer:new{ padding = 0, padding_left = gap, bordersize = 0, head },
+        book_row,
+    }
+end
+
+function LibraryView:buildHomeWidgets(slots, width, height)
+    local Widgets = require("librarywidgets")
+    local ctx = self:widgetBookContext()
+    local n = math.max(1, #slots)
+    local gap = self.gap or 8
+    local col_w = math.floor((width - gap * (n + 1)) / n)
+    local header_h = self:continueHeaderHeight()
+    local body_h = math.max(48, height - header_h)
+    local row = HorizontalGroup:new{ align = "top", HorizontalSpan:new{ width = gap } }
+    for i, spec in ipairs(slots) do
+        table.insert(row, self:buildOneWidget(spec, i, col_w, header_h, body_h, Widgets, ctx))
+        table.insert(row, HorizontalSpan:new{ width = gap })
+    end
+    return TopContainer:new{ dimen = Geom:new{ w = width, h = height }, row }
+end
+
 function LibraryView:buildContinueHeader()
     local f = Font:getFace("cfont", 17)
     local heading = Core.topRow(self.top_row) == "recent" and _("Recently opened") or _("Continue reading")
     local label = TextWidget:new{ text = heading, face = f, bold = true }
-    local row = HorizontalGroup:new{ align = "center", label }
+    local title = WidgetTitle:new{
+        min_h = 28,
+        on_hold = function() self:openWidgetMenu(1) end,
+        on_tap = function() return self:tapWidgetTitle(1) end,
+        label,
+    }
+    local row = HorizontalGroup:new{ align = "center", title }
     return FrameContainer:new{
         padding = 0,
         padding_left = Size.margin.default + self.gap,
@@ -1347,11 +1528,29 @@ function LibraryView:buildBody()
     -- clears itself when there is no strip to hide (another tab, a search,
     -- the keyboard), so the hairline under the search bar only ever marks
     -- a real, temporary hide.
-    local strip_possible = data.kind == "books" and not Core.isCompact(self.view_mode) and Core.showContinue{
+    local Widgets = require("librarywidgets")
+    local widget_state = {
+        tab = self.tab, group = self.group, query = self.query,
+        filter = self.filter, keyboard = keyboard_h > 0,
+    }
+    local custom_widgets = self.home_widgets ~= nil
+    local widget_slots = custom_widgets and Widgets.normalize(self.home_widgets) or nil
+    local widget_area = custom_widgets and Widgets.areaVisible(widget_slots, widget_state)
+        and data.kind == "books" and not Core.isCompact(self.view_mode)
+    local strip_possible = widget_area or (data.kind == "books" and not Core.isCompact(self.view_mode) and Core.showContinue{
         enabled = self.show_continue, tab = self.tab, group = self.group,
-        query = self.query, filter = self.filter, keyboard = keyboard_h > 0 }
+        query = self.query, filter = self.filter, keyboard = keyboard_h > 0 })
     if not strip_possible then self._shelf_expanded = nil end
-    if strip_possible and not self._shelf_expanded then
+    self._widget_band_h = nil
+    if widget_area and not self._shelf_expanded then
+        self._widget_band_h = math.max(140, math.floor(full_h * 0.30))
+        continue_layout = { height = self._widget_band_h }
+        for _, spec in ipairs(widget_slots) do
+            if spec.kind == "continue" then
+                continue_books = Core.topRowBooks(self.top_row, self.all_books, self.continue_slots, fileExists)
+            end
+        end
+    elseif strip_possible and not self._shelf_expanded then
         local cbooks = Core.topRowBooks(self.top_row, self.all_books, self.continue_slots, fileExists)
         local min_rest = self.view_mode == "list" and 3 * self.list_row_h or (self.label_h + 100)
         local cl = Core.continueLayout(self.width, full_h, #cbooks, self.continue_label_h,
@@ -1447,7 +1646,12 @@ function LibraryView:buildBody()
     end
     self.layout = layout
 
-    local strip_widget = strip and self:buildContinue(self.continue_books, strip)
+    local strip_widget
+    if self._widget_band_h and widget_slots then
+        strip_widget = self:buildHomeWidgets(widget_slots, self.width, self._widget_band_h)
+    else
+        strip_widget = strip and self:buildContinue(self.continue_books, strip)
+    end
     local continue_missing = self.missing_covers
     local grid
     if self.view_mode == "list" or Core.isCompact(self.view_mode) then
