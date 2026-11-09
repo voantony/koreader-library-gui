@@ -199,6 +199,7 @@ describe("Footer size and view controls", function()
         eq(cleared(), 1, "cover cache cleared for the new size")
         eq(v.view_mode, "grid")
         eq(v.page, 1)
+        eq(v.refreshed, 1, "one refresh for the size step")
     end)
 
     it("tapping size wraps Large -> Small and switches a list to the grid", function()

@@ -2548,8 +2548,13 @@ function LibraryView:cycleCoverSize()
         self.plugin.settings.columns = cols
         if self.plugin.saveSettings then self.plugin:saveSettings() end
     end
-    self:setColumns(cols)
-    self:setViewMode("grid")
+    -- One rebuild: setColumns and setViewMode each refresh on their own.
+    self.cols = cols
+    if self.cover_cache and self.cover_cache.clear then self.cover_cache:clear() end
+    self.view_mode = Core.viewMode("grid")
+    self:rememberPref("view", self.view_mode)
+    self.page = 1
+    self:refreshBody(true)
 end
 
 --- Footer view control (issue #5): tap steps the form factor Grid ->
