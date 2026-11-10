@@ -46,6 +46,9 @@ local DEFAULTS = {
     top_row = "continue",    -- what that strip shows: "continue" | "recent" (Recently opened)
     max_depth = 10,
     show_hidden = false,
+    merge_copies = true,     -- one tile for the same book in several formats or folders
+    show_plain_text = false, -- TXT, HTML, Markdown and JSON stay out unless this is on
+    -- skip_folders: nil uses Core.defaultSkipDirs(); a list replaces that list
     return_to_library = true,   -- when the Library is the home screen, come back to it after reading
     debounce_ms = 150,
     barely_threshold = 0.10,    -- "Barely started" when chapters are unknown: below this fraction
@@ -507,10 +510,50 @@ function Library:getSkipDirs()
     return dirs
 end
 
+function Library:skipFolderList()
+    local custom = self.settings.skip_folders
+    if type(custom) == "table" and #custom > 0 then return custom end
+    return Core.defaultSkipDirs()
+end
+
+function Library:skipFolderStamp()
+    return table.concat(self:skipFolderList(), "\0"):lower()
+end
+
+--- Edit the folder-name skip list. An empty box puts the defaults back.
+function Library:showSkipFoldersDialog()
+    local InputDialog = require("ui/widget/inputdialog")
+    local dialog
+    local function save()
+        local text = dialog:getInputText() or ""
+        local list = Core.parseSkipFolders(text)
+        self.settings.skip_folders = #list > 0 and list or nil
+        self:saveSettings()
+        shared.index = nil
+        UIManager:close(dialog)
+    end
+    dialog = InputDialog:new{
+        title = _("Folders to skip"),
+        description = _("Comma-separated names. The library does not open these folders. Leave empty to restore the default list."),
+        input = Core.skipFolderText(self:skipFolderList()),
+        buttons = { {
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Save"), is_enter_default = true, callback = save },
+        } },
+    }
+    UIManager:show(dialog)
+end
+
 function Library:getIndex()
     local root = self:getRoot()
+    local show_plain = self.settings.show_plain_text == true
+    local merge_copies = self.settings.merge_copies ~= false
+    local skip_stamp = self:skipFolderStamp()
     if shared.index and shared.index.opts.root == root
-            and shared.index.opts.show_hidden == self.settings.show_hidden then
+            and shared.index.opts.show_hidden == self.settings.show_hidden
+            and shared.index.opts.show_plain == show_plain
+            and shared.index.opts.merge_copies == merge_copies
+            and shared.index.opts.skip_stamp == skip_stamp then
         return shared.index
     end
     local DocSettings = require("docsettings")
@@ -518,11 +561,16 @@ function Library:getIndex()
     shared.index = Index.new{
         root = root,
         show_hidden = self.settings.show_hidden,
+        show_plain = show_plain,
+        merge_copies = merge_copies,
+        skip_stamp = skip_stamp,
         max_depth = self.settings.max_depth,
         cache_file = DataStorage:getSettingsDir() .. "/library_index.lua",
         fs = lfs,
-        is_book = Core.makeIsBook(function(path) return DocumentRegistry:hasProvider(path) end),
+        is_book = Core.makeIsBook(function(path) return DocumentRegistry:hasProvider(path) end,
+            { plain = show_plain }),
         skip_dirs = self:getSkipDirs(),
+        skip_dir_names = self:skipFolderList(),
         lower = util.stringLower,
         bim = self:getBIM(),
         docsettings = DocSettings,
@@ -743,8 +791,8 @@ function Library:onLibraryResume()
         UIManager:show(InfoMessage:new{ text = _("No book in progress."), timeout = 2 })
         return true
     end
-    if self.ui.document and self.ui.document.file == book.path then return true end
-    self:openBook(book.path, shared.view)
+    if self.ui.document and self.ui.document.file == Core.openPath(book) then return true end
+    self:openBook(Core.openPath(book), shared.view)
     return true
 end
 
@@ -994,7 +1042,7 @@ end
 -- Book information and Open. The details card keeps it on More.
 function Library:showBookDialog(book, view)
     local BookList = require("ui/widget/booklist")
-    local file = book.path
+    local file = Core.openPath(book)
     local dialog
     local function close() self:closeOverLibrary(dialog, view) end
     local function after_status_change()
@@ -1190,7 +1238,7 @@ end
 --- Write status the way the file browser's status buttons do, then refresh.
 function Library:setReadingStatus(book, status, view)
     if not book or type(book.path) ~= "string" then return end
-    local file = book.path
+    local file = Core.openPath(book)
     local BookList = require("ui/widget/booklist")
     local handle = file
     local summary = { status = status }
@@ -1237,9 +1285,9 @@ function Library:showBookDetails(book, view, opts)
     if not book or type(book.path) ~= "string" then return end
     opts = opts or {}
     local already_open = opts.already_open and true or false
-    if not already_open and not view and self.ui and self.ui.document
-            and self.ui.document.file == book.path then
-        already_open = true
+    if not already_open and not view and self.ui and self.ui.document then
+        local open = self.ui.document.file
+        if open == book.path or open == Core.openPath(book) then already_open = true end
     end
     local time_left = Core.knownTimeLeft(book)
     if shared.index and shared.index.knownTimeLeft then
@@ -1256,6 +1304,7 @@ function Library:showBookDetails(book, view, opts)
         time_left = time_left,
         description = self:loadDescription(book),
         facts = Core.bookFacts(book),
+        copies = Core.copyChoices(book),
     }
     -- A name whose shelf would hold only this book is plain text, not a link.
     local all = (view and view.all_books) or (shared.index and shared.index.books)
@@ -1284,7 +1333,12 @@ function Library:showBookDetails(book, view, opts)
                 return
             end
             UIManager:close(card)
-            UIManager:nextTick(function() self:openBook(book.path, view) end)
+            UIManager:nextTick(function() self:openBook(Core.openPath(book), view) end)
+        end,
+        on_open_copy = function(path)
+            if type(path) ~= "string" or path == "" then return end
+            UIManager:close(card)
+            UIManager:nextTick(function() self:openBook(path, view) end)
         end,
         on_status = function()
             local action = Core.detailsStatusAction(book)
@@ -2181,6 +2235,32 @@ function Library:addToMainMenu(menu_items)
                     self:saveSettings()
                     shared.index = nil
                 end,
+            },
+            {
+                text = _("Merge copies of the same book"),
+                help_text = _("One tile when the same book is in several formats or folders (the same title and authors, or the same Calibre id). The copy you have started is preferred, then the one you read last, then EPUB, AZW3, MOBI, PDF. The details card lists the others so you can open one. A second path to the same file is always a single book."),
+                checked_func = function() return self.settings.merge_copies ~= false end,
+                callback = function()
+                    self.settings.merge_copies = self.settings.merge_copies == false
+                    self:saveSettings()
+                    shared.index = nil
+                end,
+            },
+            {
+                text = _("Show plain text and web files"),
+                help_text = _("Also list TXT, HTML, Markdown and JSON. Off by default, so notes, readme files and exported highlights stay out of the library. EPUB, PDF, MOBI, AZW, AZW3, KFX, FB2, DjVu, CBZ, CBR, CB7, DOCX, RTF and CHM are always listed. Exported highlight files stay hidden either way."),
+                checked_func = function() return self.settings.show_plain_text == true end,
+                callback = function()
+                    self.settings.show_plain_text = not self.settings.show_plain_text
+                    self:saveSettings()
+                    shared.index = nil
+                end,
+            },
+            {
+                text = _("Folders to skip"),
+                help_text = _("Folder names the library never opens, separated by commas. The default skips KOReader's own folders, exported highlights, and common code and system folders (node_modules, .git, build, venv, __pycache__, system, Android, and others). Hidden folders stay hidden unless Include hidden folders is on. Clear the box and save to restore the default list."),
+                keep_menu_open = true,
+                callback = function() self:showSkipFoldersDialog() end,
                 separator = true,
             },
             self:barelyMenu(),

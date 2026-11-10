@@ -626,6 +626,40 @@ function Details:buildHeader(max_w)
         table.insert(col, vgap(Size.padding.default))
         table.insert(col, facts)
     end
+    local copies = self:buildCopies(max_w)
+    if copies then
+        table.insert(col, vgap(Size.padding.default))
+        table.insert(col, copies)
+    end
+    return col
+end
+
+--- Other formats and folders of this book. Each row opens that file.
+function Details:buildCopies(max_w)
+    local copies = self.info and self.info.copies
+    if type(copies) ~= "table" or #copies == 0 then return nil end
+    local col = VerticalGroup:new{ align = "left" }
+    table.insert(col, TextWidget:new{
+        text = _("Other copies"),
+        face = face("cfont", 15),
+        fgcolor = BLACK,
+        max_width = math.max(1, max_w),
+    })
+    for _, c in ipairs(copies) do
+        if type(c) == "table" and type(c.path) == "string" and c.path ~= "" then
+            local path = c.path
+            table.insert(col, vgap(Size.padding.small))
+            table.insert(col, Link:new{
+                text = type(c.label) == "string" and c.label ~= "" and c.label or path,
+                size = 15,
+                max_width = math.max(1, max_w),
+                on_tap = function()
+                    if self.on_open_copy then self.on_open_copy(path) end
+                end,
+            })
+        end
+    end
+    if #col <= 1 then return nil end
     return col
 end
 

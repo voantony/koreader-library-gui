@@ -83,34 +83,66 @@ end
 -- Book formats the Library lists. KOReader's DocumentRegistry also accepts
 -- scripts and config files (crengine registers .sh, .lua, .py, .js, .json,
 -- .ini, .log ... as plain text), so "KOReader can open it" is not enough.
+-- TXT, HTML, Markdown and JSON are plain text and web files: off unless
+-- "Show plain text and web files" is on (opts.plain).
 Core.BOOK_EXTENSIONS = {
-    epub = true, pdf = true, mobi = true, azw3 = true, azw = true, prc = true,
+    epub = true, pdf = true, mobi = true, azw3 = true, azw = true, prc = true, kfx = true,
     fb2 = true, cbz = true, cbr = true, cb7 = true, djvu = true, djv = true,
-    xps = true, chm = true, docx = true, rtf = true, odt = true, txt = true,
+    xps = true, chm = true, docx = true, rtf = true, odt = true,
+}
+
+Core.PLAIN_EXTENSIONS = {
+    txt = true, html = true, htm = true, md = true, markdown = true, json = true,
 }
 
 -- Never books, even if a later edit adds them above by mistake.
 Core.NON_BOOK_EXTENSIONS = {
-    sh = true, lua = true, py = true, js = true, json = true, ini = true, log = true,
+    sh = true, lua = true, py = true, js = true, ini = true, log = true,
 }
+
+--- A plain-text export of highlights or annotations, not a book.
+-- Only TXT / HTML / Markdown / JSON. An EPUB whose title contains the word
+-- is still a book.
+function Core.isExportedNote(name)
+    if type(name) ~= "string" then return false end
+    local _, base = Core.splitPath(name)
+    local ext = Core.extension(base)
+    if not Core.PLAIN_EXTENSIONS[ext] then return false end
+    local stem = Core.stem(base):lower():gsub("_", " ")
+    if stem == "my clippings" or stem == "clippings" or stem == "annotations"
+            or stem == "annotation" or stem == "highlights" or stem == "highlight" then
+        return true
+    end
+    if stem:find("annotations", 1, true) or stem:find("annotation", 1, true)
+            or stem:find("highlights", 1, true) or stem:find("clippings", 1, true) then
+        return true
+    end
+    return false
+end
 
 --- True when the file name has a book format extension (case-insensitive).
 -- `foo.fb2.zip` counts; a bare `.zip` does not.
-function Core.isBookName(name)
+-- `opts.plain` also accepts TXT, HTML, Markdown and JSON, except exported notes.
+function Core.isBookName(name, opts)
     if type(name) ~= "string" then return false end
     local _, base = Core.splitPath(name)
     local l = base:lower()
     if l:match("%.fb2%.zip$") then return true end
     local ext = Core.extension(l)
     if Core.NON_BOOK_EXTENSIONS[ext] then return false end
+    if Core.PLAIN_EXTENSIONS[ext] then
+        if not (opts and opts.plain == true) then return false end
+        return not Core.isExportedNote(name)
+    end
     return Core.BOOK_EXTENSIONS[ext] == true
 end
 
 --- Build an `is_book(path)` predicate: a book format AND openable by KOReader.
 -- @tparam[opt] function has_provider `function(path) -> bool`
-function Core.makeIsBook(has_provider)
+-- @tparam[opt] table opts `{ plain = true }` to include TXT, HTML, Markdown and JSON
+function Core.makeIsBook(has_provider, opts)
     return function(path)
-        if not Core.isBookName(path) then return false end
+        if not Core.isBookName(path, opts) then return false end
         if has_provider then
             local ok, res = pcall(has_provider, path)
             return ok and res and true or false
@@ -119,8 +151,58 @@ function Core.makeIsBook(has_provider)
     end
 end
 
---- Folder names never scanned: KOReader's own install folder.
+--- Folder names the library does not walk, unless the user replaces the list.
+-- Hidden dot-folders are already left out unless "Include hidden folders" is on.
+-- `.sdr` sidecar directories are always skipped, on top of this list.
+function Core.defaultSkipDirs()
+    return {
+        "koreader", "node_modules", ".git", ".svn", ".hg",
+        "build", "dist", "target", "venv", ".venv", "__pycache__",
+        "system", "android",
+        "highlights", "annotations", "clippings", "clipboard",
+        ".cache", "__macosx", ".gradle", ".idea", ".vscode",
+        "coverage", ".tox", "site-packages", "lost+found",
+        ".active-content-data",
+    }
+end
+
+-- Kept for callers that still read the old name. The scan uses defaultSkipDirs.
 Core.SKIP_DIR_NAMES = { koreader = true }
+
+--- Folder names from a comma-separated settings string. Empty parts are dropped.
+-- An empty string means "use the defaults" (the caller stores nil).
+function Core.parseSkipFolders(text)
+    local list = {}
+    if type(text) ~= "string" then return list end
+    for part in text:gmatch("[^,]+") do
+        part = trim(part)
+        if part ~= "" and part ~= "." and part ~= ".." and not part:find("/", 1, true) then
+            list[#list + 1] = part
+        end
+    end
+    return list
+end
+
+function Core.skipFolderText(list)
+    if type(list) ~= "table" then return "" end
+    return table.concat(list, ", ")
+end
+
+function Core.skipDirSet(names)
+    local set = {}
+    for _, n in ipairs(names or Core.defaultSkipDirs()) do
+        if type(n) == "string" and n ~= "" then set[n:lower()] = true end
+    end
+    return set
+end
+
+--- True for sidecar dirs and for names on the skip list (case-insensitive).
+function Core.isSkippedDirName(name, set)
+    if type(name) ~= "string" or name == "" then return false end
+    if name:lower():match("%.sdr$") then return true end
+    set = set or Core.skipDirSet()
+    return set[name:lower()] == true
+end
 
 ----------------------------------------------------------------------------
 -- Scanning
@@ -130,11 +212,16 @@ Core.SKIP_DIR_NAMES = { koreader = true }
 -- @tparam string root folder to scan
 -- @tparam table fs `{ dir = function(path) -> iterator over names,
 --   attributes = function(path) -> { mode=, size=, modification= } | nil }`
---   (shape-compatible with LuaFileSystem)
+--   (shape-compatible with LuaFileSystem). `symlinkattributes`, when present,
+--   is used to notice a symlink without following it.
 -- @tparam function is_book `function(path) -> bool`
 -- @tparam[opt] table opts `{ max_depth = 10, show_hidden = false, limit = 20000,
---   skip_dirs = { "/abs/path", ... } }`. Folders named `koreader` (the
---   install folder) and every path in `skip_dirs` are never walked.
+--   skip_dirs = { "/abs/path", ... }, skip_dir_names = { "node_modules", ... } }`.
+--   Hidden dot-folders are skipped unless `show_hidden`. Names in
+--   `skip_dir_names` (default: KOReader, dev and system folders) and every
+--   `*.sdr` directory are never walked, and neither is a path in `skip_dirs`.
+--   The same file reached twice (symlink, `/mnt/us` and `/mnt/base-us`, or a
+--   path that differs only by case on those volumes) is one record.
 -- @treturn table list of book records
 -- @treturn bool true when the scan stopped early because of `limit`
 function Core.scan(root, fs, is_book, opts)
@@ -146,14 +233,44 @@ function Core.scan(root, fs, is_book, opts)
     local skip = {}
     for _, d in ipairs(opts.skip_dirs or {}) do
         if type(d) == "string" and d ~= "" then
-            skip[(d:gsub("/+$", ""))] = true
+            skip[Core.canonicalPath(d)] = true
         end
     end
+    local skip_names = Core.skipDirSet(opts.skip_dir_names)
     local books = {}
     local truncated = false
+    local seen_dir = {}
+
+    local function link_info(path, attr)
+        local symlink = attr and (attr.symlink == true or attr.mode == "link")
+        local target = attr and type(attr.target) == "string" and attr.target or nil
+        if fs.symlinkattributes then
+            local ok, s = pcall(fs.symlinkattributes, path)
+            if ok and type(s) == "table" then
+                if s.mode == "link" then symlink = true end
+                if type(s.target) == "string" and s.target ~= "" then target = s.target end
+            end
+        end
+        return symlink, target
+    end
+
+    local function mark_dir(path, attr)
+        local keys = { Core.fileKey(path) }
+        if attr and attr.dev ~= nil and attr.ino ~= nil then
+            keys[#keys + 1] = "i:" .. tostring(attr.dev) .. ":" .. tostring(attr.ino)
+        end
+        for _, k in ipairs(keys) do
+            if seen_dir[k] then return true end
+        end
+        for _, k in ipairs(keys) do seen_dir[k] = true end
+        return false
+    end
 
     local function walk(dir, depth)
         if truncated then return end
+        local dir_attr = fs.attributes(dir)
+        if dir ~= root and mark_dir(dir, dir_attr) then return end
+        if dir == root then mark_dir(dir, dir_attr) end
         local ok, iter, state, init = pcall(fs.dir, dir)
         if not ok or not iter then return end
         local names = {}
@@ -166,30 +283,41 @@ function Core.scan(root, fs, is_book, opts)
         for _, name in ipairs(names) do
             if truncated then return end
             local hidden = name:sub(1, 1) == "."
-            if show_hidden or not hidden then
-                local path = dir .. "/" .. name
+            local path = dir .. "/" .. name
+            if Core.isSkippedDirName(name, skip_names) or skip[Core.canonicalPath(path)] then
+                -- named skips and absolute skips, including when hidden folders are shown
+            elseif show_hidden or not hidden then
                 local attr = fs.attributes(path)
                 if attr then
-                    if attr.mode == "directory" then
-                        -- *.sdr folders hold KOReader's per-book settings, never books
-                        if depth < max_depth and not name:match("%.sdr$")
-                                and not Core.SKIP_DIR_NAMES[name:lower()]
-                                and not skip[path] then
-                            walk(path, depth + 1)
+                    local followed = attr
+                    if attr.mode == "link" and type(attr.target) == "string" and attr.target ~= "" then
+                        -- attributes() normally follows links; a fake may report the link itself
+                        local ok_t, target_attr = pcall(fs.attributes, attr.target)
+                        if ok_t and type(target_attr) == "table" and target_attr.mode ~= "link" then
+                            followed = target_attr
                         end
-                    elseif attr.mode == "file" and is_book(path) then
+                    end
+                    local mode = followed and followed.mode or attr.mode
+                    if mode == "directory" then
+                        if depth < max_depth then walk(path, depth + 1) end
+                    elseif mode == "file" and is_book(path) then
                         if #books >= limit then
                             truncated = true
                             return
                         end
+                        local symlink, target = link_info(path, attr)
                         table.insert(books, {
                             path = path,
                             name = name,
                             dir = dir,
                             folder = Core.relativeDir(root, dir),
                             ext = Core.extension(name),
-                            size = attr.size or 0,
-                            modification = attr.modification or 0,
+                            size = (followed and followed.size) or attr.size or 0,
+                            modification = (followed and followed.modification) or attr.modification or 0,
+                            dev = (followed and followed.dev) or attr.dev,
+                            ino = (followed and followed.ino) or attr.ino,
+                            target = target,
+                            symlink = symlink or nil,
                         })
                     end
                 end
@@ -198,7 +326,386 @@ function Core.scan(root, fs, is_book, opts)
     end
 
     walk(root, 0)
-    return books, truncated
+    return Core.collapseSameFile(books), truncated
+end
+
+----------------------------------------------------------------------------
+-- One file, one book (symlinks, mount aliases, case, trailing slashes)
+----------------------------------------------------------------------------
+
+-- Volumes that are case-insensitive. Two paths that differ only by case
+-- under these prefixes are the same file (Kindle FAT, Kobo, PocketBook).
+local CASE_INSENSITIVE_ROOTS = { "/mnt/us", "/mnt/onboard", "/mnt/ext1" }
+
+--- Collapse slashes, `.` and `..`, and a trailing slash. `/mnt/base-us` is
+-- the same volume as `/mnt/us` on a Kindle.
+function Core.canonicalPath(path)
+    if type(path) ~= "string" or path == "" then return "" end
+    path = path:gsub("\\", "/"):gsub("/+", "/")
+    local abs = path:sub(1, 1) == "/"
+    local parts = {}
+    for part in path:gmatch("[^/]+") do
+        if part == ".." then
+            if #parts > 0 and parts[#parts] ~= ".." then
+                table.remove(parts)
+            elseif not abs then
+                parts[#parts + 1] = ".."
+            end
+        elseif part ~= "." then
+            parts[#parts + 1] = part
+        end
+    end
+    local out = (abs and "/" or "") .. table.concat(parts, "/")
+    if out == "" then out = abs and "/" or "." end
+    if out == "/mnt/base-us" then return "/mnt/us" end
+    if out:sub(1, 13) == "/mnt/base-us/" then return "/mnt/us" .. out:sub(13) end
+    return out
+end
+
+local function underPrefix(path, prefix)
+    return path == prefix or path:sub(1, #prefix + 1) == prefix .. "/"
+end
+
+--- Identity of a path: canonical form, lower-cased on case-insensitive volumes.
+function Core.fileKey(path)
+    local p = Core.canonicalPath(path)
+    for _, pre in ipairs(CASE_INSENSITIVE_ROOTS) do
+        if underPrefix(p, pre) then return p:lower() end
+    end
+    return p
+end
+
+--- Paths that name the same Kindle file. The scanned path is first.
+function Core.pathAliases(path)
+    local out, seen = {}, {}
+    local function add(p)
+        if type(p) ~= "string" or p == "" or seen[p] then return end
+        seen[p] = true
+        out[#out + 1] = p
+    end
+    add(path)
+    local c = Core.canonicalPath(path)
+    add(c)
+    if underPrefix(c, "/mnt/us") then
+        add("/mnt/base-us" .. c:sub(8)) -- "/mnt/us" is 7 characters; sub(8) keeps the slash
+    end
+    return out
+end
+
+--- Prefer the path KOReader should open: not a symlink, and `/mnt/us`
+-- rather than `/mnt/base-us`.
+function Core.pathBeats(a, b)
+    local as = a and a.symlink and true or false
+    local bs = b and b.symlink and true or false
+    if as ~= bs then return not as end
+    local function rank(p)
+        p = p or ""
+        if underPrefix(p, "/mnt/us") then return 0 end
+        if p == "/mnt/base-us" or p:sub(1, 13) == "/mnt/base-us/" then return 1 end
+        return 2
+    end
+    local ar, br = rank(a and a.path), rank(b and b.path)
+    if ar ~= br then return ar < br end
+    return (a and a.path or "") < (b and b.path or "")
+end
+
+--- Collapse records that are the same file. The kept record's `alt_paths`
+-- lists the other paths. Order of first occurrence is kept.
+function Core.collapseSameFile(books)
+    if type(books) ~= "table" then return {} end
+    local parent = {}
+    for i = 1, #books do parent[i] = i end
+    local function find(i)
+        local p = i
+        while parent[p] ~= p do p = parent[p] end
+        local x = i
+        while parent[x] ~= p do
+            local n = parent[x]
+            parent[x] = p
+            x = n
+        end
+        return p
+    end
+    local function unite(a, b)
+        a, b = find(a), find(b)
+        if a ~= b then parent[b] = a end
+    end
+    local by_key, by_ino = {}, {}
+    for i, b in ipairs(books) do
+        local k = Core.fileKey(b.path)
+        if by_key[k] then unite(i, by_key[k]) else by_key[k] = i end
+        if type(b.target) == "string" and b.target ~= "" then
+            local tk = Core.fileKey(b.target)
+            if by_key[tk] then unite(i, by_key[tk]) else by_key[tk] = i end
+        end
+        if b.dev ~= nil and b.ino ~= nil then
+            local ik = tostring(b.dev) .. ":" .. tostring(b.ino)
+            if by_ino[ik] then unite(i, by_ino[ik]) else by_ino[ik] = i end
+        end
+    end
+    local groups, order = {}, {}
+    for i = 1, #books do
+        local r = find(i)
+        if not groups[r] then
+            groups[r] = {}
+            order[#order + 1] = r
+        end
+        groups[r][#groups[r] + 1] = books[i]
+    end
+    local out = {}
+    for _, r in ipairs(order) do
+        local g = groups[r]
+        local primary = g[1]
+        for j = 2, #g do
+            if Core.pathBeats(g[j], primary) then primary = g[j] end
+        end
+        local alts, seen = {}, {}
+        local function add_alt(p)
+            if type(p) == "string" and p ~= "" and p ~= primary.path and not seen[p] then
+                seen[p] = true
+                alts[#alts + 1] = p
+            end
+        end
+        for _, b in ipairs(g) do
+            add_alt(b.path)
+            if type(b.alt_paths) == "table" then
+                for _, p in ipairs(b.alt_paths) do add_alt(p) end
+            end
+        end
+        primary.alt_paths = #alts > 0 and alts or nil
+        out[#out + 1] = primary
+    end
+    return out
+end
+
+--- The path to open. A reading sidecar or history entry stored under another
+-- alias of this file (`open_path`) wins, so KOReader finds the saved page.
+function Core.openPath(book)
+    if type(book) ~= "table" then return nil end
+    if type(book.open_path) == "string" and book.open_path ~= "" then return book.open_path end
+    return book.path
+end
+
+----------------------------------------------------------------------------
+-- Copies of one book (several formats or folders)
+----------------------------------------------------------------------------
+
+-- Lower rank is preferred when nothing else distinguishes two copies.
+Core.FORMAT_RANK = {
+    epub = 1, azw3 = 2, azw = 3, mobi = 4, prc = 4, kfx = 5, pdf = 6,
+    fb2 = 7, djvu = 8, djv = 8, docx = 9, rtf = 10, odt = 10, chm = 11,
+    cbz = 20, cbr = 21, cb7 = 22, xps = 23,
+}
+
+local FORMAT_WORDS = {
+    pdf = true, epub = true, mobi = true, azw = true, azw3 = true, kfx = true,
+    fb2 = true, djvu = true, docx = true, rtf = true, chm = true,
+    cbz = true, cbr = true, cb7 = true,
+}
+
+--- Title or author text for grouping: lower case, accents folded, punctuation
+-- and underscores turned into spaces, and a trailing format word dropped
+-- ("Title (pdf)" matches "Title").
+function Core.identityText(s)
+    if type(s) ~= "string" then return "" end
+    local n = Core.normalizeText(s)
+    if n:find("_", 1, true) then n = n:gsub("_", " ") end
+    n = trim((n:gsub("%s+", " ")))
+    local word = n:match("%s(%S+)$")
+    if word and FORMAT_WORDS[word] then n = trim(n:sub(1, -(#word + 2))) end
+    return n
+end
+
+function Core.authorKey(book)
+    local names = Core.authorNames(book)
+    local parts = {}
+    for _, n in ipairs(names) do
+        local id = Core.identityText(n)
+        if id ~= "" then parts[#parts + 1] = id end
+    end
+    table.sort(parts)
+    return table.concat(parts, "|")
+end
+
+--- "title\\0authors", or nil when there is no title. Authors may be empty
+-- (two files with the same title and no author still match).
+function Core.titleAuthorKey(book)
+    if type(book) ~= "table" then return nil end
+    local title = Core.identityText(book.title or book.name)
+    if title == "" then return nil end
+    return title .. "\0" .. Core.authorKey(book)
+end
+
+function Core.normalizeIsbn(s)
+    if type(s) ~= "string" then return nil end
+    local n = s:upper():gsub("[%s%-]", "")
+    if not n:match("^[%dX]+$") or #n < 10 then return nil end
+    return n
+end
+
+--- Started, finished, or on hold, or a percent past the cover.
+function Core.hasReadingProgress(book)
+    if type(book) ~= "table" then return false end
+    local s = book.status
+    if s == "complete" or s == "reading" or s == "abandoned" then return true end
+    local p = tonumber(book.percent)
+    return p ~= nil and p > 0
+end
+
+--- True when `a` should be the tile instead of `b`: reading progress, then
+-- most recently read, then EPUB, AZW3, MOBI, PDF.
+function Core.copyBeats(a, b)
+    if type(a) ~= "table" then return false end
+    if type(b) ~= "table" then return true end
+    local ap, bp = Core.hasReadingProgress(a), Core.hasReadingProgress(b)
+    if ap ~= bp then return ap end
+    local at, bt = tonumber(a.last_opened) or 0, tonumber(b.last_opened) or 0
+    if at ~= bt then return at > bt end
+    local ar = Core.FORMAT_RANK[a.ext] or 100
+    local br = Core.FORMAT_RANK[b.ext] or 100
+    if ar ~= br then return ar < br end
+    return (a.path or "") < (b.path or "")
+end
+
+function Core.preferCopy(list)
+    local best = list and list[1] or nil
+    if not best then return nil end
+    for i = 2, #list do
+        if Core.copyBeats(list[i], best) then best = list[i] end
+    end
+    return best
+end
+
+local function isbnFromEntry(e)
+    local id = e.identifiers or e.isbn
+    if type(id) == "string" then return Core.normalizeIsbn(id:match("^[Ii][Ss][Bb][Nn]:(.+)$") or id) end
+    if type(id) ~= "table" then return nil end
+    if type(id.isbn) == "string" then return Core.normalizeIsbn(id.isbn) end
+    if type(id.ISBN) == "string" then return Core.normalizeIsbn(id.ISBN) end
+    for k, v in pairs(id) do
+        if type(k) == "string" and k:lower() == "isbn" and type(v) == "string" then
+            return Core.normalizeIsbn(v)
+        end
+        if type(v) == "string" then
+            local n = v:match("^[Ii][Ss][Bb][Nn]:(.+)$")
+            if n then return Core.normalizeIsbn(n) end
+        elseif type(v) == "table" then
+            local kind = type(v.type) == "string" and v.type or v[1]
+            local val = type(v.value) == "string" and v.value or v[2]
+            if type(kind) == "string" and kind:lower() == "isbn" then
+                return Core.normalizeIsbn(val)
+            end
+        end
+    end
+    return nil
+end
+
+--- One tile per work. Same Calibre UUID, same ISBN, or the same normalized
+-- title and authors. The preferred copy stays the record; `copies` lists the
+-- others, in the same preference order. The input list is not required to
+-- stay unchanged (records are reused, not copied).
+function Core.mergeCopies(books)
+    if type(books) ~= "table" then return {} end
+    local parent = {}
+    for i = 1, #books do parent[i] = i end
+    local function find(i)
+        local p = i
+        while parent[p] ~= p do p = parent[p] end
+        local x = i
+        while parent[x] ~= p do
+            local n = parent[x]
+            parent[x] = p
+            x = n
+        end
+        return p
+    end
+    local function unite(a, b)
+        a, b = find(a), find(b)
+        if a ~= b then parent[b] = a end
+    end
+    local by_uuid, by_isbn, by_title = {}, {}, {}
+    for i, b in ipairs(books) do
+        b.copies = nil
+        b.merged_into = nil
+        if type(b.uuid) == "string" and b.uuid ~= "" then
+            local k = "u:" .. b.uuid:lower()
+            if by_uuid[k] then unite(i, by_uuid[k]) else by_uuid[k] = i end
+        end
+        if type(b.isbn) == "string" and b.isbn ~= "" then
+            local k = "i:" .. b.isbn
+            if by_isbn[k] then unite(i, by_isbn[k]) else by_isbn[k] = i end
+        end
+        local tk = Core.titleAuthorKey(b)
+        if tk then
+            if by_title[tk] then unite(i, by_title[tk]) else by_title[tk] = i end
+        end
+    end
+    local groups, order = {}, {}
+    for i = 1, #books do
+        local r = find(i)
+        if not groups[r] then
+            groups[r] = {}
+            order[#order + 1] = r
+        end
+        groups[r][#groups[r] + 1] = books[i]
+    end
+    local out = {}
+    for _, r in ipairs(order) do
+        local g = groups[r]
+        local best = Core.preferCopy(g)
+        local rest = {}
+        for _, b in ipairs(g) do
+            if b ~= best then rest[#rest + 1] = b end
+        end
+        table.sort(rest, function(a, b) return Core.copyBeats(a, b) end)
+        for _, b in ipairs(rest) do b.merged_into = best end
+        best.copies = #rest > 0 and rest or nil
+        best.merged_into = nil
+        out[#out + 1] = best
+    end
+    return out
+end
+
+--- "EPUB · 42% · Classics" for a row on the details card.
+function Core.copyLabel(book)
+    if type(book) ~= "table" then return "" end
+    local ext = (book.ext or ""):upper()
+    if ext == "" then ext = "FILE" end
+    local bits = { ext }
+    if Core.hasReadingProgress(book) then
+        bits[#bits + 1] = tostring(Core.progressPercent(book)) .. "%"
+    end
+    local folder = book.folder
+    if type(folder) ~= "string" or folder == "" then
+        folder = select(1, Core.splitPath(book.path or ""))
+    end
+    if type(folder) == "string" and folder ~= "" then bits[#bits + 1] = folder end
+    return table.concat(bits, " \u{00B7} ")
+end
+
+--- Other copies to show on the details card (not the copy the tile opens).
+function Core.copyChoices(book)
+    local list = {}
+    if type(book) ~= "table" or type(book.copies) ~= "table" then return list end
+    for _, c in ipairs(book.copies) do
+        if type(c) == "table" and type(c.path) == "string" and c.path ~= "" then
+            list[#list + 1] = { path = c.path, label = Core.copyLabel(c) }
+        end
+    end
+    return list
+end
+
+--- KOReader's summary.status, with a few spellings that mean the same thing.
+-- "complete" (and "finished" / "read") is a finished book.
+function Core.normalizeDocStatus(status)
+    if type(status) ~= "string" then return nil end
+    status = trim(status):lower()
+    if status == "complete" or status == "finished" or status == "read" then return "complete" end
+    if status == "abandoned" or status == "onhold" or status == "on-hold" or status == "on_hold" then
+        return "abandoned"
+    end
+    if status == "reading" or status == "new" then return status end
+    return nil
 end
 
 ----------------------------------------------------------------------------
@@ -224,6 +731,12 @@ function Core.applyProps(book, props)
     end
     book.keywords = type(props.keywords) == "string" and props.keywords or nil
     book.language = type(props.language) == "string" and props.language or nil
+    if type(props.uuid) == "string" and trim(props.uuid) ~= "" then
+        book.uuid = trim(props.uuid)
+    else
+        book.uuid = nil
+    end
+    book.isbn = Core.normalizeIsbn(props.isbn)
     return book
 end
 
@@ -938,12 +1451,19 @@ end
 function Core.buildSearchKey(book, lower)
     lower = lower or string.lower
     local authors = table.concat(book.authors or {}, " ")
-    book.search_key = lower(table.concat({
+    local parts = {
         book.title or "",
         authors,
         book.series or "",
         book.name or "",
-    }, "\n"))
+    }
+    if type(book.copies) == "table" then
+        for _, c in ipairs(book.copies) do
+            parts[#parts + 1] = c.name or ""
+            parts[#parts + 1] = c.folder or ""
+        end
+    end
+    book.search_key = lower(table.concat(parts, "\n"))
     -- for "Typo-tolerant search" (see Core.searchFuzzy)
     local norm = Core.normalizeText(book.search_key)
     local tokens, n = {}, 0
@@ -1509,12 +2029,15 @@ function Core.calibreIndex(entries, base_dir)
                 end
             end
             local path = lpath:sub(1, 1) == "/" and lpath or (base_dir .. "/" .. lpath)
+            local uuid = plain(e.uuid)
             map[path] = {
                 title = plain(e.title),
                 authors = #authors > 0 and table.concat(authors, "\n") or nil,
                 series = plain(e.series),
                 series_index = tonumber(plain(e.series_index)),
                 keywords = type(e.tags) == "table" and table.concat(e.tags, "\n") or nil,
+                uuid = type(uuid) == "string" and uuid or nil,
+                isbn = isbnFromEntry(e),
             }
         end
     end
@@ -1548,7 +2071,7 @@ Core.CACHE_VERSION = 3
 -- `opened`, `doc_status` and `time_left` ride along so a tile never has to
 -- open a sidecar or the statistics database again.
 Core.STATE_FIELDS = { "sc_mtime", "status", "percent", "pages", "m_start", "m_chap",
-    "opened", "doc_status", "time_left" }
+    "opened", "doc_status", "time_left", "open_path" }
 
 function Core.copyState(to, from)
     for _, k in ipairs(Core.STATE_FIELDS) do to[k] = from[k] end
@@ -1568,6 +2091,7 @@ function Core.reconcile(scanned, cache_entries, calibre_stamp)
                 and c.cal == calibre_stamp and c.src ~= "file" then
             f.title, f.authors, f.series, f.series_index = c.title, c.authors, c.series, c.series_index
             f.keywords, f.src, f.cal = c.keywords, c.src, c.cal
+            f.uuid, f.isbn = c.uuid, c.isbn
             -- (only books held in memory carry these; the disk cache does not)
             f.search_key, f.search_norm, f.search_tokens = c.search_key, c.search_norm, c.search_tokens
             Core.copyState(f, c)
@@ -1583,8 +2107,9 @@ end
 
 local CACHED_FIELDS = {
     "size", "modification", "title", "authors", "series", "series_index",
-    "keywords", "src", "cal", "sc_mtime", "status", "percent", "pages", "m_start", "m_chap",
-    "opened", "doc_status", "time_left",
+    "keywords", "src", "cal", "uuid", "isbn",
+    "sc_mtime", "status", "percent", "pages", "m_start", "m_chap",
+    "opened", "doc_status", "time_left", "open_path",
 }
 
 function Core.toCacheEntries(books)

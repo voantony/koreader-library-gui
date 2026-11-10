@@ -68,11 +68,23 @@ end
 
 describe("book formats", function()
     it("accepts real book formats, any case", function()
-        for _, n in ipairs({ "a.epub", "a.PDF", "a.mobi", "a.azw3", "a.azw", "a.prc", "a.fb2", "a.fb2.zip",
+        for _, n in ipairs({ "a.epub", "a.PDF", "a.mobi", "a.azw3", "a.azw", "a.prc", "a.kfx", "a.fb2", "a.fb2.zip",
                              "a.FB2.ZIP", "a.cbz", "a.cbr", "a.cb7", "a.djvu", "a.djv", "a.xps", "a.chm",
-                             "a.docx", "a.rtf", "a.odt", "a.txt", "/x/y/Moby Dick.Epub" }) do
+                             "a.docx", "a.rtf", "a.odt", "/x/y/Moby Dick.Epub" }) do
             eq(Core.isBookName(n), true, n)
         end
+    end)
+    it("leaves plain text and web files out unless they are asked for", function()
+        for _, n in ipairs({ "a.txt", "a.TXT", "a.html", "a.htm", "a.md", "a.markdown", "a.json", "notes/Story.txt" }) do
+            eq(Core.isBookName(n), false, n)
+            eq(Core.isBookName(n, { plain = true }), true, n)
+        end
+        -- exported highlights stay out even when plain text is on
+        eq(Core.isBookName("annotations.txt", { plain = true }), false)
+        eq(Core.isBookName("Title - highlights.html", { plain = true }), false)
+        eq(Core.isBookName("My Clippings.txt", { plain = true }), false)
+        -- a real book whose name mentions annotations is still a book
+        eq(Core.isBookName("Annotations of the Law.epub"), true)
     end)
     it("rejects scripts and config files", function()
         for _, n in ipairs({ "KOReader.sh", "/mnt/us/koreader/KOReader.sh", "UPDATE.SH", "reader.lua", "x.py",
@@ -103,14 +115,13 @@ describe("scan exclusions", function()
         same(names(books), {
             "Emma.epub", "documents/Comic.cbz", "documents/Dune.mobi", "documents/Map.djvu",
             "documents/Moby.pdf", "documents/Old.fb2.zip", "documents/Persuasion.AZW3",
-            "documents/Story.txt", "notes.txt",
         })
     end)
     it("only skips listed folders, and indexes books elsewhere", function()
         local books = Core.scan(ROOT, fs, is_book)
         local n = names(books)
-        eq(#n, 10)
-        eq(n[1], "Emma.epub"); eq(n[10], "notes.txt")
+        eq(#n, 8)
+        eq(n[1], "Emma.epub"); eq(n[8], "extensions/data/x.epub")
         local has_x = false
         for _, p in ipairs(n) do if p == "extensions/data/x.epub" then has_x = true end end
         eq(has_x, true)
@@ -147,7 +158,6 @@ describe("Index with the book allowlist", function()
         same(names(books), {
             "Emma.epub", "documents/Comic.cbz", "documents/Dune.mobi", "documents/Map.djvu",
             "documents/Moby.pdf", "documents/Old.fb2.zip", "documents/Persuasion.AZW3",
-            "documents/Story.txt", "notes.txt",
         })
         for _, b in ipairs(books) do
             if b.path:find("/koreader/", 1, true) then error("indexed " .. b.path) end
