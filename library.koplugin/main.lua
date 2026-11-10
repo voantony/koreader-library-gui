@@ -434,6 +434,7 @@ function Library:newView()
         view_mode = Core.viewMode(self.settings.view),
         filter = prefs and prefs.filter or "all",
         show_continue = self.settings.show_continue ~= false,
+        home_widgets = self.settings.home_widgets,
         top_row = Core.topRow(self.settings.top_row),
         sort = self.settings.sort,
         debounce_s = (self.settings.debounce_ms or 150) / 1000,
@@ -1092,6 +1093,98 @@ function Library:showPageJump(view)
     return dialog
 end
 
+--- Long-press menu for one widget slot (#1). "None" removes the slot.
+-- "Add a widget beside this one" is how the second container in the
+-- mockup is opened; it starts as Favorites, the other widget shown there.
+function Library:widgetBase(view)
+    local Widgets = require("librarywidgets")
+    if view.home_widgets ~= nil then return Widgets.normalize(view.home_widgets) end
+    if view.currentWidgetSlots then return view:currentWidgetSlots() end
+    return Widgets.defaultFromContinue(view.show_continue ~= false)
+end
+
+function Library:showWidgetMenu(view, slot)
+    local Widgets = require("librarywidgets")
+    local dialog
+    local function close() self:closeOverLibrary(dialog, view) end
+    local buttons = {}
+    for _i, choice in ipairs(Widgets.CHOICES) do
+        table.insert(buttons, {{
+            text = _(choice.label),
+            callback = function()
+                close()
+                if choice.pick then
+                    self:pickWidgetSource(view, slot, choice.kind)
+                else
+                    view:setHomeWidgets(Widgets.setSlot(self:widgetBase(view), slot, { kind = choice.kind }))
+                end
+            end,
+        }})
+    end
+    if #self:widgetBase(view) < Widgets.MAX then
+        table.insert(buttons, {{
+            text = _("Add a widget beside this one"),
+            callback = function()
+                close()
+                local base = self:widgetBase(view)
+                if #base == 0 then base = { { kind = "continue" } } end
+                view:setHomeWidgets(Widgets.setSlot(base, #base + 1, { kind = "favorites" }))
+            end,
+        }})
+    end
+    dialog = ButtonDialog:new{
+        title = _("Widgets"),
+        title_align = "center",
+        buttons = buttons,
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
+    UIManager:show(dialog)
+end
+
+function Library:pickWidgetSource(view, slot, kind)
+    local Widgets = require("librarywidgets")
+    local names
+    if kind == "series" then
+        names = Widgets.names(view.groupsFor and view:groupsFor("series") or {})
+    elseif kind == "collection" then
+        names = Widgets.names(self:getCollections())
+    else
+        names = Widgets.folderChoices(view.all_books)
+    end
+    if #names == 0 then
+        UIManager:show(InfoMessage:new{ text = _("Nothing here yet."), timeout = 2 })
+        return
+    end
+    local title = kind
+    for _i, choice in ipairs(Widgets.CHOICES) do
+        if choice.kind == kind then title = _(choice.label) end
+    end
+    local dialog
+    local function close() self:closeOverLibrary(dialog, view) end
+    local buttons = {}
+    local limit = math.min(#names, 24)
+    for i = 1, limit do
+        local name = names[i]
+        local shown = kind == "folder" and (name:match("([^/]+)$") or name) or name
+        table.insert(buttons, {{
+            text = shown,
+            callback = function()
+                close()
+                local spec = { kind = kind }
+                if kind == "folder" then spec.path = name else spec.name = name end
+                view:setHomeWidgets(Widgets.setSlot(self:widgetBase(view), slot, spec))
+            end,
+        }})
+    end
+    dialog = ButtonDialog:new{
+        title = title,
+        title_align = "center",
+        buttons = buttons,
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
+    UIManager:show(dialog)
+end
+
 --- The ☰ menu inside the Library view.
 function Library:showLibraryMenu(view)
     local dialog
@@ -1124,14 +1217,12 @@ function Library:showLibraryMenu(view)
             end,
         })
     end
+    -- Widget selection replaces "Show Continue Reading" (#1).
     table.insert(col_row, {
-        text = (self.settings.show_continue ~= false and "✓ " or "")
-            .. (Core.topRow(self.settings.top_row) == "recent" and _("Show Recently opened") or _("Show Continue reading")),
+        text = _("Widgets"),
         callback = function()
             close()
-            self.settings.show_continue = self.settings.show_continue == false
-            self:saveSettings()
-            view:setShowContinue(self.settings.show_continue)
+            self:showWidgetMenu(view, 1)
         end,
     })
     local barely_row = {}
@@ -1241,10 +1332,26 @@ function Library:showLibraryMenu(view)
             end,
         },
     })
+    -- The mockup draws this menu at the bottom-left hamburger and does not
+    -- draw the open panel. Pop it up from that button. A tap on the button
+    -- opens it; holds and edge swipes in the corner are left to the zones.
     dialog = ButtonDialog:new{
         title = title,
         title_align = "center",
         buttons = buttons,
+        anchor = function()
+            local d = view.footer_menu and view.footer_menu.dimen
+            if type(d) == "table" and tonumber(d.x) and tonumber(d.y)
+                and tonumber(d.w) and tonumber(d.h) then
+                return d
+            end
+            local screen = Device.screen
+            local ok_w, w = pcall(function() return screen:getWidth() end)
+            local ok_h, h = pcall(function() return screen:getHeight() end)
+            w = (ok_w and tonumber(w)) or 0
+            h = (ok_h and tonumber(h)) or 0
+            return { x = 0, y = h, w = math.max(1, math.floor(w / 8)), h = 1 }
+        end,
         tap_close_callback = function() self:flashLibraryOverlay(view) end,
     }
     UIManager:show(dialog)

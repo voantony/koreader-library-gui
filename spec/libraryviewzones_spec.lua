@@ -260,3 +260,61 @@ describe("Library view zone forwarding", function()
         eq(#live_calls, 0)
     end)
 end)
+
+describe("bottom-left menu and the corner", function()
+    local Core = require("librarycore")
+
+    it("is the outer eighth of the bottom edge", function()
+        eq(Core.inBottomLeftCorner(10, 1600, 1264, 1680), true)
+        eq(Core.inBottomLeftCorner(10, 500, 1264, 1680), false, "left edge, not the corner")
+        eq(Core.inBottomLeftCorner(400, 1600, 1264, 1680), false, "bottom edge, past the corner")
+        eq(Core.inBottomLeftCorner(157, 1470, 1264, 1680), true)
+        eq(Core.inBottomLeftCorner(158, 1470, 1264, 1680), false)
+    end)
+
+    it("offers a hold in the corner to the file browser before the menu button", function()
+        local View = loadView()
+        local v = swipeView(View, {})
+        local opened
+        v.plugin = { showLibraryMenu = function() opened = true end }
+        v.footer_menu = { dimen = { x = 8, y = 1600, w = 64, h = 64 } }
+        local ev = { ges = "hold", pos = { x = 20, y = 1620 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(live_calls[1], ev, "the corner hold was offered")
+        eq(#base_calls, 0, "the menu button did not take it")
+        eq(opened, nil)
+    end)
+
+    it("still opens the menu on a tap, and leaves an unclaimed hold to the button", function()
+        local View = loadView()
+        live_result = false
+        local v = swipeView(View, {})
+        local ev = { ges = "tap", pos = { x = 20, y = 1620 } }
+        base_handled = true
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(#live_calls, 0, "a tap is not handed to the corner first")
+        eq(#base_calls, 1, "the menu button sees the tap")
+        live_calls, base_calls = {}, {}
+        base_handled = false
+        local hold = { ges = "hold", pos = { x = 20, y = 1620 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { hold } }), false)
+        eq(#live_calls, 2, "offered first, then again once nothing kept it")
+        eq(#base_calls, 1, "the button can still see an unclaimed hold")
+    end)
+
+    it("does not treat a hold outside the corner as a corner gesture", function()
+        local View = loadView()
+        local v = swipeView(View, {})
+        eq(v:handleEvent({ handler = "onGesture", args = { { ges = "hold", pos = { x = 20, y = 400 } } } }), true)
+        eq(#base_calls, 1, "the view's own widgets ran first")
+        eq(live_calls[1].ges, "hold")
+    end)
+
+    it("a vertical swipe on the left edge still goes to LiveLight", function()
+        local View = loadView()
+        local v = swipeView(View, { continue_books = { {} } })
+        eq(v:onSwipe(nil, ges("south", 20, 1620)), true)
+        eq(#live_calls, 1, "brightness, even when the swipe starts on the menu")
+        eq(v._shelf_expanded, nil)
+    end)
+end)
