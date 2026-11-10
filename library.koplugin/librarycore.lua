@@ -2728,12 +2728,106 @@ end
 --- Width of the letter strip. Same 10 mm grab as a page button: the letters
 -- themselves stay a slim column inside it, and the grid gives up this width
 -- so covers never sit under the strip.
+--- Hit width of the A–Z strip. Wider than the 10 mm page button so the
+-- column is easy to hold; the painted letters stay a slim column inside it.
 function Core.scrubberWidth(dpi)
-    return Core.pageHitPx(dpi)
+    local hit = Core.pageHitPx(dpi)
+    return math.max(hit, math.floor(hit * 1.4 + 0.5))
+end
+
+--- Smallest slot that still holds a bold letter. A full-height shelf fits
+-- every letter above this; a shelf shortened by Continue reading does not.
+function Core.scrubberMinSlot(dpi)
+    dpi = tonumber(dpi)
+    if not dpi or dpi ~= dpi or dpi < 1 then dpi = 167 end
+    return math.max(22, math.floor(3.2 * dpi / 25.4 + 0.5))
 end
 
 --- Grid width once `strip_w` has been reserved on the right. Always leaves
 -- at least half the screen (or 1 px) for the covers.
+--- Scroll a filter row that is wider than the screen (#5). `dx` is how far
+-- the finger moved right since the last step. The last chip is cropped
+-- when there is more past the right edge; `more_left` is the same cue
+-- once the row has moved.
+function Core.filterScroll(offset, content_w, view_w, dx)
+    offset = math.floor(tonumber(offset) or 0)
+    content_w = math.max(0, math.floor(tonumber(content_w) or 0))
+    view_w = math.max(0, math.floor(tonumber(view_w) or 0))
+    dx = math.floor(tonumber(dx) or 0)
+    local max_off = math.max(0, content_w - view_w)
+    offset = offset - dx
+    if offset < 0 then offset = 0 end
+    if offset > max_off then offset = max_off end
+    return {
+        offset = offset,
+        overflow = max_off > 0,
+        more_right = offset < max_off,
+        more_left = offset > 0,
+    }
+end
+
+--- What to paint down the single right-hand strip (#5). Every letter when
+-- `height` can give each one `min_slot`. Otherwise an iOS-style index:
+-- letters spread across the alphabet, with a dot between them. The finger
+-- still maps onto every letter; only the paint is compacted.
+function Core.scrubberMarks(letters, height, min_slot)
+    letters = letters or Core.SCRUBBER_LETTERS
+    local n = #letters
+    height = math.floor(tonumber(height) or 0)
+    min_slot = math.max(1, math.floor(tonumber(min_slot) or 1))
+    if n < 1 or height < 1 then return {} end
+    local capacity = math.max(1, math.floor(height / min_slot))
+    if capacity >= n then
+        local marks = {}
+        for i, letter in ipairs(letters) do
+            marks[i] = { text = letter, letter = letter }
+        end
+        return marks
+    end
+    -- k letters with a dot between each pair need 2k - 1 slots.
+    local shown = math.max(1, math.floor((capacity + 1) / 2))
+    if shown > n then shown = n end
+    if shown == 1 then
+        return { { text = letters[1], letter = letters[1] } }
+    end
+    local picks, used = {}, {}
+    for i = 1, shown do
+        local idx = math.floor((i - 1) * (n - 1) / (shown - 1) + 0.5) + 1
+        if idx < 1 then idx = 1 end
+        if idx > n then idx = n end
+        if not used[idx] then
+            used[idx] = true
+            picks[#picks + 1] = idx
+        end
+    end
+    if #picks < 2 then picks = { 1, n } end
+    local marks = {}
+    for i, idx in ipairs(picks) do
+        if i > 1 then marks[#marks + 1] = { text = "·", dot = true } end
+        marks[#marks + 1] = { text = letters[idx], letter = letters[idx] }
+    end
+    while #marks > capacity and #marks >= 3 do
+        local drop
+        for i = 2, #marks - 1 do
+            if marks[i].dot then drop = i break end
+        end
+        if not drop then break end
+        table.remove(marks, drop)
+    end
+    return marks
+end
+
+--- A vertical swipe that starts in a LiveLight edge (the outer eighth).
+-- Taps and drags stay on the A–Z strip; this flick is the one that
+-- overlaps the warmth or brightness slide.
+function Core.edgeVerticalSwipe(ges, screen_w)
+    if type(ges) ~= "table" then return nil end
+    local dir = ges.direction
+    if dir ~= "north" and dir ~= "south" then return nil end
+    local x = ges.pos and tonumber(ges.pos.x)
+    return Core.edgeStrip(x, screen_w)
+end
+
 function Core.gridContentWidth(width, strip_w)
     width = math.floor(tonumber(width) or 0)
     strip_w = math.floor(tonumber(strip_w) or 0)

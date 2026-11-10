@@ -11,6 +11,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local Core = require("librarycore")
+local Zones = require("libraryzones")
 local Screen = Device.screen
 
 local C = Blitbuffer
@@ -40,7 +41,11 @@ local function textSize(face, s, bold, color, bg)
 end
 
 function Scrubber:init()
-    self.letters = (self.index and self.index.letters) or Core.SCRUBBER_LETTERS
+    -- `letters` is the full alphabet the finger scrubs. Paint may show
+    -- only every few of them, with dots, when the column is short.
+    if not self.letters then
+        self.letters = (self.index and self.index.letters) or Core.SCRUBBER_LETTERS
+    end
     self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
     local sw = self.screen_w
     local sh = self.screen_h
@@ -105,43 +110,51 @@ function Scrubber:paintStrip(bb, x, y)
     local d = self.dimen
     local w, h = d.w, d.h
     bb:paintRect(x, y, w, h, C.COLOR_WHITE)
-    -- Hairline where the covers stop. The letters sit in a slim column on
-    -- the right; the rest of the width is the touch margin.
+    -- Hairline where the covers stop. Letters sit in a slim column on the
+    -- right; the rest of the wider strip is the touch margin.
+    local line = math.max(1, math.floor((tonumber(self.dpi) or 300) / 167))
     if bb.paintRect then
-        local line = math.max(1, math.floor((tonumber(self.dpi) or 300) / 167))
         bb:paintRect(x, y, line, h, C.COLOR_GRAY_B)
     end
-    local n = #self.letters
+    local marks = Core.scrubberMarks(self.letters, h, Core.scrubberMinSlot(self.dpi))
+    local n = #marks
     if n < 1 or h < 1 then return end
-    local slot = math.floor(h / n)
-    local glyph_w = math.min(w, math.max(math.floor(w * 0.42), math.min(w, 48)))
+    local glyph_w = math.min(56, math.max(28, math.floor(w * 0.34)))
     local glyph_x = x + w - glyph_w
-    local face_px = self:nominalSize(math.max(10, slot - 4), 11, 18)
+    local face_px = self:nominalSize(math.max(14, math.floor(h / n) - 2), 16, 26)
     local face = Font:getFace("cfont", face_px)
+    local dot_face = Font:getFace("cfont", self:nominalSize(10, 10, 14))
     local highlight = self.bubble_letter
-    for i, letter in ipairs(self.letters) do
+    for i, mark in ipairs(marks) do
         local sy = y + math.floor((i - 1) * h / n)
         local sh = math.floor(i * h / n) - math.floor((i - 1) * h / n)
-        local on = self:active(letter)
-        local hot = highlight == letter
-        local bg = C.COLOR_WHITE
-        local fg = on and C.COLOR_BLACK or C.COLOR_GRAY_6
-        if hot then
-            bg = on and C.COLOR_BLACK or C.COLOR_GRAY_8
-            fg = C.COLOR_WHITE
-            local pad = math.max(1, math.floor(sh * 0.08))
-            bb:paintRoundedRect(glyph_x + 2, sy + pad, glyph_w - 6, math.max(1, sh - 2 * pad), bg,
-                math.floor(sh / 2))
-        end
-        local widget, sz = textSize(face, letter, on or hot, fg, hot and bg or C.COLOR_WHITE)
-        local tx = glyph_x + math.floor((glyph_w - sz.w) / 2)
-        local ty = sy + math.floor((sh - sz.h) / 2)
-        widget:paintTo(bb, tx, ty)
-        widget:free()
-        if not hot and letter == self.anchor and on then
-            local mark_w = math.max(4, math.floor(sz.w * 0.7))
-            local mx = glyph_x + math.floor((glyph_w - mark_w) / 2)
-            bb:paintRect(mx, ty + sz.h - 1, mark_w, math.max(1, math.floor(slot * 0.06)), C.COLOR_BLACK)
+        if mark.dot then
+            local widget, sz = textSize(dot_face, "·", true, C.COLOR_GRAY_6, C.COLOR_WHITE)
+            widget:paintTo(bb, glyph_x + math.floor((glyph_w - sz.w) / 2), sy + math.floor((sh - sz.h) / 2))
+            widget:free()
+        else
+            local letter = mark.letter
+            local on = self:active(letter)
+            local hot = highlight == letter
+            local bg = C.COLOR_WHITE
+            local fg = on and C.COLOR_BLACK or C.COLOR_GRAY_6
+            if hot then
+                bg = on and C.COLOR_BLACK or C.COLOR_GRAY_8
+                fg = C.COLOR_WHITE
+                local pad = math.max(1, math.floor(sh * 0.08))
+                bb:paintRoundedRect(glyph_x + 2, sy + pad, glyph_w - 6, math.max(1, sh - 2 * pad), bg,
+                    math.floor(sh / 2))
+            end
+            local widget, sz = textSize(face, letter, true, fg, hot and bg or C.COLOR_WHITE)
+            local tx = glyph_x + math.floor((glyph_w - sz.w) / 2)
+            local ty = sy + math.floor((sh - sz.h) / 2)
+            widget:paintTo(bb, tx, ty)
+            widget:free()
+            if not hot and letter == self.anchor and on then
+                local mark_w = math.max(4, math.floor(sz.w * 0.7))
+                local mx = glyph_x + math.floor((glyph_w - mark_w) / 2)
+                bb:paintRect(mx, ty + sz.h - 1, mark_w, math.max(1, math.floor(sh * 0.08)), C.COLOR_BLACK)
+            end
         end
     end
 end
@@ -322,6 +335,17 @@ function Scrubber:onPanReleaseScrubber()
     return self:endDrag() or true
 end
 
+--- A vertical swipe in the outer eighth is LiveLight's brightness or
+-- warmth slide, which overlaps this strip. Taps and drags still pick a letter.
+function Scrubber:offerLiveLight(ges)
+    local view = self.view
+    local w = view and view.dimen and view.dimen.w
+    if not Core.edgeVerticalSwipe(ges, w) then return false end
+    if not (Zones and Zones.tryLiveZones) then return false end
+    local ok, taken = pcall(Zones.tryLiveZones, ges)
+    return ok and taken == true
+end
+
 function Scrubber:onSwipeScrubber(_, ges)
     -- A downward swipe from the top of the strip (inside the Controls zone)
     -- opens Controls instead of jumping to a letter. LibraryView also checks
@@ -329,6 +353,7 @@ function Scrubber:onSwipeScrubber(_, ges)
     if not (self._drag) and self.view and self.view.tryOpenControls and self.view:tryOpenControls(ges) then
         return true
     end
+    if self:offerLiveLight(ges) then return true end
     -- A quick flick is a swipe instead of a pan_release. Stay on the strip:
     -- do not also turn a page.
     local pos = ges and (ges.end_pos or ges.pos)
