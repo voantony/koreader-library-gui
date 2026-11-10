@@ -21,6 +21,8 @@ tools/emulator/shoot.sh footer
 
 `toptap` opens a book and writes `toptap-01-library-gui-bar.png`, `toptap-02-koreader-menu.png` and `toptap-03-details-from-reader.png`.
 
+`gestures` drives the file-browser top swipe and a two-finger rotate on the Library home. `gesturemenu` opens the Library's Gestures menu and shows a top swipe that does nothing after that choice is set to Nothing.
+
 `readme` writes the README shots that show the v0.5.0 home screen and gallery. It waits until the covers on screen have been extracted, so the PNGs are not grey placeholders. The same shots can be taken on their own:
 
 | Scenario | PNGs |

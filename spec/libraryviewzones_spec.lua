@@ -55,7 +55,7 @@ local function loadView()
         getHeight = function() return 1680 end,
     }, hasKeys = function() return false end, isTouchDevice = function() return true end, hasDPad = function() return false end }
     local old_require = require
-    local real = { librarycore = true, libraryindex = true, string = true, table = true, math = true }
+    local real = { librarycore = true, libraryindex = true, librarygestures = true, string = true, table = true, math = true }
     local extra = {
         ["ui/widget/container/inputcontainer"] = InputContainerStub,
         ["ui/widget/iconbutton"] = { new = function(_, o) o.image = {}; o.getSize = function() return { w = 48, h = 48 } end; return o end },
@@ -391,6 +391,52 @@ describe("Library view zone forwarding", function()
         eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
         eq(live_calls[1], ev)
         eq(v.turned, nil, "a two-finger swipe is not a page turn")
+    end)
+
+    it("does not forward a top swipe the reader turned off", function()
+        local View = loadView()
+        menu_result = true
+        local v = swipeView(View, { plugin = {
+            openControls = function() return false end,
+            settings = { gestures = { top_down = "nothing" } },
+        } })
+        local ev = { ges = "swipe", direction = "south", pos = { x = 400, y = 20 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(#menu_calls, 0, "Nothing does not open the file browser menu")
+        eq(#base_calls, 0)
+        eq(#live_calls, 0)
+    end)
+
+    it("runs the Library's own rotate action instead of the file browser's", function()
+        local View = loadView()
+        local got
+        local v = swipeView(View, { plugin = {
+            settings = { gestures = { two_east = "rotate_cw" } },
+            rotateForEvent = function(_, event) got = event; return true end,
+        } })
+        local ev = { ges = "two_finger_swipe", direction = "east", pos = { x = 1230, y = 500 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(type(got), "table")
+        eq(#live_calls, 0, "the file browser binding was not used")
+    end)
+
+    it("still forwards a two-finger swipe that is same as the file browser", function()
+        local View = loadView()
+        local v = swipeView(View, { plugin = { settings = {} }, })
+        local ev = { ges = "two_finger_swipe", direction = "east", pos = { x = 1230, y = 500 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(live_calls[1], ev)
+    end)
+
+    it("does not set brightness from the left edge when that gesture is off", function()
+        local View = loadView()
+        local v = swipeView(View, { plugin = {
+            settings = { gestures = { left_edge = "nothing" } },
+        } })
+        local ev = { ges = "swipe", direction = "south", pos = { x = 16, y = 800 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(#live_calls, 0)
+        eq(#base_calls, 0, "the edge was not handed to the shelf or the page")
     end)
 
     it("rebuilds through the plugin on a rotation event instead of forwarding it raw", function()

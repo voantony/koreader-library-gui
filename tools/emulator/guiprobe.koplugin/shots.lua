@@ -1164,6 +1164,104 @@ local function gesturesScenario()
     end)
 end
 
+--- The Gestures menu on the Library home, and a choice of Nothing that
+-- stops the top swipe from opening KOReader's menu.
+local function gestureMenuScenario()
+    whenLibrary(function()
+        local function press(pattern)
+            local stack = UIManager._window_stack or {}
+            local top = stack[#stack] and stack[#stack].widget
+            local found
+            walk(top, function(w)
+                if found or type(w.text) ~= "string" or not w.callback then return end
+                if w.text:find(pattern, 1, true) then found = w end
+            end, {})
+            if not found then
+                state.ok = false
+                P("FAIL no button", pattern, "stack", stackLine())
+                return false
+            end
+            P("press", found.text)
+            found.callback()
+            return true
+        end
+        local function swipeDownTop()
+            local sw, sh = Screen:getWidth(), Screen:getHeight()
+            local Event = require("ui/event")
+            local Geom = require("ui/geometry")
+            local y = math.max(8, math.floor(sh / 16))
+            UIManager:sendEvent(Event:new("Gesture", {
+                ges = "swipe", direction = "south",
+                pos = Geom:new{ x = math.floor(sw / 2), y = y, w = 0, h = 0 },
+                time = require("ui/time").now(),
+            }))
+        end
+        local function menuOpen()
+            local fm = FM()
+            return fm and fm.menu and fm.menu.menu_container ~= nil
+        end
+
+        q(0.3, function()
+            dismissNotices()
+            local l = lib()
+            l.settings.controls_panel = false
+            if l.saveSettings then l:saveSettings() end
+            local view = V()
+            view:onLeftIcon()
+        end)
+        q(0.4, function()
+            local label = findAnywhere("Gestures")
+            P("hamburger", tostring(label))
+            if label ~= "Gestures" then
+                state.ok = false
+                P("FAIL hamburger has no Gestures row")
+            end
+            closeAboveView()
+            lib():showGestureMenu(V())
+        end)
+        q(0.5, function()
+            local top = findAnywhere("Swipe down from the top")
+            local same = findAnywhere("Same as file browser")
+            P("menu", tostring(top), tostring(same))
+            if not top or not same then
+                state.ok = false
+                P("FAIL gesture menu")
+            end
+            shot("07-gesture-menu")
+            press("Swipe down from the top")
+        end)
+        q(0.4, function()
+            local marked = findAnywhere("✓ Same as file browser")
+            P("choices", tostring(marked), tostring(findAnywhere("Nothing")))
+            if not marked then
+                state.ok = false
+                P("FAIL default is not Same as file browser")
+            end
+            shot("08-gesture-choices")
+            press("Nothing")
+        end)
+        q(0.4, function()
+            local saved = lib().settings.gestures and lib().settings.gestures.top_down
+            P("saved", tostring(saved))
+            if saved ~= "nothing" then
+                state.ok = false
+                P("FAIL choice was not saved")
+            end
+            closeAboveView()
+            swipeDownTop()
+        end)
+        q(0.5, function()
+            if menuOpen() then
+                state.ok = false
+                P("FAIL Nothing still opened the menu")
+            else
+                P("PASS Nothing stopped the top swipe")
+            end
+            shot("09-top-swipe-off")
+        end)
+    end)
+end
+
 local ORDER = {
     "widgets", "accordion", "recently", "shelf", "bubble", "menu",
     "filters", "brightness", "startwith", "gallery",
@@ -1202,5 +1300,6 @@ end }
 for _, name in ipairs(ORDER) do scenarios[name] = solo(name) end
 scenarios.controls = solo("controls")
 scenarios.gestures = gesturesScenario
+scenarios.gesturemenu = gestureMenuScenario
 return scenarios
 end

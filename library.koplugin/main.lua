@@ -27,6 +27,7 @@ local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local util = require("util")
 local Core = require("librarycore")
+local Gestures = require("librarygestures")
 local Index = require("libraryindex")
 local Timing = require("librarytiming")
 local _ = require("gettext")
@@ -1416,6 +1417,15 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = _("Gestures"),
+            callback = function()
+                close()
+                self:showGestureMenu(view)
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = (Core.useKoreaderKeyboard(self.settings) and "✓ " or "") .. _("Use KOReader's keyboard"),
             callback = function()
                 close()
@@ -1688,6 +1698,250 @@ function Library:sleepCoverMenu()
     }
 end
 
+local GESTURE_LABEL = nil -- filled on first use so gettext has loaded
+
+local function gestureLabels()
+    if GESTURE_LABEL then return GESTURE_LABEL end
+    GESTURE_LABEL = {
+        top_down = _("Swipe down from the top"),
+        two_east = _("Two-finger swipe right"),
+        two_west = _("Two-finger swipe left"),
+        two_north = _("Two-finger swipe up"),
+        two_south = _("Two-finger swipe down"),
+        two_diagonal = _("Two-finger swipe, diagonal"),
+        left_edge = _("Left edge"),
+        right_edge = _("Right edge"),
+        top_side = _("Top edge, sideways"),
+        bottom_side = _("Bottom edge, sideways"),
+        tap_tl = _("Tap top left"),
+        tap_tr = _("Tap top right"),
+        tap_bl = _("Tap bottom left"),
+        tap_br = _("Tap bottom right"),
+        hold_tl = _("Hold top left"),
+        hold_tr = _("Hold top right"),
+        hold_bl = _("Hold bottom left"),
+        hold_br = _("Hold bottom right"),
+        other = _("Multiswipe, pinch and spread"),
+        two = _("Two-finger swipes"),
+        edge = _("Screen edges"),
+        tap = _("Corner taps"),
+        hold = _("Corner holds"),
+        filebrowser = _("Same as file browser"),
+        nothing = _("Nothing"),
+        show_menu = _("Open KOReader menu"),
+        rotate_cw = _("Rotate by 90° clockwise"),
+        rotate_ccw = _("Rotate by 90° counterclockwise"),
+        toggle_orientation = _("Toggle orientation"),
+        brightness = _("Brightness"),
+        warmth = _("Warmth"),
+        open_book = _("Open current book"),
+        library_menu = _("Library menu"),
+        controls = _("Controls panel"),
+        page_next = _("Next page"),
+        page_prev = _("Previous page"),
+    }
+    return GESTURE_LABEL
+end
+
+function Library:gestureLabel(id)
+    return gestureLabels()[id] or id
+end
+
+function Library:gestureChoiceText(slot)
+    return self:gestureLabel(Gestures.choice(self.settings, slot))
+end
+
+--- Radio list for one gesture. Shared by KOReader's menu and the dialog
+-- opened from the Library's ☰ button.
+function Library:gestureChoiceItems(slot)
+    local order = { Gestures.FILEBROWSER, Gestures.NOTHING }
+    for _, action in ipairs(Gestures.ACTIONS) do order[#order + 1] = action.id end
+    local items = {}
+    for i, id in ipairs(order) do
+        items[#items + 1] = {
+            text = self:gestureLabel(id),
+            radio = true,
+            checked_func = function() return Gestures.choice(self.settings, slot) == id end,
+            callback = function()
+                Gestures.setChoice(self.settings, slot, id)
+                self:saveSettings()
+            end,
+            separator = i == 2,
+        }
+    end
+    return items
+end
+
+function Library:gestureTouchItems()
+    local items = {}
+    local function slotItem(slot)
+        return {
+            text_func = function()
+                return self:gestureLabel(slot) .. " — " .. self:gestureChoiceText(slot)
+            end,
+            sub_item_table_func = function() return self:gestureChoiceItems(slot) end,
+        }
+    end
+    for i, entry in ipairs(Gestures.MENU) do
+        if entry.manager then
+            items[#items + 1] = {
+                text = _("KOReader gesture manager"),
+                help_text = _("Open KOReader's Gesture manager for the file browser. Same as file browser follows the bindings you set there, including a swipe down from the top and a two-finger swipe."),
+                separator = true,
+                callback = function(touchmenu)
+                    if touchmenu and touchmenu.closeMenu then touchmenu:closeMenu() end
+                    self:openFileBrowserGestureManager()
+                end,
+            }
+        elseif entry.slot then
+            items[#items + 1] = slotItem(entry.slot)
+        elseif entry.group then
+            local sub = {}
+            for _, slot in ipairs(entry.slots) do sub[#sub + 1] = slotItem(slot) end
+            items[#items + 1] = {
+                text = self:gestureLabel(entry.group),
+                sub_item_table = sub,
+            }
+        end
+    end
+    return items
+end
+
+function Library:gestureSettingsMenu()
+    return {
+        text = _("Gestures"),
+        help_text = _("What a gesture does on the Library home screen. Same as file browser keeps today's behaviour: the file browser's own gesture runs, including a swipe down from the top opening KOReader's menu, a two-finger swipe doing whatever you set in the gesture manager, and the left edge setting brightness. Nothing ignores that gesture. A one-finger tap or swipe that starts on the A–Z strip still jumps to a letter."),
+        sub_item_table_func = function() return self:gestureTouchItems() end,
+    }
+end
+
+local function gestureDialog(self, view, title, rows, back)
+    local dialog
+    local buttons = {}
+    for _, row in ipairs(rows) do
+        buttons[#buttons + 1] = {{
+            text = row.text,
+            callback = function()
+                UIManager:close(dialog)
+                row.run()
+            end,
+        }}
+    end
+    if back then
+        buttons[#buttons + 1] = {{
+            text = _("Back"),
+            callback = function()
+                UIManager:close(dialog)
+                back()
+            end,
+        }}
+    end
+    dialog = ButtonDialog:new{
+        title = title,
+        title_align = "center",
+        buttons = buttons,
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
+    UIManager:show(dialog)
+end
+
+--- The same menu, as dialogs, from the Library's own ☰ button.
+function Library:showGestureMenu(view)
+    local rows = {}
+    for i, entry in ipairs(Gestures.MENU) do
+        if entry.manager then
+            rows[#rows + 1] = {
+                text = _("KOReader gesture manager"),
+                run = function() self:openFileBrowserGestureManager() end,
+            }
+        elseif entry.slot then
+            local slot = entry.slot
+            rows[#rows + 1] = {
+                text = self:gestureLabel(slot) .. " · " .. self:gestureChoiceText(slot),
+                run = function() self:showGestureChoices(view, slot) end,
+            }
+        elseif entry.group then
+            local group = entry
+            rows[#rows + 1] = {
+                text = self:gestureLabel(group.group),
+                run = function() self:showGestureGroup(view, group) end,
+            }
+        end
+    end
+    gestureDialog(self, view, _("Gestures"), rows)
+end
+
+function Library:showGestureGroup(view, group)
+    local rows = {}
+    for _, slot in ipairs(group.slots) do
+        rows[#rows + 1] = {
+            text = self:gestureLabel(slot) .. " · " .. self:gestureChoiceText(slot),
+            run = function() self:showGestureChoices(view, slot, group) end,
+        }
+    end
+    gestureDialog(self, view, self:gestureLabel(group.group), rows, function()
+        self:showGestureMenu(view)
+    end)
+end
+
+function Library:showGestureChoices(view, slot, group)
+    local rows = {}
+    local order = { Gestures.FILEBROWSER, Gestures.NOTHING }
+    for _, action in ipairs(Gestures.ACTIONS) do order[#order + 1] = action.id end
+    local current = Gestures.choice(self.settings, slot)
+    for _, id in ipairs(order) do
+        rows[#rows + 1] = {
+            text = (current == id and "✓ " or "") .. self:gestureLabel(id),
+            run = function()
+                Gestures.setChoice(self.settings, slot, id)
+                self:saveSettings()
+                if group then self:showGestureGroup(view, group)
+                else self:showGestureMenu(view) end
+            end,
+        }
+    end
+    gestureDialog(self, view, self:gestureLabel(slot), rows, function()
+        if group then self:showGestureGroup(view, group)
+        else self:showGestureMenu(view) end
+    end)
+end
+
+--- KOReader's own Gesture manager, on the file-browser profile. That profile
+-- is the one loaded when no book is open. Returns true when the menu was shown.
+function Library:openFileBrowserGestureManager()
+    local ui = self.ui
+    if not ui or ui.document or not (ui.menu and ui.menu.onShowMenu) then
+        UIManager:show(InfoMessage:new{
+            text = _("KOReader's gesture manager for the file browser is in the file browser menu: Settings → Taps and gestures → Gesture manager."),
+            timeout = 4,
+        })
+        return false
+    end
+    local menu = ui.menu
+    if menu.setUpdateItemTable and not menu.tab_item_table then
+        menu:setUpdateItemTable()
+    end
+    local path = Gestures.menuPath(menu.tab_item_table, "gesture_manager")
+    menu:onShowMenu()
+    local touch = menu.menu_container and menu.menu_container[1]
+    if path and touch and touch.openMenu then
+        touch:openMenu(path)
+    end
+    return true
+end
+
+--- Open KOReader's top menu. Used when a Library gesture is set to that action.
+function Library:showKoreaderMenu(ges)
+    local menu = self.ui and self.ui.menu
+    if not (menu and menu.onShowMenu) then return false end
+    local index
+    if ges and menu._getTabIndexFromLocation then
+        index = menu:_getTabIndexFromLocation(ges)
+    end
+    menu:onShowMenu(index)
+    return true
+end
+
 function Library:addToMainMenu(menu_items)
     menu_items.library = {
         text = _("Library"),
@@ -1832,6 +2086,7 @@ function Library:addToMainMenu(menu_items)
             },
             self:rememberViewsMenu(),
             self:controlsMenu(),
+            self:gestureSettingsMenu(),
             {
                 text = _("Timing log (for testing)"),
                 help_text = T(_("Write how long the Library takes to open, turn a page, switch a filter and show search results to %1, one line each. Off by default; nothing is timed while it is off."), self:timingLogPath()),
