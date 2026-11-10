@@ -51,6 +51,7 @@ describe("home widgets", function()
     it("labels match the issue's names", function()
         eq(W.label({ kind = "continue" }), "Continue Reading")
         eq(W.label({ kind = "favorites" }), "Favorites")
+        eq(W.label({ kind = "added" }), "Recently added")
         eq(W.label({ kind = "series", name = "Oz" }), "Oz")
         eq(W.label({ kind = "folder", path = "/books/Novels" }), "Novels")
     end)
@@ -95,6 +96,25 @@ describe("home widgets", function()
         eq(W.accordion(2, 1, 1), nil)
         eq(W.accordion(2, 1, nil), nil)
         eq(W.accordion(2, nil, 2), 2)
+    end)
+
+    it("Recently added is a menu choice and lists the newest file first", function()
+        local choice
+        for _, item in ipairs(W.CHOICES) do
+            if item.kind == "added" then choice = item end
+        end
+        eq(choice.label, "Recently added")
+        eq(choice.pick, nil)
+        local books = {
+            { path = "/old", title = "Old", modification = 10 },
+            { path = "/new", title = "New", modification = 50 },
+            { path = "/mid", title = "Mid", modification = 20 },
+        }
+        local got = W.books({ kind = "added" }, { all = books })
+        eq(got[1].title, "New")
+        eq(got[2].title, "Mid")
+        eq(got[3].title, "Old")
+        eq(books[1].title, "Old", "the library list is not reordered")
     end)
 
     it("remembers a page per widget, and a new map does not change the old one", function()

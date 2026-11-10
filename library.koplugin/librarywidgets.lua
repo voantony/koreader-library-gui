@@ -4,6 +4,7 @@
 -- Long-pressing a widget title switches that slot. "None" removes it.
 -- With no widgets left, the books use the full area, as when
 -- "Show Continue Reading" is unchecked.
+local Core = require("librarycore")
 local Widgets = {}
 
 Widgets.MAX = 2
@@ -13,6 +14,7 @@ Widgets.MAX = 2
 Widgets.CHOICES = {
     { kind = "continue", label = "Continue Reading" },
     { kind = "favorites", label = "Favorites" },
+    { kind = "added", label = "Recently added" },
     { kind = "series", label = "A series", pick = true },
     { kind = "collection", label = "A collection", pick = true },
     { kind = "folder", label = "A folder", pick = true },
@@ -81,6 +83,7 @@ function Widgets.label(spec)
     if type(spec) ~= "table" then return "" end
     if spec.kind == "continue" then return "Continue Reading" end
     if spec.kind == "favorites" then return "Favorites" end
+    if spec.kind == "added" then return "Recently added" end
     if spec.kind == "series" then return spec.name or "Series" end
     if spec.kind == "collection" then return spec.name or "Collection" end
     if spec.kind == "folder" then
@@ -106,6 +109,9 @@ function Widgets.books(spec, ctx)
     if type(spec) ~= "table" then return {} end
     if spec.kind == "continue" then return ctx.continue or {} end
     if spec.kind == "favorites" then return ctx.favorites or {} end
+    -- Newest file first. modification is the file mtime, the same clock
+    -- the Date added sort uses.
+    if spec.kind == "added" then return Core.sortBooks(ctx.all or {}, "added") end
     if spec.kind == "series" then return byName(ctx.series, spec.name) end
     if spec.kind == "collection" then return byName(ctx.collections, spec.name) end
     if spec.kind == "folder" then
