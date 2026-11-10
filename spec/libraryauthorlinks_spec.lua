@@ -197,3 +197,32 @@ describe("details card series line and chips", function()
         chips[1]:onTapChip(); eq(_G.__shelf, "genres:Fantasy")
     end)
 end)
+
+describe("details card facts", function()
+    local Details = loadDetails()
+
+    it("prints pages, last read, size and path without hiding gettext", function()
+        local card = setmetatable({
+            info = { facts = {
+                { id = "pages", label = "Pages", value = "310" },
+                { id = "last_read", label = "Last read", value = "Never" },
+                { id = "size", label = "Size", value = "1.2 MB" },
+                { id = "path", label = "File", value = "/books/Emma.epub" },
+                { id = "title", label = "Title", value = "Emma" },
+            } },
+        }, { __index = Details })
+        local col = card:buildFacts(400)
+        local lines = {}
+        local function walk(w)
+            if type(w) ~= "table" then return end
+            if w.kind == "text" and type(w.text) == "string" then lines[#lines + 1] = w.text end
+            for _, c in ipairs(w) do walk(c) end
+        end
+        walk(col)
+        eq(#lines, 4)
+        eq(lines[1], "Pages  310")
+        eq(lines[2], "Last read  Never")
+        eq(lines[3], "Size  1.2 MB")
+        eq(lines[4], "File  /books/Emma.epub")
+    end)
+end)

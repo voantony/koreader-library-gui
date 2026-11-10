@@ -638,7 +638,7 @@ function Details:buildFacts(max_w)
     if type(facts) ~= "table" or #facts == 0 then return nil end
     local col = VerticalGroup:new{ align = "left" }
     local f = face("cfont", 15)
-    for _, fact in ipairs(facts) do
+    for _i, fact in ipairs(facts) do
         if type(fact) == "table" and not FACT_SKIP[fact.id]
                 and type(fact.label) == "string" and type(fact.value) == "string" and fact.value ~= "" then
             local value = fact.value

@@ -133,7 +133,6 @@ local function whenPainted(fn)
     local asked = false
     local function poll()
         tries = tries + 1
-        dismissNotices()
         local view = V()
         if not view then
             state.ok = false
@@ -141,6 +140,7 @@ local function whenPainted(fn)
             fn()
             return
         end
+        dismissNotices()
         if not asked and view.scheduleCoverExtraction then
             asked = true
             pcall(function() view:scheduleCoverExtraction() end)
@@ -373,10 +373,15 @@ jobs.menu = function(done)
         view:onLeftIcon()
         q(0.6, function()
             local label = findAnywhere("Widgets")
-            P("menu", tostring(label), "stack", stackLine())
+            local gestures = findAnywhere("Gestures")
+            P("menu", tostring(label), tostring(gestures), "stack", stackLine())
             if label ~= "Widgets" then
                 state.ok = false
                 P("FAIL menu has no Widgets row")
+            end
+            if gestures ~= "Gestures" then
+                state.ok = false
+                P("FAIL menu has no Gestures row")
             end
             capture("v050-menu", nil)
             closeAboveView()
@@ -621,7 +626,9 @@ jobs.startwith = function(done)
         if fm and fm.menu and fm.menu.onCloseFileManagerMenu then
             fm.menu:onCloseFileManagerMenu()
         end
-        done()
+        -- The shot closes the Library to reach the file browser. Put it
+        -- back so the jobs after this one still have a view.
+        ensureLibrary(done)
     end)
 end
 
@@ -1262,9 +1269,192 @@ local function gestureMenuScenario()
     end)
 end
 
+--- Full-height A–Z column (title sort, no widget band).
+jobs.azcolumn = function(done)
+    q(0.2, function()
+        home{ widgets = "default", continue = false, sort = "title", view = "grid",
+            tab = "books", filter = "all" }
+    end)
+    whenPainted(function()
+        capture("v050-az-column", true)
+        done()
+    end)
+end
+
+--- The same strip shortened by Continue reading.
+jobs.azshort = function(done)
+    q(0.2, function()
+        local view = home{ top = "continue", sort = "title", view = "grid",
+            tab = "books", filter = "all", continue = true }
+        if view then view:setHomeWidgets({ { kind = "continue" } }) end
+    end)
+    whenPainted(function()
+        capture("v050-az-short", true)
+        done()
+    end)
+end
+
+jobs.footerbook = function(done)
+    q(0.2, function()
+        home{ widgets = "default", continue = false, sort = "recent", view = "grid",
+            tab = "books", filter = "all" }
+    end)
+    whenPainted(function()
+        local view = V()
+        P("footer book", view and view.last_book and (view.last_book.title or view.last_book.name))
+        if not (view and view.last_book) then
+            state.ok = false
+            P("FAIL no current book in the footer")
+        end
+        shot("v050-footer-book")
+        done()
+    end)
+end
+
+jobs.footerempty = function(done)
+    q(0.2, function()
+        local view = home{ widgets = "default", continue = false, sort = "recent",
+            view = "grid", tab = "books", filter = "all" }
+        if view then
+            view.last_book = nil
+            view:buildBody()
+        end
+    end)
+    q(0.4, function()
+        local view = V()
+        if view and view.last_book then
+            state.ok = false
+            P("FAIL footer still has a book")
+        end
+        shot("v050-footer-empty")
+        done()
+    end)
+end
+
+--- Cover only: progress and badges, no title or author under the cover.
+jobs.coveronly = function(done)
+    q(0.2, function()
+        local view = home{ widgets = "default", continue = false, sort = "title", view = "covers",
+            tab = "books", filter = "all" }
+        if view then
+            for _, b in ipairs(view.all_books or {}) do
+                if b.status == "reading" then b.time_left = 2 * 3600 + 15 * 60 end
+            end
+            view:refreshBody(true)
+        end
+    end)
+    whenPainted(function()
+        local view = V()
+        P("cover only", view and view.view_mode)
+        if not (view and view.view_mode == "covers") then
+            state.ok = false
+            P("FAIL not Cover only")
+        end
+        shot("v070-cover-only")
+        done()
+    end)
+end
+
+--- List rows: New, Read, and a time left next to the percent.
+jobs.badges = function(done)
+    q(0.2, function()
+        local view = home{ widgets = "default", continue = false, sort = "title",
+            view = "list", tab = "books", filter = "all" }
+        if not view then
+            state.ok = false
+            P("FAIL no view for badges")
+            return
+        end
+        local stamped = 0
+        for _, b in ipairs(view.all_books or {}) do
+            if b.status == "reading" then
+                b.time_left = 2 * 3600 + 15 * 60
+                stamped = stamped + 1
+            end
+        end
+        view:refreshBody(true)
+        local items = view.current and view.current.items or {}
+        local per = view.layout and view.layout.per_page or 8
+        if per < 1 then per = 8 end
+        local function kind(b)
+            if b.status == "complete" or b.doc_status == "complete" then return "read" end
+            if b.status == "reading" and b.time_left then return "left" end
+            if b.opened ~= true and not (b.last_opened and b.last_opened > 0) then return "new" end
+        end
+        local page
+        local pages = math.max(1, math.ceil(#items / per))
+        for p = 1, pages do
+            local has_new, has_read, has_left = false, false, false
+            for i = (p - 1) * per + 1, math.min(#items, p * per) do
+                local k = kind(items[i])
+                if k == "new" then has_new = true
+                elseif k == "read" then has_read = true
+                elseif k == "left" then has_left = true end
+            end
+            if has_new and has_read and has_left then page = p; break end
+        end
+        P("time left stamped", stamped, "badge page", tostring(page), "per", per)
+        if stamped < 1 or not page then
+            state.ok = false
+            P("FAIL no page shows New, Read and time left")
+        end
+        if page and view.goToPage then view:goToPage(page) end
+    end)
+    whenPainted(function()
+        shot("v070-badges")
+        done()
+    end)
+end
+
+--- Gestures menu and the choices for the top swipe (default: Same as file browser).
+jobs.gesturepages = function(done)
+    q(0.2, function()
+        home{ widgets = "default", continue = false, sort = "title", view = "grid",
+            tab = "books", filter = "all" }
+        closeAboveView()
+        lib():showGestureMenu(V())
+    end)
+    q(0.5, function()
+        local top = findAnywhere("Swipe down from the top")
+        local same = findAnywhere("Same as file browser")
+        P("gestures", tostring(top), tostring(same))
+        if not (top and same) then
+            state.ok = false
+            P("FAIL gesture menu")
+        end
+        shot("v070-gestures")
+        local stack = UIManager._window_stack or {}
+        local dialog = stack[#stack] and stack[#stack].widget
+        local pressed
+        walk(dialog, function(w)
+            if pressed or type(w.text) ~= "string" or not w.callback then return end
+            if w.text:find("Swipe down from the top", 1, true) then
+                pressed = true
+                w.callback()
+            end
+        end, {})
+        if not pressed then
+            state.ok = false
+            P("FAIL could not open the top-swipe choices")
+        end
+    end)
+    q(0.4, function()
+        local marked = findAnywhere("Same as file browser")
+        P("gesture choices", tostring(marked))
+        if not marked then
+            state.ok = false
+            P("FAIL gesture choices")
+        end
+        shot("v070-gesture-choices")
+        closeAboveView()
+        done()
+    end)
+end
+
 local ORDER = {
     "widgets", "accordion", "recently", "shelf", "bubble", "menu",
-    "filters", "brightness", "startwith", "gallery",
+    "filters", "brightness", "startwith", "azcolumn", "azshort",
+    "footerbook", "footerempty", "coveronly", "badges", "gesturepages", "gallery",
 }
 
 local function runList(list, on_done)
