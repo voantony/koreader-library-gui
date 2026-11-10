@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 (2026-11-10)
+
+File-browser gestures on the Library home, and a Gestures menu so the Library can use its own bindings. Thanks to @drkhn1234 for #9 and for saying which gestures they use on a Kindle Paperwhite 4.
+
+- **Top menu and two-finger rotate.** A swipe down from the top edge opens KOReader's menu, the same zone the file browser uses. A two-finger swipe follows the file-browser gesture profile, including when it starts on the A–Z strip. If that gesture rotates the screen, the Library is rebuilt for the new size instead of being left laid out for the old one. The left edge still sets brightness, and warmth on the right edge is still forwarded. Page turns, the shelf swipe, and a one-finger jump on the A–Z strip are unchanged. Related to #9.
+- **Gestures menu.** On the Library's ☰ button, and under ☰ → Library → Gestures. Each gesture (swipe down from the top, two-finger swipes, the screen edges, corner taps and holds, and multiswipe, pinch and spread) can stay **Same as file browser** (the default, so nothing changes), do **Nothing**, or run its own action: open KOReader's menu, rotate, brightness, warmth, open the current book, the Library menu, Controls, or turn a page. **KOReader gesture manager** opens the file-browser profile, which is what Same as file browser follows.
+
 ## 0.6.0 (2026-11-09)
 
 Read / New badges, time left, Want to Read, and a Cover only view, on top of v0.5.0.
