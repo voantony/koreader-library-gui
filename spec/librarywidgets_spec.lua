@@ -97,6 +97,18 @@ describe("home widgets", function()
         eq(W.accordion(2, nil, 2), 2)
     end)
 
+    it("remembers a page per widget, and a new map does not change the old one", function()
+        local pages = W.rememberPage(nil, { kind = "continue" }, 3)
+        eq(W.storedPage(pages, { kind = "continue" }), 3)
+        eq(W.storedPage(nil, { kind = "continue" }), nil)
+        local again = W.rememberPage(pages, { kind = "folder", path = "/books/Novels" }, 2)
+        eq(W.storedPage(pages, { kind = "folder", path = "/books/Novels" }), nil)
+        eq(W.storedPage(again, { kind = "continue" }), 3)
+        eq(W.storedPage(again, { kind = "folder", path = "/books/Novels" }), 2)
+        eq(W.pageKey({ kind = "series", name = "Oz" }) ~= W.pageKey({ kind = "series", name = "Mars" }), true)
+        eq(W.storedPage(W.rememberPage(nil, { kind = "continue" }, 0), { kind = "continue" }), 1)
+    end)
+
     it("folder choices are the directories the books live in", function()
         local dirs = W.folderChoices({
             book("/mnt/books/Novels/a.epub"),

@@ -2556,6 +2556,14 @@ function Core.returnSpot(st, pid)
     if type(st.filter) == "string" then spot.filter = st.filter end
     if type(st.sort) == "string" then spot.sort = st.sort end
     if type(st.view_mode) == "string" then spot.view_mode = st.view_mode end
+    if type(st.widget_pages) == "table" then
+        local pages = {}
+        for k, v in pairs(st.widget_pages) do
+            local n = tonumber(v)
+            if type(k) == "string" and n and n >= 1 then pages[k] = math.floor(n) end
+        end
+        if next(pages) then spot.widget_pages = pages end
+    end
     return spot
 end
 
