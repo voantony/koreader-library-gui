@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.4 (2026-11-10)
+
 Reported by u/ucsilahsor on Reddit.
 
 - **Duplicate books.** The same file is one book. A symlink, a second path onto it, `/mnt/us` and `/mnt/base-us`, and a capitalisation difference on those volumes used to show up as separate tiles, each with its own progress. **Merge copies of the same book** (on, in ☰ → Library) also folds several formats or folders of one work into one tile: the same title and authors, or the same Calibre id. The copy you have started is kept, then the one you read last, then EPUB, AZW3, MOBI, PDF. Long-press the tile: the details card lists the other copies, and each one opens that file. Turn the setting off to see every format again. The same file is still listed only once.
