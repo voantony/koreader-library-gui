@@ -3361,14 +3361,14 @@ function LibraryView:onTileTap(tile, ges)
     if tile.group then
         self:openGroup(tile.group)
     else
-        self.plugin:openBook(tile.book.path, self)
+        self.plugin:openBook(Core.openPath(tile.book), self)
     end
 end
 
 function LibraryView:onResume()
     self:keyboardGuard()
     local book = self.last_book or Core.resumeBook(self.all_books)
-    if book then self.plugin:openBook(book.path, self) end
+    if book then self.plugin:openBook(Core.openPath(book), self) end
 end
 
 function LibraryView:setBarelyThreshold(t)

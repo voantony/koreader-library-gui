@@ -28,6 +28,13 @@ lower-cased key for the plain search, plus the accent-free words
 Once built, a refresh (every time the Library opens) uses the books already
 in memory as its cache: no disk-cache read, and unchanged books keep their
 search text.
+
+The same file is listed once. A symlink, a second mount (`/mnt/us` and
+`/mnt/base-us`) and a case-only difference on those volumes are one book,
+and the reading state is taken from whichever path has the sidecar. With
+"Merge copies of the same book" (on by default), several formats or folders
+of one work (same title and authors, or the same Calibre UUID or ISBN) are
+one tile. The other copies stay on the book for the details card.
 --]]
 
 local Core = require("librarycore")
@@ -75,7 +82,7 @@ function Index:writeCache()
         version = Core.CACHE_VERSION,
         root = self.opts.root,
         calibre = self.calibre_files,
-        entries = Core.toCacheEntries(self.books),
+        entries = Core.toCacheEntries(self.files or self.books),
     }
     local tmp = self.opts.cache_file .. ".tmp"
     local f = io.open(tmp, "wb")
@@ -109,28 +116,76 @@ function Index:findCalibreFiles()
 end
 
 function Index:loadCalibre(files)
-    local map = {}
-    if not self.opts.calibre_load then return map end
+    local map, by_key = {}, {}
+    if not self.opts.calibre_load then
+        self.calibre_by_key = by_key
+        return map
+    end
     for _, f in ipairs(files) do
         local ok, entries = pcall(self.opts.calibre_load, f.path)
         if ok and entries then
             for path, props in pairs(Core.calibreIndex(entries, f.dir)) do
                 if not map[path] then map[path] = props end
+                local key = Core.fileKey(path)
+                if not by_key[key] then by_key[key] = props end
             end
         end
     end
+    self.calibre_by_key = by_key
     return map
+end
+
+--- Calibre props for this file, including a path that only differs by the
+-- Kindle mount (`/mnt/us` vs `/mnt/base-us`) or by case on that volume.
+function Index:calibreFor(map, path)
+    if type(path) ~= "string" then return nil end
+    local props = map and map[path]
+    if props then return props end
+    local by_key = self.calibre_by_key
+    if by_key then
+        props = by_key[Core.fileKey(path)]
+        if props then return props end
+    end
+    if map then
+        for _, alt in ipairs(Core.pathAliases(path)) do
+            if map[alt] then return map[alt] end
+        end
+    end
+    return nil
 end
 
 ----------------------------------------------------------------------------
 -- Per-book metadata and reading state
 ----------------------------------------------------------------------------
 
-function Index:sidecarFile(path)
+--- Sidecar for `path`, or for another path that is the same file.
+-- Returns the sidecar file and the document path it belongs to.
+-- The scanned path is tried first. Aliases are tried only when that misses,
+-- so a library with no sidecars does not stat the alias on a hit.
+function Index:sidecarFile(path, alts)
     local ds = self.opts.docsettings
-    if not ds then return nil end
-    local ok, file = pcall(ds.findSidecarFile, ds, path)
-    return ok and file or nil
+    if not (ds and ds.findSidecarFile) or type(path) ~= "string" then return nil end
+    local tried = {}
+    local function find(p)
+        if type(p) ~= "string" or p == "" or tried[p] then return nil end
+        tried[p] = true
+        local ok, file = pcall(ds.findSidecarFile, ds, p)
+        if ok and type(file) == "string" and file ~= "" then return file end
+        return nil
+    end
+    local file = find(path)
+    if file then return file, path end
+    if type(alts) == "table" then
+        for _, p in ipairs(alts) do
+            file = find(p)
+            if file then return file, p end
+        end
+    end
+    for _, p in ipairs(Core.pathAliases(path)) do
+        file = find(p)
+        if file then return file, p end
+    end
+    return nil
 end
 
 function Index:readSidecar(sidecar)
@@ -143,7 +198,7 @@ end
 
 --- Fill metadata for a book whose cache entry is missing or stale.
 function Index:fillMeta(book, calibre_map, calibre_stamp, sidecar_data)
-    local calibre = calibre_map[book.path]
+    local calibre = self:calibreFor(calibre_map, book.path)
     local info
     if self.opts.bim then
         local ok, i = pcall(self.opts.bim.getBookInfo, self.opts.bim, book.path, false)
@@ -166,8 +221,13 @@ end
 
 --- Refresh status/percent if the sidecar changed. Returns the sidecar data if it was read.
 function Index:refreshState(book)
-    local sidecar = self:sidecarFile(book.path)
+    local sidecar, via = self:sidecarFile(book.path, book.alt_paths)
     local mtime = sidecar and self.opts.fs.attributes(sidecar, "modification") or false
+    -- Remember which path the sidecar was stored under, so opening the book
+    -- uses the path KOReader already knows (often /mnt/us rather than /mnt/base-us).
+    if type(via) == "string" and via ~= "" and via ~= book.path then
+        book.open_path = via
+    end
     if mtime == book.sc_mtime and book.status then return nil end
     book.sc_mtime = mtime
     local data = sidecar and self:readSidecar(sidecar)
@@ -178,14 +238,18 @@ function Index:refreshState(book)
         return nil
     end
     local summary = type(data.summary) == "table" and data.summary or {}
-    book.doc_status = type(summary.status) == "string" and summary.status or nil
+    local raw = type(summary.status) == "string" and summary.status or nil
+    if not raw and type(data.status) == "string" then raw = data.status end
+    local norm = Core.normalizeDocStatus(raw)
+    book.doc_status = norm or (type(raw) == "string" and raw or nil)
     book.opened = true
-    book.status = Core.isKnownStatus(summary.status) and summary.status or "reading"
+    book.status = norm or "reading"
     book.percent = tonumber(data.percent_finished)
     book.pages = tonumber(data.doc_pages)
     Core.applyMarks(book, data.library_marks)
     -- KOReader marks a book "reading" as soon as it opens: one you only
     -- opened (still on the cover, title page or contents) stays unread.
+    -- A finished book (summary.status "complete") is never rewritten.
     if book.status == "reading" and Core.readingStage(book) == "unread" then
         book.status = "new"
     end
@@ -234,17 +298,42 @@ function Index:lookupStats(path)
     return stats
 end
 
+--- Exact path -> time, and file-key -> time. The key matches `/mnt/us` with
+-- `/mnt/base-us` and ignores case on those volumes.
 function Index:historyTimes()
-    local times = {}
+    local exact, by_key = {}, {}
     local hist = self.opts.history
     if hist and type(hist.hist) == "table" then
         for _, item in ipairs(hist.hist) do
             if item.file and item.time then
-                times[item.file] = math.max(times[item.file] or 0, item.time)
+                local t = item.time
+                if not exact[item.file] or t > exact[item.file] then exact[item.file] = t end
+                local key = Core.fileKey(item.file)
+                if not by_key[key] or t > by_key[key] then by_key[key] = t end
             end
         end
     end
-    return times
+    return exact, by_key
+end
+
+--- Last-opened time for this file, and the history path when it differs
+-- from the path we scanned (that is the path to open).
+function Index:historyFor(book, exact, by_key)
+    exact, by_key = exact or {}, by_key or {}
+    local best_t, best_p = nil, nil
+    local function consider(p)
+        local t = exact[p]
+        if t and (not best_t or t >= best_t) then best_t, best_p = t, p end
+    end
+    consider(book.path)
+    if type(book.alt_paths) == "table" then
+        for _, p in ipairs(book.alt_paths) do consider(p) end
+    end
+    for _, p in ipairs(Core.pathAliases(book.path)) do consider(p) end
+    if not best_t and by_key then
+        best_t = by_key[Core.fileKey(book.path)]
+    end
+    return best_t, best_p
 end
 
 ----------------------------------------------------------------------------
@@ -258,7 +347,7 @@ function Index:build(force)
     local t0 = self:clock()
     local scanned, truncated = Core.scan(o.root, o.fs, o.is_book, {
         max_depth = o.max_depth, show_hidden = o.show_hidden, limit = o.limit,
-        skip_dirs = o.skip_dirs,
+        skip_dirs = o.skip_dirs, skip_dir_names = o.skip_dir_names,
     })
     local t_scan = self:clock()
 
@@ -292,28 +381,63 @@ function Index:build(force)
         self:fillMeta(book, calibre_map, calibre_stamp, data)
     end
 
-    local times = self:historyTimes()
+    local exact, by_key = self:historyTimes()
     for _, book in ipairs(scanned) do
-        book.last_opened = times[book.path]
+        local opened, via = self:historyFor(book, exact, by_key)
+        book.last_opened = opened
+        if type(via) == "string" and via ~= "" and via ~= book.path then
+            book.open_path = via
+        end
         self:applyOpened(book)
         -- (reused from memory: same title, authors, series and file name)
         if not book.search_key then Core.buildSearchKey(book, o.lower) end
     end
     local t_meta = self:clock()
 
-    self.books = scanned
+    -- Every distinct file, before copies of one work are folded into a tile.
+    -- The disk cache is this list, so a second format is not re-read next time.
+    self.files = scanned
+    local books = scanned
+    if o.merge_copies ~= false then
+        books = Core.mergeCopies(scanned)
+        for _, b in ipairs(books) do
+            if b.copies then Core.buildSearchKey(b, o.lower) end
+        end
+    end
+    self.books = books
     self.by_path = {}
-    for _, b in ipairs(scanned) do self.by_path[b.path] = b end
+    self.by_key = {}
+    for _, b in ipairs(scanned) do
+        self.by_path[b.path] = b
+        local key = Core.fileKey(b.path)
+        if not self.by_key[key] then self.by_key[key] = b end
+        if type(b.alt_paths) == "table" then
+            for _, p in ipairs(b.alt_paths) do
+                self.by_path[p] = b
+                local ak = Core.fileKey(p)
+                if not self.by_key[ak] then self.by_key[ak] = b end
+            end
+        end
+    end
     self.truncated = truncated
     self.built = true
 
+    local cached_n = 0
+    if cache then
+        -- The in-memory map also keys alternate paths of the same file, so
+        -- its size is not the file count. The disk cache is one entry per file.
+        if cache.memory then cached_n = self._files_n or #scanned
+        else cached_n = self:countEntries(cache.entries) end
+    end
+    self._files_n = #scanned
     local dirty = force or not cache or #stale > 0 or sidecar_reads > 0
-        or self:countEntries(cache and cache.entries) ~= #scanned
+        or cached_n ~= #scanned
     if dirty then self:writeCache() end
     local t_end = self:clock()
 
     self.stats = {
-        books = #scanned,
+        books = #self.books,
+        files = #scanned,
         cached = #reused,
         refreshed = #stale,
         sidecar_reads = sidecar_reads,
@@ -338,19 +462,32 @@ end
 --- Re-read one book's reading state (after closing it, or changing its status).
 function Index:refreshBook(path)
     local book = self.by_path[path]
+    if not book and self.by_key and type(path) == "string" then
+        book = self.by_key[Core.fileKey(path)]
+    end
+    if book and book.merged_into then book = book.merged_into end
     if not book then return nil end
     book.sc_mtime = nil
     self:refreshState(book)
-    local times = self:historyTimes()
-    book.last_opened = times[path] or book.last_opened
+    local exact, by_key = self:historyTimes()
+    local opened, via = self:historyFor(book, exact, by_key)
+    book.last_opened = opened or book.last_opened
+    if type(via) == "string" and via ~= "" and via ~= book.path then book.open_path = via end
     self:applyOpened(book)
     return book
 end
 
 --- A record for a file outside the indexed folder (e.g. in a collection).
 function Index:recordFor(path)
-    local book = self.by_path[path]
-    if book then return book end
+    local book = self.by_path and self.by_path[path]
+    if not book and self.by_key and type(path) == "string" then
+        book = self.by_key[Core.fileKey(path)]
+    end
+    if book then
+        -- A format that was folded into another tile: the collection shows that tile.
+        if book.merged_into then return book.merged_into end
+        return book
+    end
     local attr = self.opts.fs.attributes(path)
     if not attr or attr.mode ~= "file" then return nil end
     local dir, name = Core.splitPath(path)
@@ -360,7 +497,8 @@ function Index:recordFor(path)
     }
     local data = self:refreshState(book)
     self:fillMeta(book, {}, nil, data)
-    book.last_opened = self:historyTimes()[path]
+    local exact, by_key = self:historyTimes()
+    book.last_opened = select(1, self:historyFor(book, exact, by_key))
     self:applyOpened(book)
     Core.buildSearchKey(book, self.opts.lower)
     return book

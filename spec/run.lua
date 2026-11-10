@@ -67,6 +67,7 @@ require("librarysuggest_spec") -- word suggestions while typing
 require("librarytiming_spec") -- the opt-in timing log
 require("librarystatus_spec") -- clock and battery styles beside the search bar
 require("libraryupdate_spec") -- version, release SHA256, backup and restore
+require("librarydedupe_spec") -- duplicate files, grouped copies, skipped folders and types
 
 io.write("\n")
 for _, f in ipairs(failures) do print("FAIL: " .. f) end

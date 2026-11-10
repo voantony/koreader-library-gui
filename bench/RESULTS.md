@@ -88,6 +88,17 @@ With Project: Title enabled, the regular bench still extracts covers into its ca
 
 None of these numbers were measured on a device. Expect the CPU-bound parts to be roughly an order of magnitude slower on the Kindle; that is an estimate, not a measurement. Even then, search filtering stays well under a frame, and the e-ink refresh, not the plugin, sets the visible latency.
 
+## Large library, in memory
+
+`luajit bench/index_bench.lua` builds a fake tree of 5,000 EPUBs plus one PDF of the same book in each shelf (folded into one tile), a symlink of the first book, a `notes.txt` in every shelf, and `node_modules`, `.git`, `build`, `venv`, `__pycache__`, `system` and `Android` (none of those are opened). No disk and no KOReader process. One run on this machine:
+
+| Pass | time | tiles | files |
+|---|---|---|---|
+| Cold (metadata filled) | 149 ms | 5001 | 5050 |
+| Warm (unchanged files reused) | 105 ms | 5001 | 5050 |
+
+The same shape is asserted, with a loose time bound, by `spec/librarydedupe_spec.lua`.
+
 ## Rerun
 
 ```sh
