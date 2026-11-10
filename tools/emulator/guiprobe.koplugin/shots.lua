@@ -1723,5 +1723,117 @@ scenarios.gestures = gesturesScenario
 scenarios.gesturemenu = gestureMenuScenario
 scenarios.update = updateScenario
 scenarios.menuclose = menuCloseScenario
+
+-- The first refresh after a book closes. With Return to Library, that paint
+-- is the Library. The file browser is created underneath and is not the top
+-- widget, so it is not what the screen shows.
+scenarios.closebook = function()
+    whenLibrary(function()
+        q(0.4, function()
+            dismissNotices()
+            local view = V()
+            local book
+            for _, b in ipairs(view.sorted or {}) do
+                if b.path and tostring(b.path):match("%.epub$") then book = b; break end
+            end
+            book = book or (view.sorted and view.sorted[1])
+            if not (book and book.path) then
+                state.ok = false
+                P("FAIL no book to open")
+                return
+            end
+            P("open", book.path)
+            lib():openBook(book.path, view)
+        end)
+        local tries = 0
+        local function waitReader()
+            tries = tries + 1
+            local ui = RUI()
+            if ui and ui.document then
+                P("reader up", "tries", tries)
+                return
+            end
+            if tries > 60 then
+                state.ok = false
+                P("FAIL reader did not open")
+                return
+            end
+            again(0.5, waitReader)
+        end
+        q(1, waitReader)
+        q(0.4, function()
+            local ui = RUI()
+            if not (ui and ui.document and ui.document.file) then
+                state.ok = false
+                P("FAIL no document to close")
+                return
+            end
+            local file = ui.document.file
+            if ui.menu and ui.menu.onTapCloseMenu then ui.menu:onTapCloseMenu() end
+            ui:onClose()
+            local paints = 0
+            local orig = UIManager.forceRePaint
+            UIManager.forceRePaint = function(um, ...)
+                paints = paints + 1
+                orig(um, ...)
+                if paints == 1 then
+                    local stack = UIManager._window_stack or {}
+                    local w = stack[#stack] and stack[#stack].widget
+                    local name = w and (w.name or w.title) or "none"
+                    if type(name) ~= "string" then name = tostring(name) end
+                    P("first paint top", name, "stack", stackLine())
+                    -- shot() calls forceRePaint; this paint is already done.
+                    shotRaw("close-first-paint")
+                    if name ~= "library_view" then
+                        state.ok = false
+                        P("FAIL first paint is not the Library")
+                    else
+                        P("PASS first paint is the Library")
+                    end
+                end
+            end
+            ui:showFileManager(file)
+            UIManager:forceRePaint()
+            UIManager.forceRePaint = orig
+            P("close paints", paints)
+        end)
+    end)
+end
+
+scenarios.returnmenu = function()
+    whenLibrary(function()
+        q(0.3, function()
+            dismissNotices()
+            lib():showAfterCloseDialog(V())
+        end)
+        q(0.5, function()
+            local back = findAnywhere("Return to Library")
+            local files = findAnywhere("Return to file browser")
+            P("after close", tostring(back), tostring(files), "stack", stackLine())
+            if not (back and files) then
+                state.ok = false
+                P("FAIL after-close choices missing")
+            else
+                P("PASS after closing a book")
+            end
+            shot("after-closing-a-book")
+            closeAboveView()
+            lib():showOnStartupDialog(V())
+        end)
+        q(0.5, function()
+            local openlib = findAnywhere("Open Library")
+            local last = findAnywhere("Resume last book")
+            P("on startup", tostring(openlib), tostring(last), "stack", stackLine())
+            if not (openlib and last) then
+                state.ok = false
+                P("FAIL startup choices missing")
+            else
+                P("PASS on startup")
+            end
+            shot("on-startup")
+        end)
+    end)
+end
+
 return scenarios
 end
