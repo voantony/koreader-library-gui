@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1 (2026-11-10)
+
+- **Details card fix.** The book details card (long-press a book) crashed while drawing pages, last read, file size and path, a bug since v0.6.0. Fixed.
+- README refreshed for v0.7.0 with new screenshots of the Gestures menu, Cover only, and the badges.
+
 ## 0.7.0 (2026-11-10)
 
 File-browser gestures on the Library home, and a Gestures menu so the Library can use its own bindings. Thanks to @drkhn1234 for #9 and for saying which gestures they use on a Kindle Paperwhite 4.

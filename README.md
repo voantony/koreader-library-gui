@@ -1,6 +1,6 @@
 # Library GUI for KOReader
 
-[![Release](https://gitlab.com/antonyvo/koreader-library-gui/-/badges/release.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.0)
+[![Release](https://gitlab.com/antonyvo/koreader-library-gui/-/badges/release.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.1)
 [![Pipeline](https://gitlab.com/antonyvo/koreader-library-gui/badges/main/pipeline.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/pipelines)
 
 Library GUI (`library.koplugin`) is a KOReader plugin that replaces the file browser with a library screen that looks and works more like the Kindle's own home screen: book covers with reading progress, a search bar with the clock and battery at the top, tabs for Books, Collections, Authors and Series, the menu in the footer, and a Controls panel you pull down from the top right (or open from the clock or the ☰ menu).
@@ -9,7 +9,7 @@ It sits alongside KOReader's file browser, History and Collections. It never mov
 
 <p align="center"><img src="docs/screenshots/v050-widgets.png" width="420" alt="Books tab with Continue Reading and Favorites above the cover grid and one A–Z column on the right"></p>
 
-The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. The current release is [v0.7.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.0) (10 November 2026). The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
+The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. The current release is [v0.7.1](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.1) (10 November 2026). The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
 
 ## Home screen
 
@@ -114,9 +114,9 @@ The shots on this page were taken in the KOReader emulator (1264×1680) with the
 
 ## Install
 
-The current release is **[v0.7.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.0)**. Download **[library.koplugin-v0.7.0.zip](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.0/downloads/library.koplugin-v0.7.0.zip)** and unzip it. You get a folder called `library.koplugin`.
+The current release is **[v0.7.1](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.1)**. Download **[library.koplugin-v0.7.1.zip](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.1/downloads/library.koplugin-v0.7.1.zip)** and unzip it. You get a folder called `library.koplugin`.
 
-SHA256: `fede2f8f502ff753d0936c36659d2eba5789a80371f3dc0ee64103b3e43fd47c`
+SHA256: `17c1174b2ae2128ed545cd2d23c11dd4ec7755689e03aaad15c4f8887153a17a`
 
 1. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).
