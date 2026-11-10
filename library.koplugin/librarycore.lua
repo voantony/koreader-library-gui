@@ -1793,11 +1793,11 @@ function Core.nextMinuteDelay(now)
     return delay
 end
 
---- Footer buttons: the menu, and Resume (drawn, but not tappable, when there is no book).
-function Core.footerChrome(has_book)
+--- Footer chrome on the left: the menu only. The current-book cover in
+-- the middle opens the same book the old Resume button did (#4).
+function Core.footerChrome(_has_book)
     return {
         { id = "menu", icon = "appbar.menu", enabled = true },
-        { id = "resume", icon = "book.opened", enabled = has_book and true or false },
     }
 end
 
@@ -1962,12 +1962,62 @@ end
 -- eighths (the strips LiveLight's brightness/warmth slides use): "left",
 -- "right", or nil. `w` is the screen width. On a 1264 px Colorsoft each
 -- strip is 158 px wide.
+--- A rectangle GestureRange can ask `:contains` on. Never nil. A missing
+-- or plain box becomes an empty one that matches nothing, so a scrub
+-- cannot crash with "attempt to call method 'contains' (a nil value)".
+function Core.gestureRect(rect)
+    local x = type(rect) == "table" and tonumber(rect.x) or 0
+    local y = type(rect) == "table" and tonumber(rect.y) or 0
+    local w = type(rect) == "table" and tonumber(rect.w) or 0
+    local h = type(rect) == "table" and tonumber(rect.h) or 0
+    x, y = x or 0, y or 0
+    w, h = w or 0, h or 0
+    if w < 0 then w = 0 end
+    if h < 0 then h = 0 end
+    if type(rect) == "table" and type(rect.contains) == "function"
+        and rect.x == x and rect.y == y and rect.w == w and rect.h == h then
+        return rect
+    end
+    local g = { x = x, y = y, w = w, h = h }
+    function g:contains(p)
+        if self.w <= 0 or self.h <= 0 then return false end
+        if type(p) ~= "table" or not p.x or not p.y then return false end
+        local pw, ph = tonumber(p.w) or 0, tonumber(p.h) or 0
+        return self.x <= p.x and self.y <= p.y
+            and self.x + self.w >= p.x + pw
+            and self.y + self.h >= p.y + ph
+    end
+    return g
+end
+
 function Core.edgeStrip(x, w)
     x, w = tonumber(x), tonumber(w)
     if not (x and w) or w <= 0 then return nil end
     if x < w / 8 then return "left" end
     if x >= w * 7 / 8 then return "right" end
     return nil
+end
+
+--- Brightness for a finger that started at `start_y` on the left edge and
+-- is now at `y`. Up (smaller y) raises the level. The whole range takes
+-- 70% of the screen height, the same travel LiveLight uses. One step of
+-- the Controls slider is one integer of this result.
+function Core.edgeLightLevel(start_y, y, screen_h, start_level, min_level, max_level)
+    start_y = tonumber(start_y) or 0
+    y = tonumber(y) or start_y
+    screen_h = tonumber(screen_h) or 0
+    start_level = math.floor(tonumber(start_level) or 0)
+    min_level = math.floor(tonumber(min_level) or 0)
+    max_level = math.floor(tonumber(max_level) or start_level)
+    if max_level < min_level then max_level = min_level end
+    if screen_h < 1 then return start_level end
+    local travel = screen_h * 0.7
+    local span = max_level - min_level
+    if travel < 1 or span < 1 then return start_level end
+    local level = math.floor(start_level + (start_y - y) * span / travel + 0.5)
+    if level < min_level then level = min_level end
+    if level > max_level then level = max_level end
+    return level
 end
 
 --- Bottom-left corner: KOReader's DTAP_ZONE_BOTTOM_LEFT, the outer eighth
@@ -2743,14 +2793,32 @@ function Core.pageHitPx(dpi)
     return px
 end
 
---- Width of the letter strip. Same 10 mm grab as a page button: the letters
--- themselves stay a slim column inside it, and the grid gives up this width
--- so covers never sit under the strip.
---- Hit width of the A–Z strip. Wider than the 10 mm page button so the
--- column is easy to hold; the painted letters stay a slim column inside it.
+--- Visible A–Z column the grid gives up. About 4.2 mm, at least 44 px at
+-- 300 dpi: a hairline and a bold letter, with the letter close to the
+-- divider. The hit target is wider than this and is not reserved.
+function Core.scrubberColumnWidth(dpi)
+    dpi = tonumber(dpi)
+    if not dpi or dpi ~= dpi or dpi < 1 then dpi = 167 end
+    local px = math.floor(4.2 * dpi / 25.4 + 0.5)
+    if dpi >= 290 then px = math.max(px, 44) end
+    if px < 28 then px = 28 end
+    return px
+end
+
+--- How far the letter hit reaches left of the divider, into the gutter
+-- only. About 2 mm. A cover under that overlap still gets the tap.
+function Core.scrubberGutterHit(dpi)
+    dpi = tonumber(dpi)
+    if not dpi or dpi ~= dpi or dpi < 1 then dpi = 167 end
+    local px = math.floor(2.0 * dpi / 25.4 + 0.5)
+    if dpi >= 290 then px = math.max(px, 20) end
+    if px < 8 then px = 8 end
+    return px
+end
+
+--- Reserved width of the A–Z strip: the visible column, not the hit area.
 function Core.scrubberWidth(dpi)
-    local hit = Core.pageHitPx(dpi)
-    return math.max(hit, math.floor(hit * 1.4 + 0.5))
+    return Core.scrubberColumnWidth(dpi)
 end
 
 --- Smallest slot that still holds a bold letter. A full-height shelf fits
@@ -3049,7 +3117,8 @@ end
 --- Which letter a finger at screen `y` is on. Slots share the strip height
 -- equally. Nil when the point is outside the strip.
 function Core.scrubberLetterAt(y, strip_y, strip_h, letters)
-    letters = letters or Core.SCRUBBER_LETTERS
+    if letters == nil then letters = Core.SCRUBBER_LETTERS end
+    if type(letters) ~= "table" then return nil end
     local n = #letters
     y = tonumber(y)
     strip_y = tonumber(strip_y) or 0

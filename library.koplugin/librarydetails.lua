@@ -91,7 +91,7 @@ function Link:init()
     local s = self[1]:getSize()
     self.dimen = Geom:new{ x = 0, y = 0, w = s.w, h = s.h }
     self.ges_events = {
-        TapLink = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } },
+        TapLink = { GestureRange:new{ ges = "tap", range = function() return Core.gestureRect(self.dimen) end } },
     }
 end
 
@@ -148,7 +148,7 @@ function Chip:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = s.w, h = s.h }
     if self.plain then return end
     self.ges_events = {
-        TapChip = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } },
+        TapChip = { GestureRange:new{ ges = "tap", range = function() return Core.gestureRect(self.dimen) end } },
     }
 end
 
@@ -179,8 +179,8 @@ function Pager:init()
     self[1] = group
     self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
     self.ges_events = {
-        SwipePage = { GestureRange:new{ ges = "swipe", range = function() return self.dimen end } },
-        TapPage = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } },
+        SwipePage = { GestureRange:new{ ges = "swipe", range = function() return Core.gestureRect(self.dimen) end } },
+        TapPage = { GestureRange:new{ ges = "tap", range = function() return Core.gestureRect(self.dimen) end } },
     }
     self:refreshLabel()
 end
@@ -345,8 +345,8 @@ function Details:init()
         w = sw - 2 * L.margin, h = sh - 2 * L.margin,
     }
     self.ges_events = {
-        TapCard = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } },
-        SwipeCard = { GestureRange:new{ ges = "swipe", range = function() return self.dimen end } },
+        TapCard = { GestureRange:new{ ges = "tap", range = function() return Core.gestureRect(self.dimen) end } },
+        SwipeCard = { GestureRange:new{ ges = "swipe", range = function() return Core.gestureRect(self.dimen) end } },
     }
     if Device:hasKeys() and Device.input and Device.input.group then
         local back = Core.detailsCloseKeys(Device.input.group.Back, Device:hasFewKeys())

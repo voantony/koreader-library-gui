@@ -1,7 +1,9 @@
 --- A–Z strip down the right edge of the library grid.
 -- Tap or drag a letter to jump to the first page whose sort key starts with
 -- it. While the finger is down, only the strip and the letter bubble are
--- refreshed (a fast update). The grid is rebuilt once, when the finger lifts.
+-- refreshed (a fast update). Letting go always clears the bubble and asks
+-- for a UI refresh of the rectangle under it, then rebuilds the grid once.
+-- A touch that starts on the strip is never offered to LiveLight.
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local Font = require("ui/font")
@@ -11,7 +13,6 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local Core = require("librarycore")
-local Zones = require("libraryzones")
 local Screen = Device.screen
 
 local C = Blitbuffer
@@ -28,6 +29,8 @@ local Scrubber = InputContainer:extend{
     screen_h = 0,
     bubble_letter = nil,
     DRAG_TICK = 0.06,  -- seconds between coalesced drag steps
+    -- If no release event arrives, hide the bubble anyway.
+    BUBBLE_TIMEOUT = 1.0,
 }
 
 local function textSize(face, s, bold, color, bg)
@@ -53,7 +56,10 @@ function Scrubber:init()
     if not sh or sh < 1 then sh = Screen:getHeight() end
     self.screen_w, self.screen_h = sw, sh
     self.bubble = Core.scrubberBubbleRect(sw, sh, self.dpi)
-    local range = function() return self.dimen end
+    if not self.hit_extra then
+        self.hit_extra = Core.scrubberGutterHit(self.dpi)
+    end
+    local range = function() return self:hitRect() end
     self.ges_events = {
         TapScrubber = { GestureRange:new{ ges = "tap", range = range } },
         PanScrubber = { GestureRange:new{ ges = "pan", range = range } },
@@ -67,6 +73,29 @@ end
 
 function Scrubber:getSize()
     return self.dimen
+end
+
+--- Where a finger counts as on the strip. The painted column, plus a
+-- gutter overlap on the left and the rest of the way to the screen edge.
+function Scrubber:hitRect()
+    local d = self.dimen or {}
+    local x0 = math.floor(d.x or 0)
+    local w = math.floor(d.w or 0)
+    local extra = math.floor(tonumber(self.hit_extra) or 0)
+    if extra < 0 then extra = 0 end
+    local x = x0 - extra
+    if x < 0 then x = 0 end
+    local right = x0 + w
+    local edge = math.floor(tonumber(self.screen_w) or 0)
+    if edge > 0 and x0 > edge * 0.5 and right < edge then
+        right = edge
+    end
+    return Core.gestureRect{
+        x = x,
+        y = math.floor(d.y or 0),
+        w = math.max(0, right - x),
+        h = math.floor(d.h or 0),
+    }
 end
 
 function Scrubber:stripRect()
@@ -108,10 +137,12 @@ end
 
 function Scrubber:paintStrip(bb, x, y)
     local d = self.dimen
-    local w, h = d.w, d.h
+    if not d or not bb then return end
+    local w, h = tonumber(d.w) or 0, tonumber(d.h) or 0
+    if w < 1 or h < 1 then return end
     bb:paintRect(x, y, w, h, C.COLOR_WHITE)
-    -- Hairline where the covers stop. Letters sit in a slim column on the
-    -- right; the rest of the wider strip is the touch margin.
+    -- Hairline where the covers stop. The letters sit just to its right.
+    -- The wider hit area is not painted; it overlaps the gutter and the edge.
     local line = math.max(1, math.floor((tonumber(self.dpi) or 300) / 167))
     if bb.paintRect then
         bb:paintRect(x, y, line, h, C.COLOR_GRAY_B)
@@ -119,8 +150,10 @@ function Scrubber:paintStrip(bb, x, y)
     local marks = Core.scrubberMarks(self.letters, h, Core.scrubberMinSlot(self.dpi))
     local n = #marks
     if n < 1 or h < 1 then return end
-    local glyph_w = math.min(56, math.max(28, math.floor(w * 0.34)))
-    local glyph_x = x + w - glyph_w
+    local inset = math.max(line + 1, 2)
+    local right_pad = math.max(1, math.floor(w * 0.08))
+    local glyph_w = math.max(1, w - inset - right_pad)
+    local glyph_x = x + inset
     local face_px = self:nominalSize(math.max(14, math.floor(h / n) - 2), 16, 26)
     local face = Font:getFace("cfont", face_px)
     local dot_face = Font:getFace("cfont", self:nominalSize(10, 10, 14))
@@ -132,28 +165,30 @@ function Scrubber:paintStrip(bb, x, y)
             local widget, sz = textSize(dot_face, "·", true, C.COLOR_GRAY_6, C.COLOR_WHITE)
             widget:paintTo(bb, glyph_x + math.floor((glyph_w - sz.w) / 2), sy + math.floor((sh - sz.h) / 2))
             widget:free()
-        else
+        elseif type(mark.letter) == "string" and mark.letter ~= "" then
             local letter = mark.letter
             local on = self:active(letter)
             local hot = highlight == letter
             local bg = C.COLOR_WHITE
             local fg = on and C.COLOR_BLACK or C.COLOR_GRAY_6
+            local box_w = math.max(1, glyph_w - 4)
             if hot then
                 bg = on and C.COLOR_BLACK or C.COLOR_GRAY_8
                 fg = C.COLOR_WHITE
                 local pad = math.max(1, math.floor(sh * 0.08))
-                bb:paintRoundedRect(glyph_x + 2, sy + pad, glyph_w - 6, math.max(1, sh - 2 * pad), bg,
-                    math.floor(sh / 2))
+                local box_h = math.max(1, sh - 2 * pad)
+                bb:paintRoundedRect(glyph_x + 2, sy + pad, box_w, box_h, bg,
+                    math.min(math.floor(sh / 2), math.floor(box_w / 2), math.floor(box_h / 2)))
             end
             local widget, sz = textSize(face, letter, true, fg, hot and bg or C.COLOR_WHITE)
-            local tx = glyph_x + math.floor((glyph_w - sz.w) / 2)
-            local ty = sy + math.floor((sh - sz.h) / 2)
+            local tx = glyph_x + math.floor((glyph_w - (sz.w or 0)) / 2)
+            local ty = sy + math.floor((sh - (sz.h or 0)) / 2)
             widget:paintTo(bb, tx, ty)
             widget:free()
             if not hot and letter == self.anchor and on then
-                local mark_w = math.max(4, math.floor(sz.w * 0.7))
+                local mark_w = math.max(4, math.floor((sz.w or 0) * 0.7))
                 local mx = glyph_x + math.floor((glyph_w - mark_w) / 2)
-                bb:paintRect(mx, ty + sz.h - 1, mark_w, math.max(1, math.floor(sh * 0.08)), C.COLOR_BLACK)
+                bb:paintRect(mx, ty + (sz.h or 0) - 1, mark_w, math.max(1, math.floor(sh * 0.08)), C.COLOR_BLACK)
             end
         end
     end
@@ -182,13 +217,21 @@ function Scrubber:paintTo(bb, x, y)
     if self.bubble_letter then self:paintBubble(bb) end
 end
 
-function Scrubber:pushRefresh(plan)
+function Scrubber:pushRefresh(plan, prefer_view)
     self.last_refresh = plan
     if not plan or not UIManager.setDirty then return end
+    -- The strip widget is thrown away when a letter jump rebuilds the
+    -- page. Dirty the view, which stays, so the panel still updates the
+    -- rectangle the bubble covered.
+    local host = (prefer_view and self.view) or self
+    -- A jump rebuilds the page and drops this strip. Refreshing a widget
+    -- that is already closed crashes the repaint, so the region is asked
+    -- for on its own.
+    if host and host._closed then host = nil end
     for _, r in ipairs(plan.regions or {}) do
         local rect = Geom:new{ x = r.x, y = r.y, w = r.w, h = r.h }
         local mode = plan.mode
-        UIManager:setDirty(self, function() return mode, rect end)
+        UIManager:setDirty(host, function() return mode, rect end)
     end
 end
 
@@ -262,6 +305,47 @@ function Scrubber:cancelTick()
     self._tick = nil
 end
 
+function Scrubber:cancelBubbleTimeout()
+    if self._bubble_timeout and UIManager.unschedule then
+        UIManager:unschedule(self._bubble_timeout)
+    end
+    self._bubble_timeout = nil
+end
+
+--- Hide the letter if no pan_release, hold_release or swipe ever arrives.
+function Scrubber:armBubbleTimeout()
+    self:cancelBubbleTimeout()
+    self._bubble_timeout = function()
+        self._bubble_timeout = nil
+        if self._drag or self.bubble_letter then self:endDrag() end
+    end
+    if UIManager.scheduleIn then
+        UIManager:scheduleIn(self.BUBBLE_TIMEOUT or 1, self._bubble_timeout)
+    end
+end
+
+--- Drop the centered letter and refresh the rectangle under it.
+-- Safe to call more than once. Does not jump to a page.
+function Scrubber:clearBubble()
+    if self._clearing then return false end
+    if not (self.bubble_letter or self._drag or self._pending or self._snap or self._bubble_timeout) then
+        return false
+    end
+    self._clearing = true
+    self:cancelTick()
+    self:cancelBubbleTimeout()
+    local bubble = self.bubble
+    local strip = self:stripRect()
+    self._drag = nil
+    self._pending = nil
+    self.bubble_letter = nil
+    self:restoreSnap()
+    self:redrawDrag()
+    self:pushRefresh(Core.scrubberReleaseRefresh(false, nil, strip, bubble), true)
+    self._clearing = false
+    return true
+end
+
 function Scrubber:flushDrag()
     local pos = self._pending
     self._pending = nil
@@ -273,6 +357,7 @@ end
 function Scrubber:dragTo(pos)
     self._drag = true
     self._pending = pos
+    self:armBubbleTimeout()
     if self._tick then return end
     self:flushDrag()
     self._tick = function()
@@ -298,20 +383,20 @@ function Scrubber:jumpTo(letter)
 end
 
 function Scrubber:endDrag()
-    if not self._drag then return false end
+    if not (self._drag or self.bubble_letter) then
+        self:cancelBubbleTimeout()
+        return false
+    end
     self:cancelTick()
     self:flushDrag()
     local letter = self.bubble_letter
-    local bubble = self.bubble
-    local strip = self:stripRect()
-    self._drag = nil
-    self.bubble_letter = nil
-    self:restoreSnap()
+    self:clearBubble()
     local view = self.view
-    local navigated = view and view.jumpToLetter and view:jumpToLetter(letter)
-    if not navigated then
-        self:redrawDrag()
-        self:pushRefresh(Core.scrubberReleaseRefresh(false, nil, strip, bubble))
+    if view and view._closed then return true end
+    if view and view.jumpToLetter then
+        view:jumpToLetter(letter)
+    else
+        self:jumpTo(letter)
     end
     return true
 end
@@ -335,34 +420,27 @@ function Scrubber:onPanReleaseScrubber()
     return self:endDrag() or true
 end
 
---- A vertical swipe in the outer eighth is LiveLight's brightness or
--- warmth slide, which overlaps this strip. Taps and drags still pick a letter.
-function Scrubber:offerLiveLight(ges)
-    local view = self.view
-    local w = view and view.dimen and view.dimen.w
-    if not Core.edgeVerticalSwipe(ges, w) then return false end
-    if not (Zones and Zones.tryLiveZones) then return false end
-    local ok, taken = pcall(Zones.tryLiveZones, ges)
-    return ok and taken == true
-end
-
 function Scrubber:onSwipeScrubber(_, ges)
     -- A downward swipe from the top of the strip (inside the Controls zone)
     -- opens Controls instead of jumping to a letter. LibraryView also checks
     -- this, but a swipe that starts on the strip is delivered here first.
-    if not (self._drag) and self.view and self.view.tryOpenControls and self.view:tryOpenControls(ges) then
+    -- Once a drag is underway the lift still has to clear the bubble, so
+    -- Controls does not take that swipe.
+    if not self._drag and self.view and self.view.tryOpenControls and self.view:tryOpenControls(ges) then
         return true
     end
-    if self:offerLiveLight(ges) then return true end
-    -- A quick flick is a swipe instead of a pan_release. Stay on the strip:
-    -- do not also turn a page.
+    -- The strip wins over LiveLight. A flick that starts here picks a letter
+    -- and is not offered to the warmth zone, even though the column sits
+    -- inside the outer eighth.
     local pos = ges and (ges.end_pos or ges.pos)
-    if self._drag then
+    if self._drag or self.bubble_letter then
         if pos then self._pending = pos end
         self:endDrag()
         return true
     end
-    local letter = self:letterAt(pos and pos.y)
+    -- A quick flick is a swipe instead of a pan_release. Stay on the strip:
+    -- do not also turn a page.
+    local letter = self:letterAt((ges and ges.pos and ges.pos.y) or (pos and pos.y))
     self:jumpTo(letter)
     return true
 end
@@ -382,6 +460,7 @@ function Scrubber:onHoldReleaseScrubber()
 end
 
 function Scrubber:onCloseWidget()
+    self:clearBubble()
     self:cancelTick()
     self:freeSnap()
 end

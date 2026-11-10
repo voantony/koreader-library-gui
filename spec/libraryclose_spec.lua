@@ -1,5 +1,6 @@
 -- Closing the Library: no X; "Close Library" is the last item of the
--- three-bar menu. The menu and Resume buttons are in the footer.
+-- three-bar menu. The menu button is in the footer. The current-book
+-- cover, not a Resume button, opens the last book.
 -- The Back key still closes (or leaves a shelf).
 local function stub()
     return setmetatable({}, {
@@ -105,14 +106,12 @@ describe("Library footer buttons", function()
         return setmetatable(extra or {}, { __index = View })
     end
 
-    it("is the menu button and a Resume button that needs a book", function()
+    it("is only the menu button", function()
         local off = Core.footerChrome(false)
+        eq(#off, 1)
         eq(off[1].icon, "appbar.menu")
         eq(off[1].enabled, true)
-        eq(off[2].icon, "book.opened")
-        eq(off[2].enabled, false, "no last book: Resume is not tappable")
-        eq(Core.footerChrome(true)[2].enabled, true)
-        eq(#Core.footerChrome(true), 2)
+        eq(#Core.footerChrome(true), 1)
     end)
 
     it("Resume opens the last book, including from inside a shelf", function()
@@ -139,11 +138,9 @@ describe("Library footer buttons", function()
         v.plugin = { getBooks = function() return books end, collate = function(a, b) return a < b end }
         v:reloadData()
         eq(v.last_book, nil)
-        eq(Core.footerChrome(v.last_book ~= nil)[2].enabled, false)
         books = { { path = "/a.epub", title = "A", status = "reading", percent = 0.3, last_opened = 100 } }
         v:reloadData()
         eq(v.last_book.path, "/a.epub")
-        eq(Core.footerChrome(true)[2].enabled, true)
         books = {}
         v:reloadData()
         eq(v.last_book, nil)

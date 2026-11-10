@@ -10,7 +10,7 @@ Layout, top to bottom:
     continue reading (Books tab, no search or filter:
                      the books in progress, with percent and last-read time)
     cover grid or list   an A–Z strip on the right when sorted by title, author or series
-    footer           menu, Resume, page x of y, sort
+    footer           menu, page x of y, sort, current-book cover
                      (in a series: "2 of 5 read")
 
 Inside a series the books are in series order and numbered ("3 · Title").
@@ -266,7 +266,11 @@ function TapArea:init()
         w = math.max(size.w, self.min_w or 0),
         h = math.max(size.h, self.min_h or 0),
     }
-    self.ges_events = { TapArea = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } } }
+    local range = function() return Core.gestureRect(self.dimen) end
+    self.ges_events = { TapArea = { GestureRange:new{ ges = "tap", range = range } } }
+    if self.hold_callback then
+        self.ges_events.HoldArea = { GestureRange:new{ ges = "hold", range = range } }
+    end
     local box = Geom:new{ w = self.dimen.w, h = self.dimen.h }
     if self.align == "center" then
         self[1] = CenterContainer:new{ dimen = box, self[1] }
@@ -287,6 +291,11 @@ function TapArea:onTapArea()
     return true
 end
 
+function TapArea:onHoldArea()
+    if self.hold_callback then self.hold_callback() end
+    return true
+end
+
 --- A widget title. Long-press opens the widget menu (#1). Tap is left
 -- for the accordion (#2); with no tap handler the press is not eaten.
 local WidgetTitle = InputContainer:extend{}
@@ -295,7 +304,7 @@ function WidgetTitle:init()
     local label = self[1]
     local sz = label and label.getSize and label:getSize() or { w = 40, h = 20 }
     self.dimen = Geom:new{ x = 0, y = 0, w = math.max(sz.w, self.min_w or 0), h = math.max(sz.h, self.min_h or 24) }
-    local range = function() return self.dimen end
+    local range = function() return Core.gestureRect(self.dimen) end
     self.ges_events = {
         TapWidgetTitle = { GestureRange:new{ ges = "tap", range = range } },
         HoldWidgetTitle = { GestureRange:new{ ges = "hold", range = range } },
@@ -328,7 +337,7 @@ function LibraryView:buildChrome()
     self:scheduleStatusRefresh()
 end
 
---- Long-press on the Resume button: which book it opens.
+--- Long-press on the current-book cover: which book it opens.
 function LibraryView:showResumeHint()
     local book = self.last_book
     if not book then return end
@@ -856,7 +865,7 @@ function FilterStrip:init()
     local scroll = Core.filterScroll(self.offset, self.content_w, self.dimen.w, 0)
     self.offset = scroll.offset
     self._scroll = scroll
-    local range = function() return self.dimen end
+    local range = function() return Core.gestureRect(self.dimen) end
     self.ges_events = {
         PanFilter = { GestureRange:new{ ges = "pan", range = range } },
         SwipeFilter = { GestureRange:new{ ges = "swipe", range = range } },
@@ -949,14 +958,13 @@ function LibraryView:buildChips(counts)
     }
 end
 
---- The current book's cover in the middle of the footer (issue #4): the
--- same book the Resume button opens, as a miniature with a 2:3 shape.
--- Tap it to return to the reader. No cover yet: the book's initial in a
--- bordered box, like the mockup's "B". No book being read: no button, and
--- the footer is exactly as before. Returns the button and its width.
+--- The current book's cover in the middle of the footer (issue #4).
+-- Tap it to return to the reader. A long-press shows the title and progress,
+-- which used to live on the Resume button. No cover yet: the book's initial
+-- in a bordered box. Returns the button and its width.
 function LibraryView:buildCurrentBookButton(height)
     local book = self.last_book
-    if not book then return nil, 0 end
+    if not book then return nil, height end
     local cover, _w, _h, needs = Tiles.bookCover(self, book,
         math.floor(height * 2 / 3 + 0.5), height,
         Core.scrubberBucket(book.title or book.name or ""), nil)
@@ -970,6 +978,7 @@ function LibraryView:buildCurrentBookButton(height)
     local btn = TapArea:new{
         min_w = Tiles.minTouch(), min_h = Tiles.minTouch(), align = "center",
         callback = function() self:onResume() end,
+        hold_callback = function() self:showResumeHint() end,
         cover,
     }
     return btn, btn:getSize().w
@@ -1037,23 +1046,18 @@ function LibraryView:buildFooter(page, pages, total, kind)
         page_label,
         arrow("chevron.right", 1, page < pages or more),
     }
-    -- Menu and Resume live here, not in the top corners: those are hard to hit on e-ink.
-    -- Same thumb-sized target as the page arrows. Resume stays put, dimmed, with no book.
+    -- The menu lives here, not in a top corner: those are hard to hit on e-ink.
+    -- Same thumb-sized target as the page arrows.
     local chrome_icon = Screen:scaleBySize(22)
     local chrome_pad = math.max(0, math.floor((touch - chrome_icon) / 2))
     local function chromeButton(item)
         local enabled = item.enabled ~= false
         local callback, hold
-        if item.id == "menu" then
-            -- A tap opens the menu (#1). A hold does not: the button sits
-            -- in the bottom-left corner, and a hold there is that corner's
-            -- gesture. Swipes are not claimed by the button at all.
-            callback = function() self:onLeftIcon() end
-            hold = nil
-        else
-            callback = function() if self.last_book then self:onResume() end end
-            hold = function() if self.last_book then self:showResumeHint() end end
-        end
+        -- A tap opens the menu (#1). A hold does not: the button sits
+        -- in the bottom-left corner, and a hold there is that corner's
+        -- gesture. Swipes are not claimed by the button at all.
+        callback = function() self:onLeftIcon() end
+        hold = nil
         local btn = IconButton:new{
             icon = item.icon,
             width = chrome_icon, height = chrome_icon,
@@ -1081,12 +1085,12 @@ function LibraryView:buildFooter(page, pages, total, kind)
             show_parent = self,
         }
     end
-    local menu_btn, resume_btn
+    local menu_btn
     for _, item in ipairs(Core.footerChrome(self.last_book ~= nil)) do
         local btn = chromeButton(item)
-        if item.id == "menu" then menu_btn = btn else resume_btn = btn end
+        if item.id == "menu" then menu_btn = btn end
     end
-    self.footer_menu, self.footer_resume = menu_btn, resume_btn
+    self.footer_menu, self.footer_resume = menu_btn, nil
     -- Button:onHoldSelectButton returns true even with no hold callback,
     -- which would swallow a hold in the bottom-left corner.
     if menu_btn.ges_events then
@@ -1094,7 +1098,7 @@ function LibraryView:buildFooter(page, pages, total, kind)
         menu_btn.ges_events.HoldReleaseSelectButton = nil
     end
     local button_gap = Size.padding.small
-    local buttons_w = menu_btn:getSize().w + button_gap + resume_btn:getSize().w + Size.padding.default
+    local buttons_w = menu_btn:getSize().w + Size.padding.default
     -- Size steps the cover size, view steps the form factor; a long-press
     -- on either opens the sort and view picker.
     local size_btn = navButton("zoom.page",
@@ -1107,7 +1111,11 @@ function LibraryView:buildFooter(page, pages, total, kind)
     local nav_w = size_btn:getSize().w + button_gap + view_btn:getSize().w + button_gap + pager:getSize().w
     -- The current book's cover, centred between the text and the pager.
     -- A touch-sized target; the visible miniature keeps its 2:3 shape.
-    local current_btn, current_w = self:buildCurrentBookButton(Tiles.minTouch())
+    -- The slot stays the same width with or without a book, so the footer
+    -- does not jump. Empty, it is just space in the middle.
+    local slot_h = Tiles.minTouch()
+    local current_btn, current_w = self:buildCurrentBookButton(slot_h)
+    if not current_btn then current_w = slot_h end
     self.footer_current = current_btn
     -- "202 books · Last read ▾": tap it to pick the sort (books only; a
     -- series keeps its reading order).
@@ -1126,20 +1134,15 @@ function LibraryView:buildFooter(page, pages, total, kind)
     local row = {
         align = "center",
         menu_btn,
-        HorizontalSpan:new{ width = button_gap },
-        resume_btn,
         HorizontalSpan:new{ width = Size.padding.default },
         text,
     }
-    if current_btn then
-        -- Split the free space around the cover so it sits in the middle.
-        local half = math.max(Size.padding.small, math.floor(rest / 2))
-        table.insert(row, HorizontalSpan:new{ width = half })
-        table.insert(row, current_btn)
-        table.insert(row, HorizontalSpan:new{ width = half })
-    else
-        table.insert(row, HorizontalSpan:new{ width = math.max(Size.padding.small, rest) })
-    end
+    -- Split the free space around the cover slot so it sits in the middle.
+    local half = math.max(Size.padding.small, math.floor(rest / 2))
+    local slot = current_btn or HorizontalSpan:new{ width = current_w }
+    table.insert(row, HorizontalSpan:new{ width = half })
+    table.insert(row, slot)
+    table.insert(row, HorizontalSpan:new{ width = half })
     table.insert(row, size_btn)
     table.insert(row, HorizontalSpan:new{ width = button_gap })
     table.insert(row, view_btn)
@@ -1733,9 +1736,9 @@ function LibraryView:buildBody()
         grid = self:buildGrid(page_items, data.kind, layout, grid_h, grid_w)
     end
     for _, sc in ipairs(self.scrubbers or {}) do
-        if sc.freeSnap then sc:freeSnap() end
+        self:dropScrubber(sc)
     end
-    if self.scrubber and self.scrubber.freeSnap then self.scrubber:freeSnap() end
+    self:dropScrubber(self.scrubber)
     self.scrubber, self.scrubbers = nil, nil
     if letter_mode and letter_w > 0 then
         local anchor_item = page_items[1]
@@ -2517,6 +2520,7 @@ function LibraryView:buildScrubber(items, per_page, mode, width, height, anchor,
         dpi = self:screenDpi(),
         screen_w = self.dimen and self.dimen.w or self.width,
         screen_h = self.dimen and self.dimen.h or 0,
+        hit_extra = Core.scrubberGutterHit(self:screenDpi()),
         show_parent = self,
     }
 end
@@ -2534,7 +2538,8 @@ function LibraryView:scrubberHit(ges)
             and p.x < d.x + d.w and p.y < d.y + d.h
     end
     for _, sc in ipairs(self:eachScrubber()) do
-        if inside(sc.dimen, ges and ges.pos) or inside(sc.dimen, ges and ges.start_pos) then
+        local hit = (sc.hitRect and sc:hitRect()) or sc.dimen
+        if inside(hit, ges and ges.pos) or inside(hit, ges and ges.start_pos) then
             return sc
         end
     end
@@ -2611,7 +2616,9 @@ function LibraryView:handleEvent(event)
         local ev = event.args and event.args[1]
         if ev and self:cornerGestureFirst(ev) then return true end
         if InputContainer.handleEvent(self, event) then return true end
-        if ev and Zones.tryLiveZones(ev) then return true end
+        -- A gesture that started on the A–Z strip is never offered to
+        -- LiveLight. The strip picks the letter, including a vertical swipe.
+        if ev and not self:gestureOnScrubber(ev) and Zones.tryLiveZones(ev) then return true end
         return false
     end
     -- A Dispatcher action the view does not handle (a Gestures-plugin
@@ -2629,6 +2636,7 @@ function LibraryView:onSwipe(_, ges)
         drag:endDrag()
         return true
     end
+    if self:trackEdgeLight("swipe", ges) then return true end
     if self:tryOpenControls(ges) then return true end
     local hit = self:scrubberHit(ges)
     if hit then
@@ -2643,11 +2651,11 @@ function LibraryView:onSwipe(_, ges)
     if (d == "west" or d == "east") and Zones.tryUserFirst(ges, Zones.liveHost()) then
         return true
     end
-    -- A vertical slide that starts on an edge strip is LiveLight's (issue #8):
-    -- brightness on the left, warmth on the right. Offer it to the file
-    -- browser's zones first; if nothing there takes it (LiveLight off, or
-    -- the edge set to Off), it falls through to the shelf expand below. The
-    -- A–Z strip and the Controls corner above keep their own gestures.
+    -- A vertical slide that starts on an edge is LiveLight's (issue #8):
+    -- brightness on the left, warmth on the right. The A–Z strip already
+    -- took a swipe that started on it, above. Warmth only sees a right-edge
+    -- swipe that started outside the strip (above or below a short column).
+    -- If nothing there takes it, the shelf expand below still runs.
     if (d == "north" or d == "south") and ges.pos and Core.edgeStrip(ges.pos.x, self.dimen.w) then
         if Zones.tryLiveZones(ges) then return true end
     end
@@ -2690,14 +2698,199 @@ function LibraryView:toggleShelfExpand(expand, ges)
     return true
 end
 
---- A drag that has left the letter strip keeps driving it. Anywhere else, a
--- pan is not a page turn.
+-- Same cadence as the Controls brightness slider: the first step now,
+-- then at most one step every 0.06 s. Nothing here repaints the Library.
+LibraryView.EDGE_LIGHT_TICK = 0.06
+
+function LibraryView:powerDevice()
+    if not Device.getPowerDevice then return nil end
+    local ok, p = pcall(Device.getPowerDevice, Device)
+    if not ok or type(p) ~= "table" then return nil end
+    if type(p.fl_min) ~= "number" or type(p.fl_max) ~= "number" then return nil end
+    if type(p.setIntensity) ~= "function" or type(p.frontlightIntensity) ~= "function" then return nil end
+    return p
+end
+
+function LibraryView:applyEdgeLevel(level)
+    local edge = self._edge
+    local p = edge and edge.powerd
+    if not p then return end
+    -- A Kindle without warmth, or a powerd that throws, must not take the
+    -- gesture handler down with it. The light call is the whole update:
+    -- nothing here repaints the Library.
+    if level <= p.fl_min and type(p.turnOffFrontlight) == "function" then
+        pcall(p.turnOffFrontlight, p)
+    elseif type(p.setIntensity) == "function" then
+        pcall(p.setIntensity, p, level)
+        if type(p.isFrontlightOff) == "function" and type(p.turnOnFrontlight) == "function" then
+            local ok_off, off = pcall(p.isFrontlightOff, p)
+            if ok_off and off then pcall(p.turnOnFrontlight, p) end
+        end
+    end
+    if type(p.updateResumeFrontlightState) == "function" then
+        pcall(p.updateResumeFrontlightState, p)
+    end
+    edge.level = level
+    self:paintEdgeLevel(level)
+end
+
+function LibraryView:flushEdgeLight()
+    local edge = self._edge
+    if not edge then return end
+    local level = edge.pending
+    edge.pending = nil
+    if level == nil or level == edge.applied then return end
+    edge.applied = level
+    self:applyEdgeLevel(level)
+end
+
+function LibraryView:queueEdgeLight(level)
+    local edge = self._edge
+    if not edge then return end
+    edge.pending = level
+    if edge.tick then return end
+    self:flushEdgeLight()
+    edge.tick = function()
+        if self._edge then self._edge.tick = nil end
+        if self._edge and self._edge.pending ~= nil then
+            self:queueEdgeLight(self._edge.pending)
+        end
+    end
+    if UIManager.scheduleIn then
+        UIManager:scheduleIn(self.EDGE_LIGHT_TICK, edge.tick)
+    else
+        edge.tick = nil
+    end
+end
+
+--- A small number, refreshed fast and by itself. The Library is not in
+-- the update. Nil when there is no framebuffer to draw on.
+function LibraryView:paintEdgeLevel(level)
+    local bb = Screen and Screen.bb
+    local rect = self._edge_level_rect
+    if not rect and self.dimen then
+        local w = math.max(48, math.floor((self.dimen.w or 0) * 0.12))
+        local h = 48
+        rect = {
+            x = math.floor(((self.dimen.w or 0) - w) / 2),
+            y = math.floor((self.dimen.h or 0) / 8),
+            w = w, h = h,
+        }
+        self._edge_level_rect = rect
+    end
+    if not rect then return end
+    if bb and bb.paintRect then
+        pcall(function()
+            bb:paintRect(rect.x, rect.y, rect.w, rect.h, Blitbuffer.COLOR_WHITE)
+            local face = Font:getFace("cfont", 20)
+            local widget = TextWidget:new{
+                text = tostring(level), face = face, bold = true,
+            }
+            local sz = widget:getSize()
+            widget:paintTo(bb,
+                rect.x + math.floor((rect.w - sz.w) / 2),
+                rect.y + math.floor((rect.h - sz.h) / 2))
+            widget:free()
+        end)
+    end
+    if UIManager.setDirty then
+        local g = Geom:new{ x = rect.x, y = rect.y, w = rect.w, h = rect.h }
+        UIManager:setDirty(nil, function() return "fast", g end)
+    end
+end
+
+function LibraryView:clearEdgeLevel()
+    local rect = self._edge_level_rect
+    self._edge_level_rect = nil
+    if not rect or not UIManager.setDirty then return end
+    local g = Geom:new{ x = rect.x, y = rect.y, w = rect.w, h = rect.h }
+    UIManager:setDirty(self, function() return "ui", g end)
+end
+
+function LibraryView:beginEdgeLight(start_y)
+    if self._edge then return true end
+    local p = self:powerDevice()
+    if not p then return false end
+    local ok, level = pcall(p.frontlightIntensity, p)
+    if not ok or type(level) ~= "number" then return false end
+    self._edge = {
+        powerd = p,
+        start_y = start_y,
+        start_level = level,
+        level = level,
+        applied = level,
+    }
+    return true
+end
+
+function LibraryView:moveEdgeLight(y)
+    local edge = self._edge
+    if not edge or not y then return end
+    local level = Core.edgeLightLevel(edge.start_y, y, self.dimen and self.dimen.h or 0,
+        edge.start_level, edge.powerd.fl_min, edge.powerd.fl_max)
+    self:queueEdgeLight(level)
+end
+
+function LibraryView:endEdgeLight()
+    local edge = self._edge
+    if not edge then return false end
+    if edge.tick and UIManager.unschedule then UIManager:unschedule(edge.tick) end
+    edge.tick = nil
+    self:flushEdgeLight()
+    self._edge = nil
+    self:clearEdgeLevel()
+    return true
+end
+
+--- Left-edge brightness. True when this gesture is part of that slide.
+-- A touch that started on the A–Z strip is not one. No frontlight: false,
+-- so the file browser's own zones still get it.
+function LibraryView:trackEdgeLight(kind, ges)
+    if type(ges) ~= "table" or not self.dimen then return false end
+    local start = ges.start_pos or ges.pos
+    if self._edge then
+        if kind == "pan" or kind == "hold_pan" then
+            self:moveEdgeLight(ges.pos and ges.pos.y)
+            return true
+        end
+        if kind == "pan_release" or kind == "hold_release" or kind == "swipe" then
+            local y = (ges.end_pos and ges.end_pos.y) or (ges.pos and ges.pos.y)
+            self:moveEdgeLight(y)
+            self:endEdgeLight()
+            return true
+        end
+        return false
+    end
+    if not (start and start.x and start.y) then return false end
+    if self:gestureOnScrubber({ pos = start, start_pos = start }) then return false end
+    if Core.edgeStrip(start.x, self.dimen.w) ~= "left" then return false end
+    if kind == "pan" or kind == "hold_pan" then
+        local rel = ges.relative
+        if rel and math.abs(rel.y or 0) < math.abs(rel.x or 0) then return false end
+        if not self:beginEdgeLight(start.y) then return false end
+        self:moveEdgeLight(ges.pos and ges.pos.y or start.y)
+        return true
+    end
+    if kind == "swipe" and (ges.direction == "north" or ges.direction == "south") then
+        if not self:beginEdgeLight(start.y) then return false end
+        local y = (ges.end_pos and ges.end_pos.y) or (ges.pos and ges.pos.y)
+        self:moveEdgeLight(y)
+        self:endEdgeLight()
+        return true
+    end
+    return false
+end
+
+--- A drag that has left the letter strip keeps driving it. A vertical drag
+-- that starts on the left edge sets the frontlight directly, the way the
+-- Controls brightness slider does, and does not repaint the Library.
 function LibraryView:onPan(_, ges)
     local drag = self:draggingScrubber()
     if drag then
         drag:dragTo(ges and ges.pos)
         return true
     end
+    if self:trackEdgeLight("pan", ges) then return true end
     return false
 end
 
@@ -2707,10 +2900,12 @@ function LibraryView:onHoldPan(_, ges)
         drag:dragTo(ges and ges.pos)
         return true
     end
+    if self:trackEdgeLight("hold_pan", ges) then return true end
     return false
 end
 
-function LibraryView:onPanRelease()
+function LibraryView:onPanRelease(_, ges)
+    if self:trackEdgeLight("pan_release", ges) then return true end
     local drag = self:draggingScrubber()
     if drag then
         drag:endDrag()
@@ -2719,7 +2914,8 @@ function LibraryView:onPanRelease()
     return false
 end
 
-function LibraryView:onHoldRelease()
+function LibraryView:onHoldRelease(_, ges)
+    if self:trackEdgeLight("hold_release", ges) then return true end
     local drag = self:draggingScrubber()
     if drag then
         drag:endDrag()
@@ -2820,12 +3016,18 @@ function LibraryView:onClose()
     return true
 end
 
+function LibraryView:dropScrubber(sc)
+    if not sc then return end
+    if sc.clearBubble then sc:clearBubble() end
+    if sc.freeSnap then sc:freeSnap() end
+end
+
 function LibraryView:onCloseWidget()
     self._closed = true
     for _, sc in ipairs(self.scrubbers or {}) do
-        if sc.freeSnap then sc:freeSnap() end
+        self:dropScrubber(sc)
     end
-    if self.scrubber and self.scrubber.freeSnap then self.scrubber:freeSnap() end
+    self:dropScrubber(self.scrubber)
     if self.timing then
         for _, name in ipairs({ "page", "filter", "search" }) do self.timing:cancel(name) end
     end

@@ -49,7 +49,7 @@ local function widget(w, h)
     end }
 end
 
-local buttons, groups
+local buttons, groups, hints
 local function clsInit()
     local base = cls()
     function base:new(o)
@@ -63,7 +63,7 @@ end
 
 local cover_calls, cover_needs
 local function loadFooterView()
-    buttons, groups = {}, {}
+    buttons, groups, hints = {}, {}, {}
     cover_calls, cover_needs = {}, false
     return load("libraryview.lua", {
         ["ui/widget/container/inputcontainer"] = clsInit(),
@@ -83,6 +83,14 @@ local function loadFooterView()
         end },
         ["ui/widget/horizontalspan"] = widget(8, 8),
         ["ui/widget/container/framecontainer"] = widget(200, 48),
+        ["ui/uimanager"] = {
+            show = function(_, w) hints[#hints + 1] = w end,
+            close = function() end,
+            setDirty = function() end,
+            unschedule = function() end,
+            scheduleIn = function() end,
+        },
+        ["ui/widget/infomessage"] = { new = function(_, o) return o end },
         ["ui/geometry"] = { new = function(_, o) o.x = o.x or 0; o.y = o.y or 0; return o end },
         ["ui/gesturerange"] = { new = function() return {} end },
         ["ui/widget/container/leftcontainer"] = { new = function(_, o) return o end },
@@ -158,7 +166,7 @@ describe("Current-book shortcut in the footer", function()
         local v, _o, row = footer({ last_book = nil })
         eq(v.footer_current, nil)
         eq(#cover_calls, 0)
-        eq(#row, 11, "menu, gap, resume, gap, text, spacer, size, gap, view, gap, pager")
+        eq(#row, 11, "menu, gap, text, spacer, empty slot, spacer, size, gap, view, gap, pager")
     end)
 
     it("shows the current book's cover in the middle, 2:3, touch-sized", function()
@@ -172,7 +180,7 @@ describe("Current-book shortcut in the footer", function()
         eq(btn ~= nil, true)
         eq(btn:getSize().w, 48, "tap target is at least touch-sized")
         eq(btn:getSize().h, 48)
-        eq(#row, 13, "menu, gap, resume, gap, text, gap, cover, gap, size, gap, view, gap, pager")
+        eq(#row, 11, "menu, gap, text, spacer, cover, spacer, size, gap, view, gap, pager")
         local at = indexOf(row, btn)
         eq(at ~= nil, true)
         eq(at > indexOf(row, v.sort_label), true, "after the sort text")
@@ -190,21 +198,15 @@ describe("Current-book shortcut in the footer", function()
         same(opened, { "/books/Dune.epub" })
     end)
 
-    it("opens the same book as the Resume button", function()
-        local v, opened = footer({ last_book = book })
+    it("a long-press on the cover shows the title and progress", function()
+        local v = footer({ last_book = book })
         local resume
         for _, b in ipairs(buttons) do
             if b.icon == "book.opened" then resume = b end
         end
-        resume.callback()
-        eq(#opened, 1)
-        eq(opened[1], "/books/Dune.epub")
-        -- rebuilding the footer keeps the same shortcut
-        buttons, groups = {}, {}
-        v:buildFooter(1, 1, 40, "books")
-        v.footer_current.callback()
-        eq(#opened, 2)
-        eq(opened[2], "/books/Dune.epub")
+        eq(resume, nil, "the Resume button is gone")
+        v.footer_current.hold_callback()
+        eq(hints[1].text, "Resume: Dune  ·  42 %")
     end)
 
     it("queues the cover for extraction when it is not ready yet", function()
