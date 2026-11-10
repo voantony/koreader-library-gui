@@ -23,6 +23,8 @@ It prints one dot per test and a summary such as `272 passed, 0 failed`. KOReade
 
 Each spec file is listed in `spec/run.lua`. If you add a new one, add it to that list.
 
+Merge requests, and pushes to `main`, run the same command in GitLab CI (`.gitlab-ci.yml`), plus a syntax check of every `.lua` file with `luajit -bl`. The job uses a small Alpine image and installs LuaJIT. It does not start the emulator. A red pipeline means the merge request is not ready.
+
 ## Testing in the KOReader emulator
 
 Most changes should be checked on screen as well as in the tests.

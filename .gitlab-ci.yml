@@ -1,0 +1,39 @@
+# Specs and a Lua syntax check on merge requests and on pushes to the
+# default branch. Alpine plus luajit only, so a run stays small enough
+# for the shared free-tier runners. The emulator is not started here.
+
+image: alpine:3.21
+
+variables:
+  GIT_DEPTH: "1"
+
+default:
+  interruptible: true
+  before_script:
+    - apk add --no-cache luajit
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # The push that adds this file, before a merge request exists.
+    - if: $CI_COMMIT_BRANCH == "ci/merge-request-tests" && $CI_OPEN_MERGE_REQUESTS == null
+
+stages:
+  - test
+
+lua-syntax:
+  stage: test
+  script:
+    - |
+      set -eu
+      find . -name '*.lua' -not -path './.git/*' > /tmp/lua-files
+      while IFS= read -r f; do
+        luajit -bl "$f" >/dev/null
+      done < /tmp/lua-files
+      echo "syntax ok ($(wc -l < /tmp/lua-files) files)"
+
+lua-specs:
+  stage: test
+  script:
+    - luajit spec/run.lua
