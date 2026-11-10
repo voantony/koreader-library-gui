@@ -28,6 +28,8 @@ local logger = require("logger")
 local util = require("util")
 local Core = require("librarycore")
 local Gestures = require("librarygestures")
+local ok_status, status_mod = pcall(require, "librarystatus")
+local Status = (ok_status and type(status_mod) == "table" and status_mod.DEFAULT == "icon") and status_mod or nil
 local Index = require("libraryindex")
 local Timing = require("librarytiming")
 local _ = require("gettext")
@@ -52,7 +54,8 @@ local DEFAULTS = {
     rounded_keyboard = true,    -- "Rounded keyboard in search": softer keys for the search bar only
     use_koreader_keyboard = false, -- "Use KOReader's keyboard": stock InputDialog for the search bar
     show_clock = true,          -- clock beside the search bar
-    show_battery = true,        -- battery percentage beside the search bar
+    show_battery = true,        -- battery beside the search bar
+    -- status_style: "icon" (default) | "compact" | "plain". A saved "bar" is read as "icon".
     show_scrubber = true,       -- A–Z strip on the right when the list is alphabetical
     fuzzy_search = true,        -- "Typo-tolerant search": accents ignored, small typos forgiven
     search_suggestions = true,  -- "Word suggestions": words from the library above the search keyboard
@@ -91,6 +94,12 @@ local VIEW_NAMES = {
     covers = _("Cover only"),
 }
 
+local STATUS_STYLE_LABEL = {
+    icon = _("Battery icon"),
+    compact = _("Status bar"),
+    plain = _("Plain text"),
+}
+
 local Library = WidgetContainer:extend{
     name = "library",
     is_doc_only = false,
@@ -107,6 +116,71 @@ local shared = {
     after_book = nil,     -- "show" / "search": open the Library once the book has closed
 }
 Library.shared = shared
+
+--- "icon" unless a known style is saved. The drawn battery is the default.
+function Library:statusStyleId()
+    if Status and type(Status.styleOf) == "function" then
+        return Status.styleOf(self.settings)
+    end
+    local id = self.settings and self.settings.status_style
+    if id == "icon" or id == "compact" or id == "plain" then return id end
+    return "icon"
+end
+
+function Library:statusStyleLabel()
+    return STATUS_STYLE_LABEL[self:statusStyleId()] or STATUS_STYLE_LABEL.icon
+end
+
+function Library:applyStatusStyle(id, view)
+    if Status and type(Status.style) == "function" then
+        id = Status.style(id)
+    elseif id ~= "icon" and id ~= "compact" and id ~= "plain" then
+        id = "icon"
+    end
+    self.settings.status_style = id
+    self:saveSettings()
+    local target = view or shared.view
+    if target and target.setStatusStyle then target:setStatusStyle(id) end
+end
+
+function Library:showStatusStyleDialog(view)
+    local rows = {}
+    local dialog
+    for _, id in ipairs(Status and Status.ORDER or { "icon", "compact", "plain" }) do
+        rows[#rows + 1] = {{
+            text = (self:statusStyleId() == id and "✓ " or "") .. STATUS_STYLE_LABEL[id],
+            callback = function()
+                if dialog then UIManager:close(dialog) end
+                self:applyStatusStyle(id, view)
+            end,
+        }}
+    end
+    dialog = ButtonDialog:new{
+        title = _("Clock and battery"),
+        title_align = "center",
+        buttons = rows,
+    }
+    UIManager:show(dialog)
+end
+
+function Library:statusStyleMenu()
+    local items = {}
+    for _, id in ipairs(Status and Status.ORDER or { "icon", "compact", "plain" }) do
+        items[#items + 1] = {
+            text = STATUS_STYLE_LABEL[id],
+            radio = true,
+            checked_func = function() return self:statusStyleId() == id end,
+            callback = function() self:applyStatusStyle(id) end,
+        }
+    end
+    return {
+        text_func = function()
+            return T(_("Clock and battery: %1"), self:statusStyleLabel())
+        end,
+        help_text = _("How the time and battery beside the search bar are drawn. Battery icon is a bold time and a battery outline that fills with the charge, with a bolt while charging. Status bar uses the same battery icons as KOReader's status bar, plus the percentage. Plain text is the original line. The clock follows KOReader's 12-hour clock setting."),
+        sub_item_table = items,
+    }
+end
 
 local function collate(a, b)
     return ffiUtil.strcoll(a, b)
@@ -449,6 +523,7 @@ function Library:newView()
         use_koreader_keyboard = Core.useKoreaderKeyboard(self.settings),
         show_clock = Core.showClock(self.settings),
         show_battery = Core.showBattery(self.settings),
+        status_style = self:statusStyleId(),
         show_scrubber = Core.showScrubber(self.settings),
         fuzzy_search = Core.fuzzySearch(self.settings),
         search_suggestions = self.settings.search_suggestions ~= false,
@@ -1397,6 +1472,15 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = T(_("Clock and battery: %1"), self:statusStyleLabel()),
+            callback = function()
+                close()
+                self:showStatusStyleDialog(view)
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = (Core.showClock(self.settings) and "✓ " or "") .. _("Show clock"),
             callback = function()
                 close()
@@ -2044,7 +2128,7 @@ function Library:addToMainMenu(menu_items)
             },
             {
                 text = _("Show battery"),
-                help_text = _("Show the battery percentage beside the search bar. It updates with the clock, not on its own timer."),
+                help_text = _("Show the battery beside the search bar. It updates with the clock, not on its own timer."),
                 checked_func = function() return Core.showBattery(self.settings) end,
                 callback = function()
                     self.settings.show_battery = not Core.showBattery(self.settings)
@@ -2052,6 +2136,7 @@ function Library:addToMainMenu(menu_items)
                     if shared.view then shared.view:setShowBattery(self.settings.show_battery) end
                 end,
             },
+            self:statusStyleMenu(),
             {
                 text = _("A–Z strip"),
                 help_text = _("A letter strip down the right edge. Tap or drag a letter to jump to the first page that starts with it. Shown when books are already sorted by title, author or series (a cover grid or single-column Compact included), and on the Authors, Collections and Genres lists. The Series list shows it when that list runs past one page. Hidden for Date added, Last read and Size, inside one series, on Compact · 2 columns, and when a search fits on one page. Showing the strip does not change the sort."),

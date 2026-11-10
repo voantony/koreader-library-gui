@@ -592,6 +592,102 @@ scenarios.toptap = function()
     end)
 end
 
+--- Header clock and battery styles, at the size shoot.sh was started with.
+-- The first step writes the three new styles so they can be copied early.
+scenarios.status = function()
+    whenLibrary(function()
+        q(0.4, function()
+            dismissNotices()
+            local view = V()
+            if view.closeKeyboard then view:closeKeyboard() end
+            if view.applySearch then view:applySearch("") end
+            view.readClock = function(self)
+                if not self.show_clock then return nil end
+                if self:twelveHour() then return "12:59 PM" end
+                return "12:59"
+            end
+            view:setShowClock(true)
+            view:setShowBattery(true)
+            local Device = require("device")
+            Device.hasBattery = function() return true end
+            local power = Device:getPowerDevice()
+            if type(power) ~= "table" then
+                power = {}
+                Device.getPowerDevice = function() return power end
+            end
+            local function setPower(percent, charging, charged)
+                if not power then
+                    state.ok = false
+                    P("FAIL no power device")
+                    return
+                end
+                power.getCapacity = function() return percent end
+                power.isCharging = function() return charging and true or false end
+                power.isCharged = function() return charged and true or false end
+            end
+            local function setTwelve(on)
+                if on then
+                    G_reader_settings:saveSetting("twelve_hour_clock", true)
+                else
+                    G_reader_settings:saveSetting("twelve_hour_clock", false)
+                end
+            end
+            local function show(style, name)
+                setTwelve(name:find("12", 1, true) ~= nil and not name:find("24", 1, true))
+                view:setStatusStyle(style)
+                if view.onTimeFormatChanged then view:onTimeFormatChanged() end
+                -- setStatusStyle no-ops when the style is already current, so
+                -- a clock-format change still has to rebuild. onTimeFormatChanged does.
+                if view.status_style ~= style and view.setStatusStyle then
+                    view.status_style = nil
+                    view:setStatusStyle(style)
+                end
+                P("status", style, name, "twelve", tostring(view:twelveHour()),
+                    "fp", tostring(view._status_text))
+                shot("status-" .. name)
+            end
+            view._status_show = show
+            view._status_power = setPower
+            setPower(78, false, false)
+            setTwelve(false)
+            show("icon", "icon-24")
+            show("compact", "compact-24")
+            show("plain", "plain-24")
+        end)
+        q(0.3, function()
+            local view = V()
+            view._status_power(78, false, false)
+            view._status_show("icon", "icon-12")
+            view._status_show("compact", "compact-12")
+            view._status_show("plain", "plain-12")
+        end)
+        q(0.3, function()
+            local view = V()
+            view._status_power(62, true, false)
+            view._status_show("icon", "icon-charging")
+            view._status_show("compact", "compact-charging")
+            view._status_power(8, false, false)
+            view._status_show("icon", "icon-low")
+            view._status_show("compact", "compact-low")
+        end)
+        q(0.3, function()
+            local view = V()
+            view._status_power(78, false, false)
+            view._status_show("icon", "icon-12")
+            local screen = Device.screen
+            if not screen.night_mode and screen.toggleNightMode then
+                screen:toggleNightMode()
+            end
+            view:refreshBody(true)
+            P("night", tostring(screen.night_mode))
+            shot("status-icon-night")
+            if screen.night_mode and screen.toggleNightMode then
+                screen:toggleNightMode()
+            end
+        end)
+    end)
+end
+
 local function scriptDir()
     local src = debug.getinfo(1, "S").source
     if src:sub(1, 1) == "@" then src = src:sub(2) end

@@ -138,6 +138,19 @@ describe("Status refresh", function()
         eq(#unscheduled >= 1, true)
     end)
 
+    it("rebuilds the header when KOReader's 12-hour clock changes", function()
+        local v = view()
+        local n = 0
+        v.search_field = {}
+        v.buildSearchRow = function() n = n + 1 end
+        v.refreshBody = function() end
+        v:onTimeFormatChanged()
+        eq(n, 1)
+        v._closed = true
+        v:onTimeFormatChanged()
+        eq(n, 1, "a closed Library does not rebuild")
+    end)
+
     it("refreshes only the header when the minute changes", function()
         local v = view()
         v.updateStatusText = function() return true end
@@ -290,6 +303,7 @@ describe("Header settings in the menu", function()
         eq(rows[#rows - 2][1].text, "Gestures")
         eq(rows[#rows - 3][1].text, "\u{2713} Show clock")
         eq(rows[#rows - 3][2].text, "\u{2713} Show battery")
+        eq(rows[#rows - 4][1].text, "Clock and battery: Battery icon")
     end)
 
     it("toggles clock and battery separately, and the keyboard on its own", function()
@@ -310,5 +324,77 @@ describe("Header settings in the menu", function()
         eq(settings.use_koreader_keyboard, true)
         eq(view.koreader_keyboard, true)
         eq(settings.show_clock, false, "the keyboard switch does not turn the clock back on")
+    end)
+
+    it("offers the four clock styles and keeps the battery icon as the default", function()
+        local shown = {}
+        local UIManager = {
+            show = function(_, w) shown[#shown + 1] = w end,
+            close = function() end,
+            nextTick = function(_, f) f() end,
+            scheduleIn = function() end,
+        }
+        local Library = load("main.lua", {
+            ["ui/uimanager"] = UIManager,
+            ["ui/widget/buttondialog"] = { new = function(_, o) return o end },
+            ["ui/widget/container/widgetcontainer"] = cls(),
+            librarystatus = require("librarystatus"),
+        })
+        local view = {
+            sort = "recent", view_mode = "grid",
+            placeName = function() return "Books" end,
+            viewKey = function() return "books" end,
+            hasRemembered = function() return false end,
+            setStatusStyle = function(v, id) v.style = id end,
+        }
+        local self = setmetatable({
+            settings = { columns = 4 },
+            saveSettings = function() end,
+        }, { __index = Library })
+        Library.showLibraryMenu(self, view)
+        local rows = shown[1].buttons
+        rows[#rows - 4][1].callback()
+        local picker = shown[#shown]
+        eq(picker.title, "Clock and battery")
+        eq(#picker.buttons, 3)
+        eq(picker.buttons[1][1].text, "\u{2713} Battery icon")
+        eq(picker.buttons[2][1].text, "Status bar")
+        eq(picker.buttons[3][1].text, "Plain text")
+        picker.buttons[3][1].callback()
+        eq(self.settings.status_style, "plain")
+        eq(view.style, "plain")
+    end)
+
+    it("reads a saved thin bar as the battery icon", function()
+        local shown = {}
+        local UIManager = {
+            show = function(_, w) shown[#shown + 1] = w end,
+            close = function() end,
+            nextTick = function(_, f) f() end,
+            scheduleIn = function() end,
+        }
+        local Library = load("main.lua", {
+            ["ui/uimanager"] = UIManager,
+            ["ui/widget/buttondialog"] = { new = function(_, o) return o end },
+            ["ui/widget/container/widgetcontainer"] = cls(),
+            librarystatus = require("librarystatus"),
+        })
+        local view = {
+            sort = "recent", view_mode = "grid",
+            placeName = function() return "Books" end,
+            viewKey = function() return "books" end,
+            hasRemembered = function() return false end,
+            setStatusStyle = function(v, id) v.style = id end,
+        }
+        local self = setmetatable({
+            settings = { columns = 4, status_style = "bar" },
+            saveSettings = function() end,
+        }, { __index = Library })
+        eq(self:statusStyleId(), "icon")
+        Library.showLibraryMenu(self, view)
+        local rows = shown[1].buttons
+        eq(rows[#rows - 4][1].text, "Clock and battery: Battery icon")
+        rows[#rows - 4][1].callback()
+        eq(shown[#shown].buttons[1][1].text, "\u{2713} Battery icon")
     end)
 end)

@@ -19,7 +19,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 scenario="${1:-}"
 if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
-    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|aznav|toptap|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|gallery|readme>" >&2
+    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|aznav|toptap|status|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|gallery|readme>" >&2
     echo "  EMU_OUT     output directory (default: emulator-out/<scenario>)" >&2
     echo "  EMU_PLUGIN  library.koplugin to copy (default: ./library.koplugin)" >&2
     echo "  EMU_COUNT   books in the seeded library (default: 200)" >&2
@@ -28,7 +28,7 @@ if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
     exit 2
 fi
 case "$scenario" in
-    smoke|footer|az|aznav|toptap|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|azcolumn|azshort|footerbook|footerempty|coveronly|badges|gesturepages|gallery|readme) ;;
+    smoke|footer|az|aznav|toptap|status|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|azcolumn|azshort|footerbook|footerempty|coveronly|badges|gesturepages|gallery|readme) ;;
     *) echo "unknown scenario: $scenario" >&2; exit 2 ;;
 esac
 
@@ -178,6 +178,15 @@ elif scenario == "az":
         check(n + ".png", True)
 elif scenario == "toptap":
     for n in ("toptap-01-library-gui-bar", "toptap-02-koreader-menu", "toptap-03-details-from-reader"):
+        check(n + ".png", True)
+elif scenario == "status":
+    for n in (
+        "status-icon-24", "status-compact-24", "status-plain-24",
+        "status-icon-12", "status-compact-12", "status-plain-12",
+        "status-icon-charging", "status-compact-charging",
+        "status-icon-low", "status-compact-low",
+        "status-icon-night",
+    ):
         check(n + ".png", True)
 elif scenario == "aznav":
     for n in ("aznav-compact", "aznav-authors", "aznav-grid", "aznav-series", "aznav-compact2", "aznav-last-read"):
