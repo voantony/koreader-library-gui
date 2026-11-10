@@ -160,7 +160,10 @@ end
 --     callback quits KOReader), so the host's onClose is neutralised for
 --     the synchronous dispatch -- except for the intentional Exit/Restart
 --     actions, which need it intact. A gesture-carrying event can never
---     take that bypass.
+--     take that bypass. Neutralising onClose does not repaint anything:
+--     the menu's own close refreshes with setDirty(nil), which does not
+--     paint the Library. The close guard in main.lua does that, after
+--     the dialog is gone.
 local NEVER_FORWARD = {
     onCloseWidget   = true,
     onFlushSettings = true,

@@ -350,10 +350,15 @@ function LibraryView:showResumeHint()
     local book = self.last_book
     if not book then return end
     local pct = Core.percentText(book.percent)
-    UIManager:show(InfoMessage:new{
+    local note = InfoMessage:new{
         text = T(_("Resume: %1"), book.title or book.name) .. (pct and ("  ·  " .. pct) or ""),
         timeout = 2,
-    })
+    }
+    if self.plugin and self.plugin.showOverLibrary then
+        self.plugin:showOverLibrary(note, self)
+    else
+        UIManager:show(note)
+    end
 end
 
 --- The search bar: a rounded field with a magnifier, the text box and a
@@ -2204,13 +2209,32 @@ function LibraryView:refreshMode(reason)
     return mode
 end
 
---- One flashing refresh of the Library after an overlay closes, when
--- the cover grid is showing. No rebuild.
+--- One full-screen refresh of this view after a menu or dialog closes.
+-- The target is the Library, never a nil widget (that only refreshes
+-- whatever is already in the framebuffer, often the file browser) and
+-- never a rectangle the size of the menu. The A–Z strip, the clock and
+-- the footer are inside this rectangle. No rebuild.
 function LibraryView:flashOverlay()
-    local mode = self:refreshMode("overlay")
-    if mode ~= "flashui" or not UIManager.setDirty then return end
+    if not UIManager.setDirty then return end
+    local d = self.dimen
+    local mode, rect = "full", {
+        x = 0, y = 0,
+        w = d and d.w or 0,
+        h = d and d.h or 0,
+    }
+    local ok, Refresh = pcall(require, "libraryrefresh")
+    if ok and type(Refresh) == "table" and type(Refresh.overlayClose) == "function" then
+        mode, rect = Refresh.overlayClose(d and d.w, d and d.h)
+    end
+    if type(Geom) == "table" and type(Geom.new) == "function" and type(rect) == "table" then
+        local g = Geom:new{
+            x = tonumber(rect.x) or 0, y = tonumber(rect.y) or 0,
+            w = tonumber(rect.w) or 0, h = tonumber(rect.h) or 0,
+        }
+        if type(g) == "table" and type(g.w) == "number" then rect = g end
+    end
     UIManager:setDirty(self, function()
-        return mode, self.dimen, true
+        return mode, rect
     end)
 end
 
@@ -2320,7 +2344,11 @@ function LibraryView:openKoreaderSearch()
         done = true
         local text = keep and (dialog:getInputText() or "") or original
         self._search_dialog = nil
-        UIManager:close(dialog)
+        if self.plugin and self.plugin.closeOverLibrary then
+            self.plugin:closeOverLibrary(dialog, self)
+        else
+            UIManager:close(dialog)
+        end
         if self._search_action then UIManager:unschedule(self._search_action); self._search_action = nil end
         if self.search_input then self.search_input:setText(text) end
         self:applySearch(text)
@@ -2343,7 +2371,11 @@ function LibraryView:openKoreaderSearch()
         } },
     }
     self._search_dialog = dialog
-    UIManager:show(dialog)
+    if self.plugin and self.plugin.showOverLibrary then
+        self.plugin:showOverLibrary(dialog, self)
+    else
+        UIManager:show(dialog)
+    end
     if dialog.onShowKeyboard then dialog:onShowKeyboard() end
 end
 
@@ -2354,7 +2386,11 @@ function LibraryView:setUseKoreaderKeyboard(on)
     if self._search_dialog then
         local dialog = self._search_dialog
         self._search_dialog = nil
-        UIManager:close(dialog)
+        if self.plugin and self.plugin.closeOverLibrary then
+            self.plugin:closeOverLibrary(dialog, self)
+        else
+            UIManager:close(dialog)
+        end
     end
     self.use_koreader_keyboard = on
     self:buildSearchRow()
@@ -3010,6 +3046,11 @@ function LibraryView:topMenuSwipeFirst(ev)
 end
 
 function LibraryView:handleEvent(event)
+    -- The input that just closed a menu is still in this frame. It must
+    -- not reach a file-browser zone, and it must not close this view.
+    if self._overlay_just_closed and (event.handler == "onGesture" or event.handler == "onClose") then
+        return true
+    end
     if event.handler == "onGesture" then
         if Device.screen_saver_lock then return false end
         local ev = event.args and event.args[1]
@@ -3421,6 +3462,10 @@ function LibraryView:openNamedShelf(kind, name)
 end
 
 function LibraryView:onClose()
+    -- Back that already dismissed a dialog (KOReader's menu does not
+    -- consume it) would otherwise close the Library and leave the file
+    -- browser on screen.
+    if self._overlay_just_closed then return true end
     if self.group then
         self:closeGroup()
         return true

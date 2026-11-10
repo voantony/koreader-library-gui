@@ -385,7 +385,18 @@ jobs.menu = function(done)
             end
             capture("v050-menu", nil)
             closeAboveView()
-            done()
+            -- The close flash is scheduled for the frame after the menu's
+            -- own refresh. Wait, then shoot the Library with the menu gone.
+            q(0.6, function()
+                local top = stackLine()
+                P("menu closed", top)
+                if V() == nil then
+                    state.ok = false
+                    P("FAIL Library was closed with the menu")
+                end
+                capture("v050-menu-closed", nil)
+                done()
+            end)
         end)
     end)
 end

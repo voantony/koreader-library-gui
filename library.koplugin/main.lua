@@ -154,7 +154,7 @@ function Library:showStatusStyleDialog(view)
         rows[#rows + 1] = {{
             text = (self:statusStyleId() == id and "✓ " or "") .. STATUS_STYLE_LABEL[id],
             callback = function()
-                if dialog then UIManager:close(dialog) end
+                self:closeOverLibrary(dialog, view)
                 self:applyStatusStyle(id, view)
             end,
         }}
@@ -164,7 +164,7 @@ function Library:showStatusStyleDialog(view)
         title_align = "center",
         buttons = rows,
     }
-    UIManager:show(dialog)
+    self:showOverLibrary(dialog, view)
 end
 
 local UPDATE_MODE_LABEL = {
@@ -251,7 +251,7 @@ function Library:showUpdatesMenu(view)
             { pick("install") },
         },
     }
-    UIManager:show(dialog)
+    self:showOverLibrary(dialog, view)
 end
 
 function Library:statusStyleMenu()
@@ -300,6 +300,7 @@ end
 
 function Library:init()
     installBroadcastTag()
+    self:installCloseGuard(UIManager)
     self.settings = G_reader_settings:readSetting(SETTINGS_KEY) or {}
     -- The old checkbox has to be read before the default writes top_tap = "bar".
     require("libraryreadermenu").migrateTopTap(self.settings)
@@ -521,7 +522,8 @@ function Library:skipFolderStamp()
 end
 
 --- Edit the folder-name skip list. An empty box puts the defaults back.
-function Library:showSkipFoldersDialog()
+function Library:showSkipFoldersDialog(view)
+    view = view or shared.view
     local InputDialog = require("ui/widget/inputdialog")
     local dialog
     local function save()
@@ -530,18 +532,18 @@ function Library:showSkipFoldersDialog()
         self.settings.skip_folders = #list > 0 and list or nil
         self:saveSettings()
         shared.index = nil
-        UIManager:close(dialog)
+        self:closeOverLibrary(dialog, view)
     end
     dialog = InputDialog:new{
         title = _("Folders to skip"),
         description = _("Comma-separated names. The library does not open these folders. Leave empty to restore the default list."),
         input = Core.skipFolderText(self:skipFolderList()),
         buttons = { {
-            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Cancel"), id = "close", callback = function() self:closeOverLibrary(dialog, view) end },
             { text = _("Save"), is_enter_default = true, callback = save },
         } },
     }
-    UIManager:show(dialog)
+    self:showOverLibrary(dialog, view)
 end
 
 function Library:getIndex()
@@ -760,7 +762,7 @@ end
 
 function Library:openInSeries(dir)
     if not self.ui.document then
-        UIManager:show(InfoMessage:new{ text = _("Open a book first."), timeout = 2 })
+        self:showOverLibrary(InfoMessage:new{ text = _("Open a book first."), timeout = 2 })
         return true
     end
     local target, current = self:seriesTarget(dir)
@@ -773,7 +775,7 @@ function Library:openInSeries(dir)
         else
             text = T(_("“%1” is the first book of %2."), current.title or current.name, current.series)
         end
-        UIManager:show(InfoMessage:new{ text = text, timeout = 3 })
+        self:showOverLibrary(InfoMessage:new{ text = text, timeout = 3 })
         return true
     end
     logger.info("Library: series", dir > 0 and "next" or "previous", "->", target.path)
@@ -788,7 +790,7 @@ function Library:onLibraryPrevInSeries() return self:openInSeries(-1) end
 function Library:onLibraryResume()
     local book = Core.resumeBook(self:getBooks())
     if not book then
-        UIManager:show(InfoMessage:new{ text = _("No book in progress."), timeout = 2 })
+        self:showOverLibrary(InfoMessage:new{ text = _("No book in progress."), timeout = 2 })
         return true
     end
     if self.ui.document and self.ui.document.file == Core.openPath(book) then return true end
@@ -868,7 +870,7 @@ end
 function Library:onRescanLibrary()
     self:ensureIndex(true)
     local index = shared.index
-    UIManager:show(InfoMessage:new{
+    self:showOverLibrary(InfoMessage:new{
         text = T(_("Library rescanned: %1 books."), #index.books),
         timeout = 2,
     })
@@ -893,34 +895,147 @@ function Library:openControls()
     local Controls = require("librarycontrols")
     local panel = Controls:new{ plugin = self }
     shared.controls = panel
-    UIManager:show(panel, "ui")
+    self:showOverLibrary(panel, shared.view, "ui")
     return true
 end
 
 function Library:onControlsClosed(panel)
     if shared.controls == panel then shared.controls = nil end
-    self:flashLibraryOverlay(shared.view)
+    self:scheduleLibraryFlash(shared.view)
 end
 
---- Close a dialog or card over the Library and flash the cover grid
--- so leftover images don't ghost on e-ink. The flash waits a tick so
--- a rebuild in the same callback is painted first.
-function Library:closeOverLibrary(widget, view)
-    if widget then UIManager:close(widget) end
-    self:flashLibraryOverlay(view)
-end
+-- Handlers that dismiss a dialog. Each one is wrapped so it returns true:
+-- KOReader drops an event the top widget does not consume only after
+-- offering it to is_always_active widgets, and the Library is one of
+-- those while the search keyboard is up. A Back or a tap that already
+-- closed the menu would then close the Library or hit a file-browser zone.
+local OVERLAY_HANDLERS = {
+    "onClose", "onTapClose", "onTapCloseAllMenus", "onBack", "onSwipe", "onTap",
+}
 
-function Library:flashLibraryOverlay(view)
-    if not (view and view.flashOverlay) then return end
+--- After a dialog over the Library has closed, repaint the Library and
+-- flash the whole screen. `nextTick` runs at the start of the next frame,
+-- before that frame's repaint, so a refresh queued there is merged with
+-- the dialog's own regional refresh and can lose. `tickAfterNext` (via
+-- libraryreadermenu.afterPanelClose) waits until that repaint has been
+-- consumed. One flash is enough when several closes land in the same turn.
+function Library:scheduleLibraryFlash(view)
+    view = view or shared.view
+    if type(view) ~= "table" or view._closed then return end
+    if type(view.flashOverlay) ~= "function" then return end
+    if view._library_flash_pending then return end
+    view._library_flash_pending = true
     local function flash()
-        if view.flashOverlay then view:flashOverlay() end
+        view._library_flash_pending = nil
+        if view._closed or type(view.flashOverlay) ~= "function" then return end
+        view:flashOverlay()
     end
-    -- After a rebuild in the same callback (sort, go to page). Specs stub nextTick.
-    if type(UIManager.nextTick) == "function" then
-        UIManager:nextTick(flash)
+    local ok, RM = pcall(require, "libraryreadermenu")
+    if ok and type(RM) == "table" and type(RM.afterPanelClose) == "function" then
+        local how = RM.afterPanelClose(UIManager, flash)
+        if how == "tickAfterNext" or how == "nextTick" or how == "now" then return end
+        -- A spec stub answered. The flash was not scheduled.
+        view._library_flash_pending = true
+    end
+    if type(UIManager.tickAfterNext) == "function" then
+        UIManager:tickAfterNext(flash)
+    elseif type(UIManager.nextTick) == "function" then
+        UIManager:nextTick(function()
+            if type(UIManager.nextTick) == "function" then UIManager:nextTick(flash) else flash() end
+        end)
     else
         flash()
     end
+end
+
+function Library:flashLibraryOverlay(view)
+    self:scheduleLibraryFlash(view or shared.view)
+end
+
+--- Any window closed while the Library is showing schedules the full
+-- flash, including KOReader's own menu and notices this plugin did not
+-- build. The closed window's setDirty(nil) would otherwise refresh the
+-- framebuffer without painting the Library.
+function Library:installCloseGuard(ui)
+    ui = ui or UIManager
+    if type(ui) ~= "table" or ui._library_close_guard or type(ui.close) ~= "function" then return end
+    ui._library_close_guard = true
+    local orig = ui.close
+    ui.close = function(self_ui, widget, ...)
+        local view = shared.view
+        local shown = type(self_ui.isWidgetShown) == "function" and self_ui.isWidgetShown or nil
+        local function up(w)
+            return w and shown and shown(self_ui, w) and true or false
+        end
+        local library_up = view and not view._closed and up(view)
+        local closing_overlay = library_up and widget and widget ~= view and up(widget)
+        orig(self_ui, widget, ...)
+        if not closing_overlay or view._closed or not up(view) then return end
+        view._overlay_just_closed = true
+        local function clear()
+            if view then view._overlay_just_closed = nil end
+        end
+        if type(self_ui.nextTick) == "function" then
+            self_ui:nextTick(clear)
+        end
+        local plugin = view.plugin
+        if plugin and type(plugin.scheduleLibraryFlash) == "function" then
+            plugin:scheduleLibraryFlash(view)
+        end
+    end
+end
+
+--- Make every dismiss path of `widget` consume the event, and flash the
+-- Library once the widget's own close refresh has run.
+function Library:keepLibraryOnClose(widget, view)
+    if type(widget) ~= "table" or widget._library_guarded then return end
+    widget._library_guarded = true
+    view = view or shared.view
+    local plugin = self
+    for i = 1, #OVERLAY_HANDLERS do
+        local name = OVERLAY_HANDLERS[i]
+        local orig = widget[name]
+        if type(orig) == "function" then
+            widget[name] = function(w, ...)
+                orig(w, ...)
+                return true
+            end
+        end
+    end
+    local orig_cw = widget.onCloseWidget
+    widget.onCloseWidget = function(w)
+        if type(orig_cw) == "function" then orig_cw(w) end
+        if view and not view._closed then plugin:scheduleLibraryFlash(view) end
+    end
+end
+
+--- Show `widget` over the Library. Button callbacks, tap outside, Back
+-- and a swipe all leave the Library on top.
+function Library:showOverLibrary(widget, view, refreshtype, refreshregion)
+    if not widget then return end
+    self:installCloseGuard(UIManager)
+    self:keepLibraryOnClose(widget, view or shared.view)
+    UIManager:show(widget, refreshtype, refreshregion)
+    return widget
+end
+
+--- KOReader's file-browser menu, opened from the Library (top swipe, or
+-- the gesture action). Its Back, swipe and tap-outside handlers do not
+-- consume the event, and closing it refreshes with setDirty(nil).
+function Library:guardHostMenu(menu)
+    self:installCloseGuard(UIManager)
+    local container = menu and menu.menu_container
+    if type(container) ~= "table" then return end
+    self:keepLibraryOnClose(container, shared.view)
+    local touch = container[1]
+    if type(touch) == "table" then self:keepLibraryOnClose(touch, shared.view) end
+end
+
+--- Close a dialog or card over the Library and flash the whole screen
+-- once the dialog's own refresh has been painted.
+function Library:closeOverLibrary(widget, view)
+    if widget and UIManager.close then UIManager:close(widget) end
+    self:scheduleLibraryFlash(view or shared.view)
 end
 
 --- Send a KOReader event (night mode, rotation) to the file browser or reader.
@@ -1089,9 +1204,8 @@ function Library:showBookDialog(book, view)
         title = book.title .. (book.authors and book.authors[1] and ("\n" .. book.authors[1]) or ""),
         title_align = "center",
         buttons = buttons,
-        tap_close_callback = function() self:flashLibraryOverlay(view) end,
     }
-    UIManager:show(dialog)
+    self:showOverLibrary(dialog, view)
 end
 
 --- Plain blurb for the details card. Calibre, the sidecar and book info come
@@ -1332,12 +1446,12 @@ function Library:showBookDetails(book, view, opts)
                 self:closeOverLibrary(card, view)
                 return
             end
-            UIManager:close(card)
+            self:closeOverLibrary(card, view)
             UIManager:nextTick(function() self:openBook(Core.openPath(book), view) end)
         end,
         on_open_copy = function(path)
             if type(path) ~= "string" or path == "" then return end
-            UIManager:close(card)
+            self:closeOverLibrary(card, view)
             UIManager:nextTick(function() self:openBook(path, view) end)
         end,
         on_status = function()
@@ -1350,7 +1464,7 @@ function Library:showBookDetails(book, view, opts)
             self:closeOverLibrary(card, view)
         end,
         on_more = function()
-            UIManager:close(card)
+            self:closeOverLibrary(card, view)
             UIManager:nextTick(function() self:showBookDialog(book, view) end)
         end,
         want_in = self:inWantToRead(book.path),
@@ -1359,14 +1473,14 @@ function Library:showBookDetails(book, view, opts)
             if now ~= nil and card.setWantLabel then card:setWantLabel(now) end
         end,
         on_shelf = function(kind, name)
-            UIManager:close(card)
+            self:closeOverLibrary(card, view)
             UIManager:nextTick(function() self:openShelf(kind, name, view) end)
         end,
     }
     -- "ui" with no region covers the whole screen. The reader menu (and the
     -- top bar) close with a refresh of only their own strip; without this,
     -- that strip is the only update, and the card's buttons never appear.
-    UIManager:show(card, Core.detailsShowMode())
+    self:showOverLibrary(card, view, Core.detailsShowMode())
     return card
 end
 
@@ -1387,9 +1501,8 @@ function Library:showSortPicker(view)
         title = _("Sort by"),
         title_align = "center",
         buttons = buttons,
-        tap_close_callback = function() self:flashLibraryOverlay(view) end,
     }
-    UIManager:show(dialog)
+    self:showOverLibrary(dialog, view)
     return dialog
 end
 
@@ -1415,7 +1528,7 @@ function Library:showPageJump(view)
             { text = _("Go"), is_enter_default = true, callback = go },
         } },
     }
-    UIManager:show(dialog)
+    self:showOverLibrary(dialog, view)
     dialog:onShowKeyboard()
     return dialog
 end
@@ -1463,9 +1576,8 @@ function Library:showWidgetMenu(view, slot)
         title = _("Widgets"),
         title_align = "center",
         buttons = buttons,
-        tap_close_callback = function() self:flashLibraryOverlay(view) end,
     }
-    UIManager:show(dialog)
+    self:showOverLibrary(dialog, view)
 end
 
 function Library:pickWidgetSource(view, slot, kind)
@@ -1479,7 +1591,7 @@ function Library:pickWidgetSource(view, slot, kind)
         names = Widgets.folderChoices(view.all_books)
     end
     if #names == 0 then
-        UIManager:show(InfoMessage:new{ text = _("Nothing here yet."), timeout = 2 })
+        self:showOverLibrary(InfoMessage:new{ text = _("Nothing here yet."), timeout = 2 }, view)
         return
     end
     local title = kind
@@ -1507,9 +1619,8 @@ function Library:pickWidgetSource(view, slot, kind)
         title = title,
         title_align = "center",
         buttons = buttons,
-        tap_close_callback = function() self:flashLibraryOverlay(view) end,
     }
-    UIManager:show(dialog)
+    self:showOverLibrary(dialog, view)
 end
 
 --- The ☰ menu inside the Library view.
@@ -1706,9 +1817,8 @@ function Library:showLibraryMenu(view)
             h = (ok_h and tonumber(h)) or 0
             return { x = 0, y = h, w = math.max(1, math.floor(w / 8)), h = 1 }
         end,
-        tap_close_callback = function() self:flashLibraryOverlay(view) end,
     }
-    UIManager:show(dialog)
+    self:showOverLibrary(dialog, view)
 end
 
 ----------------------------------------------------------------------------
@@ -1881,7 +1991,7 @@ function Library:rememberViewsMenu()
         hold_callback = function(touchmenu_instance)
             local n = Core.countViewMemory(self.settings)
             local ConfirmBox = require("ui/widget/confirmbox")
-            UIManager:show(ConfirmBox:new{
+            self:showOverLibrary(ConfirmBox:new{
                 text = T(_("Forget the layout, sort and filter remembered for %1 shelves? The Books tab's default stays."), n),
                 ok_text = _("Forget"),
                 ok_callback = function()
@@ -2061,7 +2171,7 @@ local function gestureDialog(self, view, title, rows, back)
         buttons[#buttons + 1] = {{
             text = row.text,
             callback = function()
-                UIManager:close(dialog)
+                self:closeOverLibrary(dialog, view)
                 row.run()
             end,
         }}
@@ -2070,7 +2180,7 @@ local function gestureDialog(self, view, title, rows, back)
         buttons[#buttons + 1] = {{
             text = _("Back"),
             callback = function()
-                UIManager:close(dialog)
+                self:closeOverLibrary(dialog, view)
                 back()
             end,
         }}
@@ -2079,9 +2189,8 @@ local function gestureDialog(self, view, title, rows, back)
         title = title,
         title_align = "center",
         buttons = buttons,
-        tap_close_callback = function() self:flashLibraryOverlay(view) end,
     }
-    UIManager:show(dialog)
+    self:showOverLibrary(dialog, view)
 end
 
 --- The same menu, as dialogs, from the Library's own ☰ button.
@@ -2150,7 +2259,7 @@ end
 function Library:openFileBrowserGestureManager()
     local ui = self.ui
     if not ui or ui.document or not (ui.menu and ui.menu.onShowMenu) then
-        UIManager:show(InfoMessage:new{
+        self:showOverLibrary(InfoMessage:new{
             text = _("KOReader's gesture manager for the file browser is in the file browser menu: Settings → Taps and gestures → Gesture manager."),
             timeout = 4,
         })
@@ -2162,6 +2271,7 @@ function Library:openFileBrowserGestureManager()
     end
     local path = Gestures.menuPath(menu.tab_item_table, "gesture_manager")
     menu:onShowMenu()
+    self:guardHostMenu(menu)
     local touch = menu.menu_container and menu.menu_container[1]
     if path and touch and touch.openMenu then
         touch:openMenu(path)
@@ -2178,6 +2288,7 @@ function Library:showKoreaderMenu(ges)
         index = menu:_getTabIndexFromLocation(ges)
     end
     menu:onShowMenu(index)
+    self:guardHostMenu(menu)
     return true
 end
 
@@ -2536,7 +2647,7 @@ end
 -- first so nothing is left on screen to keep KOReader running.
 function Library:confirmExit()
     local ConfirmBox = require("ui/widget/confirmbox")
-    UIManager:show(ConfirmBox:new{
+    self:showOverLibrary(ConfirmBox:new{
         text = _("Exit KOReader?"),
         ok_text = _("Exit"),
         ok_callback = function() self:exitKOReader() end,
@@ -2687,7 +2798,7 @@ function Library:toggleReadability()
             msg = _("Readability on: darker, bolder text with more space. Tap Readability again to undo.")
         end
     end
-    UIManager:show(InfoMessage:new{ text = msg, timeout = 2 })
+    self:showOverLibrary(InfoMessage:new{ text = msg, timeout = 2 })
 end
 
 ----------------------------------------------------------------------------
@@ -3068,7 +3179,7 @@ function Library:flashGhostingMenu()
             local label = current == Refresh.SETTING and everyLabel() or names[current]
             return T(_("Flash to clear ghosting: %1"), label)
         end,
-        help_text = _("On e-ink, a flashing refresh clears leftover cover images. By default this follows KOReader's own full-refresh setting (every 6 pages unless you changed that): the Library flashes every N page turns, and whenever you switch tabs, open a shelf, or close the details card, Controls, keyboard or a picker over the cover grid. Choose every page, KOReader's setting, or never. Does nothing on LCD screens or the emulator. Dragging the A–Z strip keeps its fast refresh."),
+        help_text = _("On e-ink, a flashing refresh clears leftover cover images. By default this follows KOReader's own full-refresh setting (every 6 pages unless you changed that): the Library flashes every N page turns, and whenever you switch tabs or open a shelf. Choose every page, KOReader's setting, or never. Closing a menu or dialog over the Library always flashes the whole screen, including the A–Z strip, and Never does not turn that off. Does nothing on LCD screens or the emulator for page turns. Dragging the A–Z strip keeps its fast refresh."),
         enabled_func = function()
             return Device and type(Device.hasEinkScreen) == "function" and Device:hasEinkScreen() == true
         end,
@@ -3133,7 +3244,7 @@ function Library:clearCoverCache()
         shared.view.cover_cache:clear()
         shared.view:refreshBody(true)
     end
-    UIManager:show(InfoMessage:new{
+    self:showOverLibrary(InfoMessage:new{
         text = T(_("Removed %1 cover thumbnails (%2)."), n, Core.formatSize(bytes)),
         timeout = 2,
     })

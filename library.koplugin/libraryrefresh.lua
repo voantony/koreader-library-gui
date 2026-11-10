@@ -10,12 +10,21 @@ Page turns flash every N pages, matching KOReader's own full-refresh
 setting (default 6). Switching tabs, opening a shelf, or closing an
 overlay over the cover grid always flashes once. Nothing flashes on
 LCD or the emulator, or when the setting is "never".
+
+Closing a menu is separate from that. A regional "flashui" leaves
+colour-layer ghosts (menu text, NEW badges) on a Kaleido panel, and it
+does not cover the A–Z strip when the menu stops short of the edge.
+That refresh is a full-screen "full", whatever the page-turn setting is.
 --]]
 
 local M = {}
 
 M.FLASH = "flashui"
 M.UI = "ui"
+-- Menu and dialog close. "full" outranks the dialog's own regional
+-- "flashui" or "ui" when KOReader merges the two refreshes, and it
+-- clears the colour layer. The rectangle is the whole screen.
+M.OVERLAY_CLOSE = "full"
 
 -- ☰ choices
 M.ALWAYS = "always"     -- flash on every Library page turn
@@ -38,6 +47,16 @@ end
 
 function M.isCoverGrid(view_mode)
     return view_mode == nil or view_mode == "grid" or view_mode == "covers"
+end
+
+--- Refresh to request after a menu or dialog over the Library has closed.
+-- Always the whole screen, mode "full", including when the page-turn
+-- setting is "never" and when the shelf is a list. w, h are the screen.
+-- Returns mode, rect.
+function M.overlayClose(w, h)
+    w = tonumber(w) or 0
+    h = tonumber(h) or 0
+    return M.OVERLAY_CLOSE, { x = 0, y = 0, w = w, h = h }
 end
 
 --- Which refresh to use, and the page-turn count to keep.
