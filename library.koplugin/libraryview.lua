@@ -48,6 +48,7 @@ local LineWidget = require("ui/widget/linewidget")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
+local Widget = require("ui/widget/widget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -57,6 +58,9 @@ local time = require("ui/time")
 local util = require("util")
 local Core = require("librarycore")
 local Gestures = require("librarygestures")
+local ok_status, status_mod = pcall(require, "librarystatus")
+local Status = (ok_status and type(status_mod) == "table" and status_mod.DEFAULT == "icon"
+    and type(status_mod.markOps) == "function") and status_mod or nil
 local Scrubber = require("libraryscrubber")
 local Tiles = require("librarytile")
 local Covers = require("librarycovers")
@@ -99,7 +103,8 @@ local LibraryView = InputContainer:extend{
     rounded_keyboard = true, -- "Rounded keyboard in search"
     fuzzy_search = true,     -- "Typo-tolerant search"
     show_clock = true,       -- clock beside the search bar
-    show_battery = true,     -- battery percentage beside the search bar
+    show_battery = true,     -- battery beside the search bar
+    status_style = nil,      -- "icon" | "compact" | "bar" | "plain"; nil is the default (icon)
     use_koreader_keyboard = false, -- stock InputDialog instead of the Library keyboard
     search_suggestions = true, -- "Word suggestions": a row of words above the keyboard
     timing = nil,            -- the "Timing log" (librarytiming.lua), from the plugin
@@ -463,21 +468,104 @@ function LibraryView:setSearchClearShown(on)
     end
 end
 
+--- The drawn battery (icon or thin bar). The clock is a TextWidget beside it.
+local StatusMark = Widget:extend{
+    kind = "icon",
+    percent = 0,
+    charging = false,
+    unit = 1,
+}
+
+function StatusMark:init()
+    local w, h = 0, 0
+    if Status then w, h = Status.markSize(self.kind, self.unit) end
+    self.dimen = Geom:new{ w = w, h = h }
+end
+
+function StatusMark:getSize()
+    return Geom:new{ w = self.dimen.w, h = self.dimen.h }
+end
+
+function StatusMark:setState(power)
+    self.percent = power and power.percent or 0
+    self.charging = power and power.charging or false
+    self.charged = power and power.charged or false
+end
+
+function StatusMark:paintTo(bb, x, y)
+    -- The screen buffer is FFI cdata, not a table. Only skip a test double.
+    if not Status or bb == nil or type(bb.paintRect) ~= "function" then return end
+    local ops = Status.markOps(self.kind, self.percent, self.charging, self.unit)
+    for i = 1, #ops do
+        local op = ops[i]
+        local c = op.color == "white" and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
+        bb:paintRect(x + op.x, y + op.y, op.w, op.h, c)
+    end
+end
+
+function LibraryView:statusStyle()
+    if not Status then return "plain" end
+    return Status.style(self.status_style)
+end
+
+function LibraryView:statusUnit()
+    if not (Screen and Screen.scaleBySize) then return 1 end
+    local ok, n = pcall(Screen.scaleBySize, Screen, 1)
+    if ok and type(n) == "number" and n >= 1 then return n end
+    return 1
+end
+
+function LibraryView:statusFace(style)
+    style = style or self:statusStyle()
+    if not Status then
+        return Font:getFace("cfont", 20), true
+    end
+    local spec = Status.face(style)
+    return Font:getFace(spec.font, spec.size), spec.bold and true or false
+end
+
+function LibraryView:measureStatusText(text, face, bold)
+    local t = TextWidget:new{ text = text, face = face, bold = bold and true or false }
+    local sz = t:getSize()
+    local w = sz and sz.w or 0
+    if t.free then t:free() end
+    return w
+end
+
 --- Width reserved for the clock and battery, from a wide sample so "9:59"
 -- becoming "10:00" does not move the search bar.
 function LibraryView:measureStatusSlot()
     if not (self.show_clock or self.show_battery) then return 0 end
+    local style = self:statusStyle()
+    local twelve = self:twelveHour()
+    self._status_twelve = twelve
+    local face, bold = self:statusFace(style)
+    self._status_face = face
+    self._status_bold = bold
     -- Wide digits, so the field does not jump at 10:00. Battery width is reserved
     -- only when this device actually reports a percentage.
-    local clock = self.show_clock and (self:twelveHour() and "88:88 PM" or "88:88") or nil
-    local battery = (self.show_battery and self:readBattery()) and "100%" or nil
-    local sample = Core.statusLabel(clock, battery)
-    if not sample then return 0 end
-    local face = self._status_face or Font:getFace("cfont", 20)
-    local t = TextWidget:new{ text = sample, face = face, bold = true }
-    local w = t:getSize().w
-    if t.free then t:free() end
-    return w
+    local clock = self.show_clock and (twelve and "88:88 PM" or "88:88") or nil
+    local power = self.show_battery and self:readPower() or nil
+    if style == "plain" or not Status then
+        local sample = Core.statusLabel(clock, power and "100%" or nil)
+        if not sample then return 0 end
+        return self:measureStatusText(sample, face, true)
+    end
+    local clock_w = clock and self:measureStatusText(clock, face, bold) or 0
+    local batt_w = 0
+    if power then
+        if style == "compact" then
+            for _, sample in ipairs(Status.compactSamples()) do
+                local w = self:measureStatusText(sample, face, false)
+                if w > batt_w then batt_w = w end
+            end
+        else
+            batt_w = Status.markSize(style, self:statusUnit())
+        end
+    end
+    if clock_w == 0 then return batt_w end
+    if batt_w == 0 then return clock_w end
+    return clock_w + Status.gap(self:statusUnit()) + batt_w
 end
 
 function LibraryView:twelveHour()
@@ -499,7 +587,8 @@ function LibraryView:readClock()
     return os.date("%H:%M")
 end
 
-function LibraryView:readBattery()
+--- Percent, charging and charged, or nil when this device has no reading.
+function LibraryView:readPower()
     if not self.show_battery then return nil end
     if type(Device) ~= "table" or type(Device.hasBattery) ~= "function" then return nil end
     local ok, has = pcall(Device.hasBattery, Device)
@@ -508,28 +597,130 @@ function LibraryView:readBattery()
     if not okd or type(powerd) ~= "table" or type(powerd.getCapacity) ~= "function" then return nil end
     local okc, cap = pcall(powerd.getCapacity, powerd)
     if not okc then return nil end
-    return Core.batteryLabel(cap)
+    local charging, charged = false, false
+    if type(powerd.isCharging) == "function" then
+        local okch, v = pcall(powerd.isCharging, powerd)
+        if okch then charging = v and true or false end
+    end
+    if type(powerd.isCharged) == "function" then
+        local okcd, v = pcall(powerd.isCharged, powerd)
+        if okcd then charged = v and true or false end
+    end
+    if Status then return Status.state(cap, charging, charged) end
+    local label = Core.batteryLabel(cap)
+    local n = label and tonumber(label:match("^(%d+)")) or nil
+    if not n then return nil end
+    return { percent = n, charging = charging, charged = charged }
+end
+
+function LibraryView:readBattery()
+    local power = self:readPower()
+    if not power then return nil end
+    return Core.batteryLabel(power.percent)
+end
+
+--- KOReader's own battery glyph when the device provides one, else the same map.
+function LibraryView:batterySymbol(power)
+    if not power then return "" end
+    if type(Device) == "table" and type(Device.getPowerDevice) == "function" then
+        local okd, powerd = pcall(Device.getPowerDevice, Device)
+        if okd and type(powerd) == "table" and type(powerd.getBatterySymbol) == "function" then
+            local ok, sym = pcall(powerd.getBatterySymbol, powerd,
+                power.charged and true or false, power.charging and true or false, power.percent)
+            if ok and type(sym) == "string" and sym ~= "" then return sym end
+        end
+    end
+    if Status then return Status.koreaderSymbol(power.percent, power.charging, power.charged) end
+    return ""
+end
+
+function LibraryView:freeStatusWidgets()
+    self.status_label = nil
+    self._status_clock = nil
+    self._status_batt_label = nil
+    self._status_mark = nil
+    self.status_box = nil
 end
 
 function LibraryView:buildStatusWidget()
-    self.status_label = nil
-    self.status_box = nil
+    self:freeStatusWidgets()
     if not (self.show_clock or self.show_battery) then
         self._status_text = nil
+        self._status_fp = nil
         return nil
     end
-    local face = self._status_face or Font:getFace("cfont", 20)
-    local battery = self:readBattery()
-    self._status_has_battery = battery ~= nil
-    local text = Core.statusLabel(self:readClock(), battery) or ""
-    self._status_text = text
-    local label = TextWidget:new{ text = text, face = face, bold = true }
-    local slot_w = self._status_slot_w or label:getSize().w
-    local slot_h = self.search_field and self.search_field:getSize().h or label:getSize().h
-    self.status_label = label
+    local style = self:statusStyle()
+    local face, bold = self:statusFace(style)
+    self._status_face = face
+    self._status_bold = bold
+    local power = self:readPower()
+    self._status_has_battery = power ~= nil
+    local clock = self:readClock()
+    local slot_w = self._status_slot_w
+    local slot_h = self.search_field and self.search_field:getSize().h or 0
+    local inner
+    if style == "plain" or not Status then
+        local text = Core.statusLabel(clock, power and Core.batteryLabel(power.percent) or nil) or ""
+        self._status_text = text
+        self._status_fp = text
+        local label = TextWidget:new{ text = text, face = face, bold = true }
+        self.status_label = label
+        inner = label
+        if not slot_w or slot_w <= 0 then slot_w = label:getSize().w end
+        if slot_h <= 0 then slot_h = label:getSize().h end
+    else
+        local parts = { align = "center" }
+        if clock then
+            local label = TextWidget:new{ text = clock, face = face, bold = bold }
+            self._status_clock = label
+            self.status_label = label
+            parts[#parts + 1] = label
+        end
+        if power then
+            if clock then
+                parts[#parts + 1] = HorizontalSpan:new{ width = Status.gap(self:statusUnit()) }
+            end
+            if style == "compact" then
+                local text = self:batterySymbol(power) .. power.percent .. "%"
+                local label = TextWidget:new{ text = text, face = face, bold = false }
+                self._status_batt_label = label
+                parts[#parts + 1] = label
+            else
+                local mark = StatusMark:new{
+                    kind = style,
+                    percent = power.percent,
+                    charging = power.charging,
+                    charged = power.charged,
+                    unit = self:statusUnit(),
+                }
+                self._status_mark = mark
+                parts[#parts + 1] = mark
+            end
+        end
+        inner = HorizontalGroup:new(parts)
+        local sz = inner:getSize()
+        if not slot_w or slot_w <= 0 then slot_w = sz.w end
+        if slot_h <= 0 then slot_h = sz.h end
+        local gh = sz.h or 0
+        if slot_h > gh then
+            local pad = math.floor((slot_h - gh) / 2)
+            inner = VerticalGroup:new{
+                VerticalSpan:new{ width = pad },
+                inner,
+            }
+        end
+        self._status_fp = table.concat({
+            style,
+            clock or "",
+            power and tostring(power.percent) or "",
+            power and power.charging and "1" or "0",
+            power and power.charged and "1" or "0",
+        }, "|")
+        self._status_text = self._status_fp
+    end
     self.status_box = RightContainer:new{
         dimen = Geom:new{ w = slot_w, h = slot_h },
-        label,
+        inner,
     }
     -- Tap (not swipe) on the clock/battery opens Controls, so the panel
     -- does not depend on the swipe alone. The search field to the left
@@ -550,13 +741,42 @@ function LibraryView:onStatusTap()
     return false
 end
 
---- Swap the clock and battery text. Does not repaint.
+--- Swap the clock and battery. Does not repaint.
 function LibraryView:updateStatusText()
-    if not self.status_label or type(self.status_label.setText) ~= "function" then return false end
-    local text = Core.statusLabel(self:readClock(), self:readBattery()) or ""
-    if text == self._status_text then return false end
-    self._status_text = text
-    self.status_label:setText(text)
+    local style = self:statusStyle()
+    if style == "plain" or not Status then
+        if not self.status_label or type(self.status_label.setText) ~= "function" then return false end
+        local text = Core.statusLabel(self:readClock(), self:readBattery()) or ""
+        if text == self._status_text then return false end
+        self._status_text = text
+        self.status_label:setText(text)
+        return true
+    end
+    local clock = self:readClock()
+    local power = self:readPower()
+    local fp = table.concat({
+        style,
+        clock or "",
+        power and tostring(power.percent) or "",
+        power and power.charging and "1" or "0",
+        power and power.charged and "1" or "0",
+    }, "|")
+    if fp == self._status_fp then return false end
+    -- A battery that appears or disappears, or a clock that does, needs a new row.
+    local had_clock = self._status_clock ~= nil
+    local had_batt = (self._status_mark or self._status_batt_label) ~= nil
+    if (clock ~= nil) ~= had_clock or (power ~= nil) ~= had_batt then return false end
+    self._status_fp = fp
+    self._status_text = fp
+    if clock and self._status_clock and self._status_clock.setText then
+        self._status_clock:setText(clock)
+    end
+    if self._status_mark and self._status_mark.setState then
+        self._status_mark:setState(power)
+    end
+    if power and self._status_batt_label and self._status_batt_label.setText then
+        self._status_batt_label:setText(self:batterySymbol(power) .. power.percent .. "%")
+    end
     return true
 end
 
@@ -600,12 +820,19 @@ function LibraryView:scheduleStatusRefresh()
     UIManager:scheduleIn(delay, self._status_tick)
 end
 
+function LibraryView:statusTyping()
+    return self.search_input and self.search_input.isKeyboardVisible
+        and self.search_input:isKeyboardVisible() and true or false
+end
+
 function LibraryView:onStatusTick()
-    -- A battery that appears or disappears changes the search bar's width.
-    local has_battery = (self.show_battery and self:readBattery() ~= nil) and true or false
-    if self.search_field and has_battery ~= (self._status_has_battery and true or false)
-            and not (self.search_input and self.search_input.isKeyboardVisible
-                and self.search_input:isKeyboardVisible()) then
+    -- A battery that appears or disappears, or a 12-hour switch, changes the
+    -- search bar's width. Rebuild unless the keyboard is up.
+    local has_battery = (self.show_battery and self:readPower() ~= nil) and true or false
+    local twelve = self:twelveHour()
+    if self.search_field and not self:statusTyping()
+            and (has_battery ~= (self._status_has_battery and true or false)
+                or twelve ~= self._status_twelve) then
         self:buildSearchRow()
         self:refreshBody(true)
         return
@@ -615,6 +842,33 @@ function LibraryView:onStatusTick()
     UIManager:setDirty(self, function()
         return "ui", self:headerRegion(), true
     end)
+end
+
+--- KOReader's Time and date menu broadcasts this when twelve_hour_clock flips.
+function LibraryView:onTimeFormatChanged()
+    if self._closed then return end
+    if self:statusTyping() then
+        self:updateStatusText()
+        if UIManager.setDirty then
+            UIManager:setDirty(self, function()
+                return "ui", self:headerRegion(), true
+            end)
+        end
+        return
+    end
+    if not self.search_field then return end
+    self:buildSearchRow()
+    self:refreshBody(true)
+end
+
+function LibraryView:setStatusStyle(id)
+    if not Status then return end
+    id = Status.style(id)
+    if id == Status.style(self.status_style) then return end
+    self.status_style = id
+    self:buildSearchRow()
+    self:scheduleStatusRefresh()
+    self:refreshBody(true)
 end
 
 function LibraryView:setShowClock(on)
