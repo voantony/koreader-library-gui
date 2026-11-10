@@ -57,7 +57,7 @@ The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com
 
 | Sort from the footer | The ☰ menu | Controls panel |
 |---|---|---|
-| ![Sort picker opened from the footer label](docs/screenshots/07-sort-picker.png) | ![The ☰ menu opening upward from the bottom left: sort, view, Widgets, Barely started, A–Z strip, Show clock, Show battery and Use KOReader's keyboard](docs/screenshots/v050-menu.png) | ![Controls panel with brightness and warmth sliders, and Light, Night mode, Refresh, Wi-Fi, Rotate, Cover sleep and Exit](docs/screenshots/09-controls-panel.png) |
+| ![Sort picker opened from the footer label](docs/screenshots/07-sort-picker.png) | ![The ☰ menu opening upward from the bottom left: sort, view including Cover only, Widgets, Gestures, A–Z strip, clock, battery, and Close Library](docs/screenshots/v050-menu.png) | ![Controls panel with brightness and warmth sliders, and Light, Night mode, Refresh, Wi-Fi, Rotate, Cover sleep and Exit](docs/screenshots/09-controls-panel.png) |
 
 | Genres | Inside a genre | Go to page |
 |---|---|---|
@@ -65,7 +65,7 @@ The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com
 
 | Book details | A book with no description | Library in the reader menu |
 |---|---|---|
-| ![Book details for Wuthering Heights, with the cover, Open, a Public domain chip and a description](docs/screenshots/13-details-card.png) | ![Book details for a finished book with no description](docs/screenshots/14-details-card-none.png) | ![KOReader's reader menu with Library and Book details at the top, and the Library tab icon](docs/screenshots/12-reader-menu-library.png) |
+| ![Book details for Wuthering Heights: last read, file size, path, description, and Add to Want to Read](docs/screenshots/13-details-card.png) | ![Pride and Prejudice, finished, with no description. Mark unread sits with More and Close](docs/screenshots/14-details-card-none.png) | ![KOReader's reader menu with Library and Book details at the top, and the Library tab icon](docs/screenshots/12-reader-menu-library.png) |
 
 | Clock and battery off |
 |---|
@@ -75,7 +75,13 @@ The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com
 |---|---|---|
 | ![Filter chips with their full labels. Finished is cut off at the right edge](docs/screenshots/v050-filters.png) | ![KOReader's file browser, filing-cabinet tab, with Start with set to library](docs/screenshots/v050-start-with.png) | ![The frontlight level, 31, while a drag on the left edge is still down](docs/screenshots/v050-brightness.png) |
 
-The shots on this page show the home screen (widgets and the A–Z strip). They were taken in the KOReader emulator with the dummy library. v0.7.0 adds a Gestures menu on the Library home and forwards the file browser's top swipe and two-finger gestures. v0.6.0 adds Read / New badges, time left, Want to Read, and Cover only. Finished keeps its full label and is cut off at the screen edge when the row is wider than the screen; swipe the chips to bring it across. The level in the brightness shot is drawn by the plugin while the finger is down, and it is cleared when the finger lifts.
+| Cover only | Badges and time left | Gestures |
+|---|---|---|
+| ![Cover only: New badges and a progress row with time left, no title under the cover](docs/screenshots/v070-cover-only.png) | ![List view with New, Read, and time left under the percent](docs/screenshots/v070-badges.png) | ![Gestures menu. Each row is still Same as file browser](docs/screenshots/v070-gestures.png) |
+
+![Choices for swipe down from the top. Same as file browser is selected](docs/screenshots/v070-gesture-choices.png)
+
+The shots on this page were taken in the KOReader emulator (1264×1680) with the dummy library. v0.7.0 adds the Gestures menu: a swipe down from the top opens KOReader's menu, and a two-finger swipe follows the file browser, until you pick another action. v0.6.0 adds Read / New badges, time left, Want to Read, and Cover only. Finished keeps its full label and is cut off at the screen edge when the row is wider than the screen; swipe the chips to bring it across. The level in the brightness shot is drawn by the plugin while the finger is down, and it is cleared when the finger lifts.
 
 ## Features
 
@@ -86,7 +92,7 @@ The shots on this page show the home screen (widgets and the A–Z strip). They 
 - **Sort** by Author, Title, Date added, Last read or Series. Tap the label in the footer to change it, or use the ☰ menu.
 - **Views**: Small, Medium or Large covers, List, Compact, Compact · 2 columns, and Cover only. Cover only keeps the progress row and the badges, and drops the title and author so more covers fit. The view, sort and filter are remembered for each tab and each author, series or collection you open (**Reset default layout** in the ☰ menu forgets them).
 - **Read / New badges.** **New** is only for a book that has never been opened. A book you opened and left on the cover stays unmarked. **Read** means KOReader's doc settings say the book is finished. On hold is unchanged.
-- **Time left** on in-progress books, next to the percent (*42 % · 2h*). It uses that book's own reading speed. If KOReader has no speed for the book, the duration is hidden; nothing is filled in with a default pace.
+- **Time left** on in-progress books. A cover and a compact row put it next to the percent (*42 % · 2h 15m*). A list row puts it under the percent. It uses that book's own reading speed. If KOReader has no speed for the book, the duration is hidden; nothing is filled in with a default pace.
 - **Want to Read.** From the details card or the book's More menu, add or remove the book from a KOReader collection named Want to Read. That collection then shows on the Collections tab like any other.
 - **Dates**: sorted by Last read or Date added, each book shows its date (*3h ago*, *Yesterday*, *12 Oct*). Under Last read, books you've never opened follow in author order.
 - **Widgets**: the area above the books. The default is still Continue reading, a row of the books you are in the middle of. Long-press the title to switch the slot to Favorites, Recently added (newest file first), a series, a collection, or a folder, or to clear it. Two widgets can sit side by side; tap a title to expand one and turn the other into a tab. A widget remembers its page when you open a book and come back. Swipe up on the grid to hide the band, and swipe down to restore it.
@@ -101,16 +107,16 @@ The shots on this page show the home screen (widgets and the A–Z strip). They 
 - **Bigger page buttons**: the footer arrows and the page number are about 10 mm wide to hit (at least 120 px on a 300 dpi Kindle), without making the footer taller.
 - **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
 - **Controls panel**: swipe down from the top right (the right half of the top of the screen; a slightly diagonal pull is fine) for Brightness and Warmth sliders and buttons for Light, Night mode, Refresh (clears e-ink ghosting), Wi-Fi, Rotate, Cover sleep and Exit (asks first, then quits KOReader). You can also tap the clock or battery beside the search bar, or choose **Controls** in the ☰ menu. Anything your device doesn't have is left out.
-- **Top tap while reading** (☰ → Library → **Top tap opens**): **Library GUI bar** (the default) opens a small menu: Library, Contents, Go to page, Search, Font & size, Light, Bookmark, Book details, Exit, and **More…** for KOReader's full reader menu. **KOReader menu** opens KOReader's own reader menu with that same tap. A swipe down from the top opens KOReader's menu with either choice. The Library screen stays as it is, and the search keyboard stays on **Use KOReader's keyboard**.
+- **Top tap while reading** (☰ → Library → **Top tap opens**): **Library GUI bar** (the default) opens a small menu: Library, Contents, Go to page, Search, Font & size, Readability, Light, Bookmark, Book details, Exit, and **More…** for KOReader's full reader menu. **KOReader menu** opens KOReader's own reader menu with that same tap. A swipe down from the top of a page opens KOReader's menu with either choice. The search keyboard stays on **Use KOReader's keyboard**.
 - **Start with**: KOReader's own Start with setting (file browser menu) includes library. Choose it to open the Library when KOReader starts and to come back to it after closing a book. A vertical drag on the left edge of the Library sets brightness directly, at the same pace as the Controls slider.
 - **Covers without other plugins.** Library GUI extracts covers itself in the background. If Project: Title or Cover browser is enabled, it reuses their cover cache.
-- **Gestures**: the Library home screen has its own gesture menu (☰ on the Library, or ☰ → Library → **Gestures**). Each gesture — swipe down from the top, two-finger swipes, the screen edges, corner taps and holds, and multiswipe, pinch and spread — can stay **Same as file browser** (the default, so nothing changes), do something else (open KOReader's menu, rotate, brightness, warmth, open the current book, the Library menu, Controls, or turn the page), or do **Nothing**. Same as file browser is defined in KOReader's own Gesture manager for the file browser; the menu has a shortcut to it. A one-finger tap or swipe that starts on the A–Z strip still jumps to a letter. Open Library, Search library, Resume last book, Rescan library, and Next / Previous in series can also be assigned under *Taps and gestures*.
+- **Gestures** (☰ on the Library, or ☰ → Library → **Gestures**). On the Library home, a swipe down from the top opens KOReader's menu, and a two-finger swipe does whatever you set for the file browser (often rotate). That is **Same as file browser**, the default for every gesture. You can instead pick **Nothing**, or an action of your own: open KOReader's menu, rotate, brightness, warmth, open the current book, the Library menu, Controls, or turn a page. The list is the top swipe, two-finger swipes (right, left, up, down, diagonal), the screen edges, corner taps and holds, and multiswipe, pinch and spread. **KOReader gesture manager** in that menu opens the file-browser profile, which is what Same as file browser follows. A one-finger tap or swipe that starts on the A–Z strip still jumps to a letter. Open Library, Search library, Resume last book, Rescan library, and Next / Previous in series can also be assigned under *Taps and gestures*.
 
 ## Install
 
 The current release is **[v0.7.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.0)**. Download **[library.koplugin-v0.7.0.zip](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.0/downloads/library.koplugin-v0.7.0.zip)** and unzip it. You get a folder called `library.koplugin`.
 
-SHA256: `fc834e9f03ed23838c2e97aa0de04583bbfe76ecf06445d0a34b742d5c352da6`
+SHA256: `fede2f8f502ff753d0936c36659d2eba5789a80371f3dc0ee64103b3e43fd47c`
 
 1. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).

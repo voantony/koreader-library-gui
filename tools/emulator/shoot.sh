@@ -28,7 +28,7 @@ if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
     exit 2
 fi
 case "$scenario" in
-    smoke|footer|az|aznav|toptap|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|gallery|readme) ;;
+    smoke|footer|az|aznav|toptap|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|azcolumn|azshort|footerbook|footerempty|coveronly|badges|gesturepages|gallery|readme) ;;
     *) echo "unknown scenario: $scenario" >&2; exit 2 ;;
 esac
 
@@ -107,7 +107,7 @@ echo "running $scenario -> $out" >&2
 set +e
 local_timeout="${EMU_TIMEOUT:-180}"
 case "$scenario" in
-    readme|gallery) local_timeout="${EMU_TIMEOUT:-720}" ;;
+    readme|gallery) local_timeout="${EMU_TIMEOUT:-1200}" ;;
 esac
 env \
     HOME="$emu_home" \
@@ -194,6 +194,13 @@ else:
         "brightness": ["v050-brightness.png"],
         "controls": ["09-controls-panel.png"],
         "startwith": ["v050-start-with.png"],
+        "azcolumn": ["v050-az-column.png"],
+        "azshort": ["v050-az-short.png"],
+        "footerbook": ["v050-footer-book.png"],
+        "footerempty": ["v050-footer-empty.png"],
+        "coveronly": ["v070-cover-only.png"],
+        "badges": ["v070-badges.png"],
+        "gesturepages": ["v070-gestures.png", "v070-gesture-choices.png"],
         "gallery": [
             "02-compact-2-columns.png", "03-compact.png", "20-recently-opened.png",
             "04-authors.png", "05-series.png", "06-search-typos.png", "07-sort-picker.png",
@@ -204,7 +211,7 @@ else:
     }
     if scenario == "readme":
         names = []
-        for key in ("widgets", "accordion", "recently", "shelf", "bubble", "menu", "filters", "brightness", "startwith", "gallery"):
+        for key in ("widgets", "accordion", "recently", "shelf", "bubble", "menu", "filters", "brightness", "startwith", "azcolumn", "azshort", "footerbook", "footerempty", "coveronly", "badges", "gesturepages", "gallery"):
             names.extend(expected[key])
         expected["readme"] = names
     for name in expected.get(scenario, []):
