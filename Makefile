@@ -2,7 +2,7 @@
 LUA ?= luajit
 PLUGIN := library.koplugin
 VERSION ?= 0.7.2
-FILES := _meta.lua main.lua librarycore.lua librarystatus.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua libraryfooter.lua libraryrefresh.lua libraryreadability.lua librarysuggest.lua librarytiming.lua libraryscrubber.lua libraryzones.lua librarygestures.lua librarywidgets.lua
+FILES := _meta.lua main.lua librarycore.lua librarystatus.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua libraryfooter.lua libraryrefresh.lua libraryreadability.lua librarysuggest.lua librarytiming.lua libraryscrubber.lua libraryzones.lua librarygestures.lua librarywidgets.lua libraryupdate.lua
 
 .PHONY: test zip stage clean
 
@@ -13,6 +13,7 @@ test:
 stage: clean
 	mkdir -p dist/$(PLUGIN)
 	cd $(PLUGIN) && cp $(FILES) ../dist/$(PLUGIN)/
+	STAMP_PATH='dist/$(PLUGIN)/_meta.lua' VERSION='$(VERSION)' $(LUA) -e 'local p,v=os.getenv("STAMP_PATH"),os.getenv("VERSION"); local f=assert(io.open(p,"rb")); local s=f:read("*a"); f:close(); local n,c=s:gsub("(version%s*=%s*\")[^\"]*(\")", "%1"..v.."%2", 1); if c~=1 then error("could not stamp version in "..p) end; f=assert(io.open(p,"wb")); f:write(n); f:close()'
 	cd dist/$(PLUGIN) && shasum -a 256 $(FILES) > ../SHA256SUMS 2>/dev/null || sha256sum $(FILES) > ../SHA256SUMS
 
 zip: stage

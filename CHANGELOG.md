@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Updates.** ☰ → Updates, and the same entry under ☰ → Library. **Check for updates now** looks up the latest release. A newer one shows the version and a short changelog. Update checks the published SHA256, replaces `library.koplugin` (the previous folder is kept as `library.koplugin.bak` and put back if the install fails), and offers to restart KOReader. Settings stay in `koreader/settings`. **Automatic updates** are **Notify me** until you change them (an unset choice is Notify me). **Off** turns background checks off; checking by hand still works. **Notify me** looks about once a week, only when Wi-Fi is already on, and only shows a short notice. **Install quietly** does that check and, when a newer release is found and no book is open, downloads it, checks the SHA256, installs it, and says it takes effect at the next restart. It does not turn Wi-Fi on, does not restart KOReader, and says nothing if the install fails. On a Mac, `curl -fsSL https://gitlab.com/antonyvo/koreader-library-gui/-/raw/main/tools/install.sh | bash` does the same install when a Kindle volume is mounted, or with `kpush` when that is on your PATH.
+
 ## 0.7.2 (2026-11-10)
 
 - **Clock and battery.** Beside the search bar, three looks: **Battery icon** (the default: a bold time and a battery that fills, with a bolt while charging), **Status bar** (KOReader's own battery icon and the percentage), and **Plain text** (the original line). A saved thin-bar choice shows the battery icon. The clock follows KOReader's 12-hour clock setting, and the header rebuilds when that setting changes. Tap the clock or battery to open Controls, as before.

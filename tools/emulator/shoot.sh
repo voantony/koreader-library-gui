@@ -19,7 +19,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 scenario="${1:-}"
 if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
-    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|aznav|toptap|status|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|gallery|readme>" >&2
+    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|aznav|toptap|status|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|update|gallery|readme>" >&2
     echo "  EMU_OUT     output directory (default: emulator-out/<scenario>)" >&2
     echo "  EMU_PLUGIN  library.koplugin to copy (default: ./library.koplugin)" >&2
     echo "  EMU_COUNT   books in the seeded library (default: 200)" >&2
@@ -28,7 +28,7 @@ if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
     exit 2
 fi
 case "$scenario" in
-    smoke|footer|az|aznav|toptap|status|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|azcolumn|azshort|footerbook|footerempty|coveronly|badges|gesturepages|gallery|readme) ;;
+    smoke|footer|az|aznav|toptap|status|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|update|azcolumn|azshort|footerbook|footerempty|coveronly|badges|gesturepages|gallery|readme) ;;
     *) echo "unknown scenario: $scenario" >&2; exit 2 ;;
 esac
 
@@ -83,6 +83,15 @@ rm -rf "$plugins/library.koplugin" "$plugins/guiprobe.koplugin"
 mkdir -p "$plugins/library.koplugin" "$plugins/guiprobe.koplugin"
 cp -a "$plugin"/. "$plugins/library.koplugin/"
 cp -a "$HERE/guiprobe.koplugin"/. "$plugins/guiprobe.koplugin/"
+if [[ "$scenario" == "update" ]]; then
+    # Latest on GitLab is v0.7.2. Report 0.7.1 so Check for updates offers it.
+    # The committed _meta.lua is left as it is.
+    sed -i 's/version = "0.7.2"/version = "0.7.1"/' "$plugins/library.koplugin/_meta.lua"
+    if ! grep -q 'version = "0.7.1"' "$plugins/library.koplugin/_meta.lua"; then
+        echo "could not stamp installed version 0.7.1" >&2
+        exit 1
+    fi
+fi
 
 display_num=99
 while [[ -e "/tmp/.X${display_num}-lock" || -e "/tmp/.X11-unix/X${display_num}" ]]; do
@@ -210,6 +219,7 @@ else:
         "coveronly": ["v070-cover-only.png"],
         "badges": ["v070-badges.png"],
         "gesturepages": ["v070-gestures.png", "v070-gesture-choices.png"],
+        "update": ["update-menu.png", "update-prompt.png", "update-success.png"],
         "gallery": [
             "02-compact-2-columns.png", "03-compact.png", "20-recently-opened.png",
             "04-authors.png", "05-series.png", "06-search-typos.png", "07-sort-picker.png",

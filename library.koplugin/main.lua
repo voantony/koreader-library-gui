@@ -69,6 +69,7 @@ local DEFAULTS = {
     footer_page_total = true,   -- reader status bar: page out of total, short tap cycle (libraryfooter.lua)
     -- footer_page_total_prev: the status bar view from before we switched it
     flash_ghosting = "setting", -- e-ink: flash every N Library page turns (libraryrefresh.lua)
+    -- update_mode: nil or "notify" (default) | "off" | "install". See libraryupdate.mode.
     -- footer_cycle: { [view] = false } views turned off in the tap cycle
     -- view_memory: { [key] = { view =, sort =, filter =, t = } }, see Core.viewKey
     -- sleep_cover_prev: KOReader's sleep screen settings from before
@@ -163,6 +164,93 @@ function Library:showStatusStyleDialog(view)
     UIManager:show(dialog)
 end
 
+local UPDATE_MODE_LABEL = {
+    off = _("Off — turn off update checks"),
+    notify = _("Notify me"),
+    install = _("Install quietly"),
+}
+
+function Library:updateMode()
+    return require("libraryupdate").mode(self.settings)
+end
+
+function Library:setUpdateMode(mode)
+    local Update = require("libraryupdate")
+    if Update.mode({ update_mode = mode }) ~= mode then return end
+    self.settings.update_mode = mode
+    self.settings.check_updates_weekly = nil
+    self:saveSettings()
+end
+
+--- ☰ → Library → Updates, and the Library ☰ menu. Off is the only switch
+-- that stops background checks. Check for updates now still works.
+function Library:updatesMenu()
+    local items = {
+        {
+            text = _("Check for updates now"),
+            help_text = _("Look up the latest release. If it is newer, it shows the version and a short changelog. Update downloads it, checks the published SHA256, and replaces this plugin. Settings stay in koreader/settings."),
+            callback = function() require("libraryupdate").prompt(self) end,
+            separator = true,
+        },
+    }
+    local help = {
+        off = _("Turn off update checks. Nothing is looked up in the background. Check for updates now still works."),
+        notify = _("About once a week, when Wi-Fi is already on, show a short notice if a newer release exists. Nothing is installed, and Wi-Fi is not turned on."),
+        install = _("About once a week, when Wi-Fi is already on, download a newer release, check its SHA256, and install it. KOReader is not restarted, and Wi-Fi is not turned on. An open book is left alone until the Library is showing again. If the install fails, the previous copy is put back and nothing is said."),
+    }
+    local Update = require("libraryupdate")
+    for i = 1, #Update.MODE_ORDER do
+        local id = Update.MODE_ORDER[i]
+        items[#items + 1] = {
+            text = UPDATE_MODE_LABEL[id],
+            help_text = help[id],
+            radio = true,
+            checked_func = function() return self:updateMode() == id end,
+            callback = function() self:setUpdateMode(id) end,
+        }
+    end
+    return {
+        text = _("Updates"),
+        help_text = _("Check for updates now always works. Automatic updates run about once a week, and only when Wi-Fi is already on."),
+        sub_item_table = items,
+        separator = true,
+    }
+end
+
+function Library:showUpdatesMenu(view)
+    local dialog
+    local function close() self:closeOverLibrary(dialog, view) end
+    local mode = self:updateMode()
+    local function pick(id)
+        return {
+            text = (mode == id and "✓ " or "") .. UPDATE_MODE_LABEL[id],
+            callback = function()
+                close()
+                self:setUpdateMode(id)
+            end,
+        }
+    end
+    dialog = ButtonDialog:new{
+        title = _("Updates"),
+        title_align = "center",
+        buttons = {
+            {
+                {
+                    text = _("Check for updates now"),
+                    callback = function()
+                        close()
+                        require("libraryupdate").prompt(self)
+                    end,
+                },
+            },
+            { pick("off") },
+            { pick("notify") },
+            { pick("install") },
+        },
+    }
+    UIManager:show(dialog)
+end
+
 function Library:statusStyleMenu()
     local items = {}
     for _, id in ipairs(Status and Status.ORDER or { "icon", "compact", "plain" }) do
@@ -242,6 +330,10 @@ function Library:init()
             UIManager:nextTick(function() self:onShowLibrary() end)
         end
     end
+    -- Off unless the reader turned it on. It only looks, and only if Wi-Fi is already up.
+    UIManager:nextTick(function()
+        require("libraryupdate").maybeWeekly(self)
+    end)
 end
 
 --- True when KOReader's own "Start with" setting points at the Library:
@@ -1472,6 +1564,15 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = _("Updates"),
+            callback = function()
+                close()
+                self:showUpdatesMenu(view)
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = T(_("Clock and battery: %1"), self:statusStyleLabel()),
             callback = function()
                 close()
@@ -2195,6 +2296,7 @@ function Library:addToMainMenu(menu_items)
                     self:saveSettings()
                 end,
             },
+            self:updatesMenu(),
         },
     }
     if self.ui.document then
