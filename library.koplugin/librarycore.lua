@@ -1793,11 +1793,11 @@ function Core.nextMinuteDelay(now)
     return delay
 end
 
---- Footer buttons: the menu, and Resume (drawn, but not tappable, when there is no book).
-function Core.footerChrome(has_book)
+--- Footer chrome on the left: the menu only. The current-book cover in
+-- the middle opens the same book the old Resume button did (#4).
+function Core.footerChrome(_has_book)
     return {
         { id = "menu", icon = "appbar.menu", enabled = true },
-        { id = "resume", icon = "book.opened", enabled = has_book and true or false },
     }
 end
 
@@ -1968,6 +1968,28 @@ function Core.edgeStrip(x, w)
     if x < w / 8 then return "left" end
     if x >= w * 7 / 8 then return "right" end
     return nil
+end
+
+--- Brightness for a finger that started at `start_y` on the left edge and
+-- is now at `y`. Up (smaller y) raises the level. The whole range takes
+-- 70% of the screen height, the same travel LiveLight uses. One step of
+-- the Controls slider is one integer of this result.
+function Core.edgeLightLevel(start_y, y, screen_h, start_level, min_level, max_level)
+    start_y = tonumber(start_y) or 0
+    y = tonumber(y) or start_y
+    screen_h = tonumber(screen_h) or 0
+    start_level = math.floor(tonumber(start_level) or 0)
+    min_level = math.floor(tonumber(min_level) or 0)
+    max_level = math.floor(tonumber(max_level) or start_level)
+    if max_level < min_level then max_level = min_level end
+    if screen_h < 1 then return start_level end
+    local travel = screen_h * 0.7
+    local span = max_level - min_level
+    if travel < 1 or span < 1 then return start_level end
+    local level = math.floor(start_level + (start_y - y) * span / travel + 0.5)
+    if level < min_level then level = min_level end
+    if level > max_level then level = max_level end
+    return level
 end
 
 --- Bottom-left corner: KOReader's DTAP_ZONE_BOTTOM_LEFT, the outer eighth
@@ -2743,14 +2765,32 @@ function Core.pageHitPx(dpi)
     return px
 end
 
---- Width of the letter strip. Same 10 mm grab as a page button: the letters
--- themselves stay a slim column inside it, and the grid gives up this width
--- so covers never sit under the strip.
---- Hit width of the A–Z strip. Wider than the 10 mm page button so the
--- column is easy to hold; the painted letters stay a slim column inside it.
+--- Visible A–Z column the grid gives up. About 4.2 mm, at least 44 px at
+-- 300 dpi: a hairline and a bold letter, with the letter close to the
+-- divider. The hit target is wider than this and is not reserved.
+function Core.scrubberColumnWidth(dpi)
+    dpi = tonumber(dpi)
+    if not dpi or dpi ~= dpi or dpi < 1 then dpi = 167 end
+    local px = math.floor(4.2 * dpi / 25.4 + 0.5)
+    if dpi >= 290 then px = math.max(px, 44) end
+    if px < 28 then px = 28 end
+    return px
+end
+
+--- How far the letter hit reaches left of the divider, into the gutter
+-- only. About 2 mm. A cover under that overlap still gets the tap.
+function Core.scrubberGutterHit(dpi)
+    dpi = tonumber(dpi)
+    if not dpi or dpi ~= dpi or dpi < 1 then dpi = 167 end
+    local px = math.floor(2.0 * dpi / 25.4 + 0.5)
+    if dpi >= 290 then px = math.max(px, 20) end
+    if px < 8 then px = 8 end
+    return px
+end
+
+--- Reserved width of the A–Z strip: the visible column, not the hit area.
 function Core.scrubberWidth(dpi)
-    local hit = Core.pageHitPx(dpi)
-    return math.max(hit, math.floor(hit * 1.4 + 0.5))
+    return Core.scrubberColumnWidth(dpi)
 end
 
 --- Smallest slot that still holds a bold letter. A full-height shelf fits

@@ -132,24 +132,30 @@ describe("LiveLight overlap with the A–Z strip", function()
         eq(Core.edgeVerticalSwipe({ direction = "west", pos = { x = 1200, y = 400 } }, 1264), nil)
     end)
 
-    it("a vertical swipe on the strip is offered to LiveLight and does not jump", function()
+    it("a vertical swipe on the strip scrubs a letter and does not call LiveLight", function()
         local offered, jumped = {}, {}
         local Scrubber = loadScrubber({
             tryLiveZones = function(ges) offered[#offered + 1] = ges; return true end,
         })
         local sc = Scrubber:new{
-            letters = { "A", "B" },
-            width = 120, height = 400, dpi = 300,
+            letters = { "A", "B", "C", "D" },
+            width = 50, height = 400, dpi = 300,
             screen_w = 1264, screen_h = 1680,
-            view = { dimen = { w = 1264, h = 1680 } },
-            jumpTo = function(_, letter) jumped[#jumped + 1] = letter end,
+            hit_extra = 20,
+            view = { dimen = { w = 1264, h = 1680 }, jumpToLetter = function(_, letter)
+                jumped[#jumped + 1] = letter
+                return true
+            end },
         }
         sc:init()
-        sc.dimen.x, sc.dimen.y = 1144, 200
-        local ges = { direction = "north", pos = { x = 1200, y = 300 }, ges = "swipe" }
+        sc.dimen.x, sc.dimen.y = 1214, 200
+        local ges = { direction = "north", pos = { x = 1230, y = 300 }, ges = "swipe" }
         eq(sc:onSwipeScrubber(nil, ges), true)
-        eq(#offered, 1)
-        eq(#jumped, 0)
+        eq(#offered, 0)
+        eq(#jumped, 1)
+        local hit = sc:hitRect()
+        eq(hit.x < sc.dimen.x, true, "hit overlaps the gutter")
+        eq(hit.x + hit.w >= 1264, true, "hit reaches the screen edge")
     end)
 
     it("a tap on the strip still jumps, and a swipe LiveLight declines still jumps", function()
@@ -225,6 +231,124 @@ describe("centered letter preview", function()
         eq(sc.last_refresh.mode, "fast")
         sc:onPanReleaseScrubber()
         eq(sc.bubble_letter, nil)
+        eq(sc.last_refresh.mode, "ui")
+    end)
+end)
+
+describe("letter bubble is cleared however the scrub ends", function()
+    local function scrubber(jumped)
+        local Scrubber = loadScrubber({})
+        local sc = Scrubber:new{
+            letters = { "A", "M", "Z" },
+            width = 50, height = 900, dpi = 300,
+            screen_w = 1264, screen_h = 1680,
+            view = { dimen = { w = 1264, h = 1680 }, jumpToLetter = function(_, letter)
+                if jumped then jumped[#jumped + 1] = letter end
+                return true
+            end },
+        }
+        sc:init()
+        sc.dimen.x, sc.dimen.y = 1214, 100
+        return sc
+    end
+
+    local function down(sc, y)
+        sc._tick = nil
+        sc:dragTo({ x = 1230, y = y or 200 })
+        eq(sc.bubble_letter ~= nil, true)
+    end
+
+    it("a lift on the strip clears it and asks for a UI refresh", function()
+        local sc = scrubber()
+        down(sc, 200)
+        eq(sc:onPanReleaseScrubber(), true)
+        eq(sc.bubble_letter, nil)
+        eq(sc._drag, nil)
+        eq(sc.last_refresh.mode, "ui")
+        local saw
+        for _, region in ipairs(sc.last_refresh.regions) do
+            if region.w == sc.bubble.w and region.h == sc.bubble.h then saw = true end
+        end
+        eq(saw, true, "the bubble rectangle is refreshed")
+    end)
+
+    it("a lift off the strip still clears it", function()
+        local sc = scrubber()
+        down(sc, 200)
+        sc._pending = { x = 100, y = 400 }
+        eq(sc:onPanReleaseScrubber(), true)
+        eq(sc.bubble_letter, nil)
+    end)
+
+    it("a swipe that ends outside the strip clears it and does not offer LiveLight", function()
+        local offered = {}
+        local Scrubber = loadScrubber({
+            tryLiveZones = function(ges) offered[#offered + 1] = ges; return true end,
+        })
+        local sc = Scrubber:new{
+            letters = { "A", "M", "Z" },
+            width = 50, height = 900, dpi = 300,
+            screen_w = 1264, screen_h = 1680,
+            view = { dimen = { w = 1264, h = 1680 }, jumpToLetter = function() return true end },
+        }
+        sc:init()
+        sc.dimen.x, sc.dimen.y = 1214, 100
+        down(sc, 200)
+        eq(sc:onSwipeScrubber(nil, {
+            direction = "north", ges = "swipe",
+            pos = { x = 1230, y = 200 },
+            end_pos = { x = 200, y = 40 },
+        }), true)
+        eq(sc.bubble_letter, nil)
+        eq(#offered, 0)
+        eq(sc.last_refresh.mode, "ui")
+    end)
+
+    it("a hold release clears it", function()
+        local sc = scrubber()
+        eq(sc:onHoldScrubber(nil, { pos = { x = 1230, y = 200 } }), true)
+        eq(sc.bubble_letter ~= nil, true)
+        eq(sc:onHoldReleaseScrubber(), true)
+        eq(sc.bubble_letter, nil)
+        eq(sc.last_refresh.mode, "ui")
+    end)
+
+    it("a page change still refreshes the bubble rectangle", function()
+        local jumped = {}
+        local sc = scrubber(jumped)
+        down(sc, 500)
+        eq(sc:endDrag(), true)
+        eq(#jumped, 1)
+        eq(sc.bubble_letter, nil)
+        eq(sc.last_refresh.mode, "ui")
+    end)
+
+    it("rebuilding the strip mid-drag clears the bubble without jumping", function()
+        local jumped = {}
+        local sc = scrubber(jumped)
+        down(sc, 200)
+        eq(sc:clearBubble(), true)
+        eq(sc.bubble_letter, nil)
+        eq(#jumped, 0)
+        eq(sc.last_refresh.mode, "ui")
+    end)
+
+    it("closing the strip clears the bubble", function()
+        local sc = scrubber()
+        down(sc, 200)
+        sc:onCloseWidget()
+        eq(sc.bubble_letter, nil)
+        eq(sc._bubble_timeout, nil)
+    end)
+
+    it("a fallback timeout clears the bubble when no release arrives", function()
+        local jumped = {}
+        local sc = scrubber(jumped)
+        down(sc, 200)
+        eq(type(sc._bubble_timeout), "function")
+        sc._bubble_timeout()
+        eq(sc.bubble_letter, nil)
+        eq(#jumped, 1, "the letter under the finger is still applied")
         eq(sc.last_refresh.mode, "ui")
     end)
 end)

@@ -238,6 +238,72 @@ describe("Library view zone forwarding", function()
         eq(v._shelf_expanded, true)
     end)
 
+    it("still forwards a right-edge swipe that starts outside a short strip", function()
+        local View = loadView()
+        local scrubbed = {}
+        local scrubber = {
+            dimen = { x = 1214, y = 400, w = 50, h = 700 },
+            hitRect = function(self)
+                return { x = self.dimen.x - 20, y = self.dimen.y, w = self.dimen.w + 20, h = self.dimen.h }
+            end,
+            onSwipeScrubber = function() scrubbed[#scrubbed + 1] = true; return true end,
+        }
+        local v = swipeView(View, { scrubber = scrubber })
+        eq(v:onSwipe(nil, ges("south", 1240, 80)), true)
+        eq(#scrubbed, 0, "above the short strip")
+        eq(#live_calls, 1, "warmth")
+    end)
+
+    it("does not forward a swipe that starts on the strip's hit area", function()
+        local View = loadView()
+        local scrubbed = {}
+        local scrubber = {
+            dimen = { x = 1214, y = 400, w = 50, h = 700 },
+            hitRect = function(self)
+                return { x = self.dimen.x - 20, y = self.dimen.y, w = self.dimen.w + 20, h = self.dimen.h }
+            end,
+            onSwipeScrubber = function() scrubbed[#scrubbed + 1] = true; return true end,
+        }
+        local v = swipeView(View, { scrubber = scrubber })
+        eq(v:onSwipe(nil, ges("north", 1200, 500)), true)
+        eq(#scrubbed, 1)
+        eq(#live_calls, 0)
+        live_calls = {}
+        eq(v:handleEvent({ handler = "onGesture", args = { { ges = "swipe", direction = "north", pos = { x = 1230, y = 500 } } } }), false)
+        eq(#live_calls, 0, "an unclaimed gesture on the strip is not offered on")
+    end)
+
+    it("still forwards a left-edge brightness swipe", function()
+        local View = loadView()
+        local v = swipeView(View, { scrubber = {
+            dimen = { x = 1214, y = 200, w = 50, h = 1200 },
+            onSwipeScrubber = function() return true end,
+        } })
+        eq(v:onSwipe(nil, ges("south", 20, 500)), true)
+        eq(#live_calls, 1)
+    end)
+
+    it("still forwards a right-edge swipe when the strip is hidden", function()
+        local View = loadView()
+        local v = swipeView(View, {})
+        eq(v:onSwipe(nil, ges("north", 1240, 500)), true)
+        eq(#live_calls, 1)
+    end)
+
+    it("a swipe while a drag is up ends the drag before anything else", function()
+        local View = loadView()
+        local ended = {}
+        local v = swipeView(View, { scrubber = {
+            dimen = { x = 1214, y = 200, w = 50, h = 1200 },
+            _drag = true,
+            endDrag = function() ended[#ended + 1] = true; return true end,
+        } })
+        eq(v:onSwipe(nil, ges("north", 400, 800)), true)
+        eq(#ended, 1)
+        eq(#live_calls, 0)
+        eq(v:onPanRelease(), true)
+    end)
+
     it("keeps the A–Z strip's swipe when it starts on the strip", function()
         local View = loadView()
         local scrubbed = {}
@@ -316,5 +382,90 @@ describe("bottom-left menu and the corner", function()
         eq(v:onSwipe(nil, ges("south", 20, 1620)), true)
         eq(#live_calls, 1, "brightness, even when the swipe starts on the menu")
         eq(v._shelf_expanded, nil)
+    end)
+end)
+
+describe("left-edge brightness", function()
+    local Core = require("librarycore")
+
+    it("maps an upward drag onto a higher level, one integer at a time", function()
+        -- 70% of 1680 is 1176 px for the whole 0..24 range.
+        eq(Core.edgeLightLevel(800, 800, 1680, 8, 0, 24), 8)
+        eq(Core.edgeLightLevel(800, 400, 1680, 8, 0, 24), 16)
+        eq(Core.edgeLightLevel(800, 200, 1680, 8, 0, 24), 20)
+        eq(Core.edgeLightLevel(100, 1600, 1680, 10, 0, 24), 0)
+        eq(Core.edgeLightLevel(1600, 0, 1680, 10, 0, 24), 24)
+    end)
+
+    local function light()
+        local sets, state = {}, { fl_intensity = 8, off = false }
+        local p = {
+            fl_min = 0, fl_max = 24, fl_intensity = 8,
+            frontlightIntensity = function(self) return self.fl_intensity end,
+            setIntensity = function(self, v)
+                self.fl_intensity = v
+                sets[#sets + 1] = v
+            end,
+            isFrontlightOff = function(self) return self.off end,
+            turnOnFrontlight = function(self) self.off = false end,
+            turnOffFrontlight = function(self) self.off = true; self.fl_intensity = 0 end,
+            updateResumeFrontlightState = function() state.resumed = (state.resumed or 0) + 1 end,
+        }
+        return p, sets, state
+    end
+
+    it("sets the frontlight on the first pan and does not rebuild the library", function()
+        local View = loadView()
+        local p, sets, state = light()
+        device_stub.getPowerDevice = function() return p end
+        local v = swipeView(View, {})
+        eq(v:onPan(nil, {
+            pos = { x = 20, y = 400 },
+            start_pos = { x = 20, y = 800 },
+            relative = { x = 0, y = -400 },
+        }), true)
+        eq(sets[1], 16)
+        eq(state.resumed >= 1, true)
+        eq(v.refreshed(), 0, "the Library was not repainted")
+        local n = #sets
+        v:onPan(nil, {
+            pos = { x = 20, y = 200 },
+            start_pos = { x = 20, y = 800 },
+            relative = { x = 0, y = -600 },
+        })
+        eq(#sets, n, "the next step waits for the same tick the slider uses")
+        eq(v:onPanRelease(nil, { pos = { x = 20, y = 200 }, start_pos = { x = 20, y = 800 } }), true)
+        eq(sets[#sets], 20)
+        eq(v._edge, nil)
+        eq(v.refreshed(), 0)
+    end)
+
+    it("a sideways pan on the left edge is not brightness", function()
+        local View = loadView()
+        local p, sets = light()
+        device_stub.getPowerDevice = function() return p end
+        local v = swipeView(View, {})
+        eq(v:onPan(nil, {
+            pos = { x = 80, y = 500 },
+            start_pos = { x = 20, y = 500 },
+            relative = { x = 60, y = 4 },
+        }), false)
+        eq(#sets, 0)
+    end)
+
+    it("does not set the light for a drag that starts on the A–Z strip", function()
+        local View = loadView()
+        local p, sets = light()
+        device_stub.getPowerDevice = function() return p end
+        local v = swipeView(View, { scrubber = {
+            dimen = { x = 1214, y = 200, w = 50, h = 1200 },
+            dragTo = function() end,
+        } })
+        eq(v:onPan(nil, {
+            pos = { x = 1230, y = 400 },
+            start_pos = { x = 1230, y = 800 },
+            relative = { x = 0, y = -400 },
+        }), false)
+        eq(#sets, 0)
     end)
 end)
