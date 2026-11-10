@@ -3,7 +3,9 @@
 #
 #   tools/emulator/shoot.sh <scenario>
 #
-# Scenarios: smoke, footer, az, aznav, toptap
+# Scenarios: smoke, footer, az, aznav, toptap, and the README set
+# (widgets, accordion, recently, shelf, bubble, menu, filters,
+# brightness, startwith, gallery, readme).
 # Output:    emulator-out/<scenario>/   (or $EMU_OUT)
 #
 # The current library.koplugin is copied into a temporary KOReader home.
@@ -17,7 +19,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 scenario="${1:-}"
 if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
-    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|aznav|toptap>" >&2
+    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|aznav|toptap|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gallery|readme>" >&2
     echo "  EMU_OUT     output directory (default: emulator-out/<scenario>)" >&2
     echo "  EMU_PLUGIN  library.koplugin to copy (default: ./library.koplugin)" >&2
     echo "  EMU_COUNT   books in the seeded library (default: 200)" >&2
@@ -26,7 +28,7 @@ if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
     exit 2
 fi
 case "$scenario" in
-    smoke|footer|az|aznav|toptap) ;;
+    smoke|footer|az|aznav|toptap|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gallery|readme) ;;
     *) echo "unknown scenario: $scenario" >&2; exit 2 ;;
 esac
 
@@ -100,6 +102,10 @@ fi
 
 echo "running $scenario -> $out" >&2
 set +e
+local_timeout="${EMU_TIMEOUT:-180}"
+case "$scenario" in
+    readme|gallery) local_timeout="${EMU_TIMEOUT:-720}" ;;
+esac
 env \
     HOME="$emu_home" \
     XDG_CONFIG_HOME="$emu_home/.config" \
@@ -116,7 +122,7 @@ env \
     GUIPROBE_OUT="$out" \
     GUIPROBE_SCRIPT="$scenario" \
     GUIPROBE_TAG="${GUIPROBE_TAG:-}" \
-    timeout "${EMU_TIMEOUT:-180}" "$prefix/bin/koreader" >"$out/koreader.log" 2>&1
+    timeout "$local_timeout" "$prefix/bin/koreader" >"$out/koreader.log" 2>&1
 rc=$?
 set -e
 
@@ -170,6 +176,36 @@ elif scenario == "az":
 elif scenario == "toptap":
     for n in ("toptap-01-library-gui-bar", "toptap-02-koreader-menu", "toptap-03-details-from-reader"):
         check(n + ".png", True)
+elif scenario == "aznav":
+    for n in ("aznav-compact", "aznav-authors", "aznav-grid", "aznav-series", "aznav-compact2", "aznav-last-read"):
+        check(n + ".png", True)
+else:
+    expected = {
+        "widgets": ["v050-widgets.png"],
+        "accordion": ["v050-accordion.png"],
+        "recently": ["v050-recently-added.png"],
+        "shelf": ["v050-shelf-before.png", "v050-shelf-expanded.png"],
+        "bubble": ["v050-az-bubble.png"],
+        "menu": ["v050-menu.png"],
+        "filters": ["v050-filters.png"],
+        "brightness": ["v050-brightness.png"],
+        "controls": ["09-controls-panel.png"],
+        "startwith": ["v050-start-with.png"],
+        "gallery": [
+            "02-compact-2-columns.png", "03-compact.png", "20-recently-opened.png",
+            "04-authors.png", "05-series.png", "06-search-typos.png", "07-sort-picker.png",
+            "09-controls-panel.png", "10-genres.png", "11-genre-books.png", "19-go-to-page.png",
+            "13-details-card.png", "14-details-card-none.png", "17-books-status-off.png",
+            "12-reader-menu-library.png",
+        ],
+    }
+    if scenario == "readme":
+        names = []
+        for key in ("widgets", "accordion", "recently", "shelf", "bubble", "menu", "filters", "brightness", "startwith", "gallery"):
+            names.extend(expected[key])
+        expected["readme"] = names
+    for name in expected.get(scenario, []):
+        check(name, True)
 if problems:
     print("shoot failed:", file=sys.stderr)
     for item in problems:

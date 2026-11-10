@@ -1,12 +1,15 @@
 # Library GUI for KOReader
 
+[![Release](https://gitlab.com/antonyvo/koreader-library-gui/-/badges/release.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.5.0)
+[![Pipeline](https://gitlab.com/antonyvo/koreader-library-gui/badges/main/pipeline.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/pipelines)
+
 Library GUI (`library.koplugin`) is a KOReader plugin that replaces the file browser with a library screen that looks and works more like the Kindle's own home screen: book covers with reading progress, a search bar with the clock and battery at the top, tabs for Books, Collections, Authors and Series, the menu in the footer, and a Controls panel you pull down from the top right (or open from the clock or the ☰ menu).
 
 It sits alongside KOReader's file browser, History and Collections. It never moves or renames your books, and closing it takes you back to the normal file browser.
 
-<p align="center"><img src="docs/screenshots/v050-widgets.png" width="420" alt="Books tab with Continue Reading and Favorites side by side above the cover grid"></p>
+<p align="center"><img src="docs/screenshots/v050-widgets.png" width="420" alt="Books tab with Continue Reading and Favorites above the cover grid and one A–Z column on the right"></p>
 
-The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. v0.5.0 is not tagged yet. The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
+The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. The current release is [v0.5.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.5.0) (9 November 2026). The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
 
 ## Home screen
 
@@ -46,7 +49,7 @@ The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com
 
 | Compact · 2 columns | Compact with dates | Recently opened |
 |---|---|---|
-| ![Compact view in two columns, sorted by Last read](docs/screenshots/02-compact-2-columns.png) | ![Compact view sorted by Last read, with dates](docs/screenshots/03-compact.png) | ![The top row switched to Recently opened](docs/screenshots/20-recently-opened.png) |
+| ![Compact view in two columns, sorted by Last read](docs/screenshots/02-compact-2-columns.png) | ![Compact view sorted by Last read, with dates](docs/screenshots/03-compact.png) | ![Recently opened above the cover grid](docs/screenshots/20-recently-opened.png) |
 
 | Authors | Series | Search with typos |
 |---|---|---|
@@ -54,21 +57,25 @@ The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com
 
 | Sort from the footer | The ☰ menu | Controls panel |
 |---|---|---|
-| ![Sort picker opened from the footer label](docs/screenshots/07-sort-picker.png) | ![The ☰ menu: sort, view, Barely started, Start with Library, Show clock, Show battery and Use KOReader's keyboard](docs/screenshots/18-menu-settings.png) | ![Controls panel with brightness and warmth sliders and Light, Night mode, Refresh, Wi-Fi, Rotate and Cover sleep buttons](docs/screenshots/09-controls-panel.png) |
+| ![Sort picker opened from the footer label](docs/screenshots/07-sort-picker.png) | ![The ☰ menu opening upward from the bottom left: sort, view, Widgets, Barely started, A–Z strip, Show clock, Show battery and Use KOReader's keyboard](docs/screenshots/v050-menu.png) | ![Controls panel with brightness and warmth sliders, and Light, Night mode, Refresh, Wi-Fi, Rotate, Cover sleep and Exit](docs/screenshots/09-controls-panel.png) |
 
 | Genres | Inside a genre | Go to page |
 |---|---|---|
-| ![Collections tab switched to Genres, with a cover and book count for each genre](docs/screenshots/10-genres.png) | ![The Mystery & Thriller genre opened, showing its books](docs/screenshots/11-genre-books.png) | ![Go to page dialog opened from the page number in the footer](docs/screenshots/19-go-to-page.png) |
+| ![Collections tab switched to Genres. This library's books are tagged Public domain](docs/screenshots/10-genres.png) | ![The Public domain genre opened, showing its books](docs/screenshots/11-genre-books.png) | ![Go to page dialog opened from the page number in the footer](docs/screenshots/19-go-to-page.png) |
 
 | Book details | A book with no description | Library in the reader menu |
 |---|---|---|
-| ![Book details card with cover, progress, Continue, genre chips and the Calibre description](docs/screenshots/13-details-card.png) | ![Book details card for a book with no description](docs/screenshots/14-details-card-none.png) | ![KOReader's reader menu with Library and Book details at the top, and the Library tab icon on the left](docs/screenshots/12-reader-menu-library.png) |
+| ![Book details for Wuthering Heights, with the cover, Open, a Public domain chip and a description](docs/screenshots/13-details-card.png) | ![Book details for a finished book with no description](docs/screenshots/14-details-card-none.png) | ![KOReader's reader menu with Library and Book details at the top, and the Library tab icon](docs/screenshots/12-reader-menu-library.png) |
 
 | Clock and battery off |
 |---|
 | <img src="docs/screenshots/17-books-status-off.png" width="300" alt="The Books tab with the clock and battery turned off"> |
 
-These earlier shots were taken in the same emulator, with a library of public-domain books and generated covers, on v0.3.4 and v0.4.0. The home-screen shots above are the v0.5.0 layout.
+| Filters | Start with | Brightness |
+|---|---|---|
+| ![Filter chips with their full labels. Finished is cut off at the right edge](docs/screenshots/v050-filters.png) | ![KOReader's file browser, filing-cabinet tab, with Start with set to library](docs/screenshots/v050-start-with.png) | ![The frontlight level, 31, while a drag on the left edge is still down](docs/screenshots/v050-brightness.png) |
+
+The shots on this page are the v0.5.0 layout, taken in the KOReader emulator with the dummy library. Finished keeps its full label and is cut off at the screen edge when the row is wider than the screen; swipe the chips to bring it across. The level in the brightness shot is drawn by the plugin while the finger is down, and it is cleared when the finger lifts.
 
 ## Features
 
@@ -98,7 +105,9 @@ These earlier shots were taken in the same emulator, with a library of public-do
 
 ## Install
 
-The newest tagged release is **[v0.4.4](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.4.4)**. That zip does not include the v0.5.0 home screen above. v0.5.0 has not been tagged, so there is no v0.5.0 zip yet. To install the version this page describes, copy the `library.koplugin` folder from this repository. To install the tagged release, download **[library-gui-0.4.4.zip](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.4.4/downloads/library-gui-0.4.4.zip)** and unzip it. Either way you get a folder called `library.koplugin`.
+The current release is **[v0.5.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.5.0)**. Download **[library.koplugin-v0.5.0.zip](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.5.0/downloads/library.koplugin-v0.5.0.zip)** and unzip it. You get a folder called `library.koplugin`.
+
+SHA256: `b5a3f6429fc370ea17fc57901f2a006664878859dca47cb6d7790b987abaacd9`
 
 1. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).
@@ -107,7 +116,7 @@ The newest tagged release is **[v0.4.4](https://gitlab.com/antonyvo/koreader-lib
 2. Restart KOReader (☰ → Exit → Restart KOReader).
 3. Open ☰ → **Library** → **Open Library**. To open it every time KOReader starts, set **Start with** to library in the file browser's menu.
 
-To update, replace the `library.koplugin` folder with the new one and restart KOReader.
+To update, replace the `library.koplugin` folder with the new one and restart KOReader. The [changelog](CHANGELOG.md) lists what is new in each release.
 
 If **Library** is missing from the menu, check ☰ → Tools → More tools → Plugin management, where it is listed as Library GUI.
 
