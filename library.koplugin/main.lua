@@ -69,6 +69,7 @@ local DEFAULTS = {
     footer_page_total = true,   -- reader status bar: page out of total, short tap cycle (libraryfooter.lua)
     -- footer_page_total_prev: the status bar view from before we switched it
     flash_ghosting = "setting", -- e-ink: flash every N Library page turns (libraryrefresh.lua)
+    check_updates_weekly = false, -- look for a release about once a week; never installs by itself
     -- footer_cycle: { [view] = false } views turned off in the tap cycle
     -- view_memory: { [key] = { view =, sort =, filter =, t = } }, see Core.viewKey
     -- sleep_cover_prev: KOReader's sleep screen settings from before
@@ -242,6 +243,10 @@ function Library:init()
             UIManager:nextTick(function() self:onShowLibrary() end)
         end
     end
+    -- Off unless the reader turned it on. It only looks, and only if Wi-Fi is already up.
+    UIManager:nextTick(function()
+        require("libraryupdate").maybeWeekly(self)
+    end)
 end
 
 --- True when KOReader's own "Start with" setting points at the Library:
@@ -1472,6 +1477,25 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = _("Check for updates"),
+            callback = function()
+                close()
+                require("libraryupdate").prompt(self)
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
+            text = (self.settings.check_updates_weekly == true and "✓ " or "") .. _("Check for updates weekly"),
+            callback = function()
+                close()
+                self.settings.check_updates_weekly = self.settings.check_updates_weekly ~= true
+                self:saveSettings()
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = T(_("Clock and battery: %1"), self:statusStyleLabel()),
             callback = function()
                 close()
@@ -2192,6 +2216,21 @@ function Library:addToMainMenu(menu_items)
                 checked_func = function() return self.settings.series_skip_finished ~= false end,
                 callback = function()
                     self.settings.series_skip_finished = self.settings.series_skip_finished == false
+                    self:saveSettings()
+                end,
+            },
+            {
+                text = _("Check for updates"),
+                help_text = _("Look up the latest Library GUI release. If there is a newer one, it shows the version and a short changelog. Update downloads it, checks the published SHA256, and replaces this plugin. Settings stay in koreader/settings."),
+                callback = function() require("libraryupdate").prompt(self) end,
+                separator = true,
+            },
+            {
+                text = _("Check for updates weekly"),
+                help_text = _("When Wi-Fi is already on, look for a new release about once a week. This only checks. It never installs by itself."),
+                checked_func = function() return self.settings.check_updates_weekly == true end,
+                callback = function()
+                    self.settings.check_updates_weekly = self.settings.check_updates_weekly ~= true
                     self:saveSettings()
                 end,
             },

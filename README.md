@@ -125,7 +125,19 @@ SHA256: `638d9a84f093387548193b27109f3abbd5aeb3d6b5e0ba7afd5d8620f4c86f2a`
 2. Restart KOReader (☰ → Exit → Restart KOReader).
 3. Open ☰ → **Library** → **Open Library**. To open it every time KOReader starts, set **Start with** to library in the file browser's menu.
 
-To update, replace the `library.koplugin` folder with the new one and restart KOReader. The [changelog](CHANGELOG.md) lists what is new in each release.
+### Updating
+
+In KOReader, open the Library and choose ☰ → **Check for updates**. The same entry is under ☰ → **Library**. A newer release shows the version and a short changelog. **Update** downloads it, checks the published SHA256, replaces the plugin, and offers to restart KOReader. Your settings stay in `koreader/settings`. The previous plugin folder is kept as `library.koplugin.bak`.
+
+**Check for updates weekly** is off until you turn it on. It only looks when Wi-Fi is already on, and it never installs by itself.
+
+From a Mac, the same install runs if a Kindle is mounted (including through [Mount Kindle](https://gitlab.com/antonyvo/kindle-mtp-mount)), or with `kpush` when that is on your PATH:
+
+```sh
+curl -fsSL https://gitlab.com/antonyvo/koreader-library-gui/-/raw/main/tools/install.sh | bash
+```
+
+The [changelog](CHANGELOG.md) lists what is new in each release.
 
 If **Library** is missing from the menu, check ☰ → Tools → More tools → Plugin management, where it is listed as Library GUI.
 

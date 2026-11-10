@@ -1484,6 +1484,93 @@ local function solo(name)
     end
 end
 
+--- Installed copy is stamped 0.7.1 by shoot.sh. The published release is
+-- v0.7.2, so Check for updates offers it and then installs it.
+local function pressExact(text)
+    local stack = UIManager._window_stack or {}
+    local top = stack[#stack] and stack[#stack].widget
+    local found
+    walk(top, function(w)
+        if found or type(w.text) ~= "string" or not w.callback then return end
+        if w.text == text then found = w end
+    end, {})
+    if not found then
+        state.ok = false
+        P("FAIL no button", text, "stack", stackLine())
+        return false
+    end
+    P("press", found.text)
+    found.callback()
+    return true
+end
+
+local function updateScenario()
+    whenLibrary(function()
+        dismissNotices()
+        local plugin = lib()
+        local path = plugin and plugin.path
+        P("plugin", tostring(path))
+        q(0.4, function()
+            local view = V()
+            if view and view.onLeftIcon then view:onLeftIcon() end
+        end)
+        q(0.6, function()
+            if findAnywhere("^Check for updates$") ~= "Check for updates" then
+                state.ok = false
+                P("FAIL menu has no Check for updates", "stack", stackLine())
+            end
+            pressExact("Check for updates")
+        end)
+        q(0.5, function()
+            local offer = findAnywhere("is available")
+            local have = findAnywhere("You have 0%.7%.1")
+            P("prompt", tostring(offer ~= nil), tostring(have ~= nil), "stack", stackLine())
+            if not (offer and have) then
+                state.ok = false
+                P("FAIL update prompt", tostring(offer), tostring(have))
+            end
+            shot("update-prompt")
+            pressExact("Update")
+        end)
+        q(0.6, function()
+            local restart = findAnywhere("Restart")
+            P("success", tostring(restart), "stack", stackLine())
+            if not restart then
+                state.ok = false
+                P("FAIL no restart dialog")
+            end
+            shot("update-success")
+            if type(path) == "string" then
+                local updater = io.open(path .. "/libraryupdate.lua", "rb")
+                if updater then
+                    updater:close()
+                    state.ok = false
+                    P("FAIL official zip did not replace the plugin folder")
+                else
+                    P("PASS plugin folder replaced")
+                end
+                local meta = io.open(path .. "/_meta.lua", "rb")
+                if meta then
+                    local text = meta:read("*a")
+                    meta:close()
+                    if text:find('version = "0.7.1"', 1, true) then
+                        state.ok = false
+                        P("FAIL still stamped 0.7.1")
+                    end
+                end
+                local backup = io.open(path .. ".bak/libraryupdate.lua", "rb")
+                if not backup then
+                    state.ok = false
+                    P("FAIL missing library.koplugin.bak")
+                else
+                    backup:close()
+                    P("PASS backup kept")
+                end
+            end
+        end)
+    end)
+end
+
 local scenarios = { readme = function()
     whenLibrary(function() runList(ORDER) end)
 end }
@@ -1491,5 +1578,6 @@ for _, name in ipairs(ORDER) do scenarios[name] = solo(name) end
 scenarios.controls = solo("controls")
 scenarios.gestures = gesturesScenario
 scenarios.gesturemenu = gestureMenuScenario
+scenarios.update = updateScenario
 return scenarios
 end
