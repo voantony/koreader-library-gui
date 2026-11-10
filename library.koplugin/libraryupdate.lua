@@ -81,6 +81,31 @@ function M.offerState(latest, installed)
     return "unknown"
 end
 
+-- Automatic updates. An unset value means Notify me: a saved choice is
+-- only "off", "notify", or "install".
+M.MODE_ORDER = { "off", "notify", "install" }
+
+function M.mode(settings)
+    local id = type(settings) == "table" and settings.update_mode or nil
+    if id == "off" or id == "notify" or id == "install" then return id end
+    return "notify"
+end
+
+--- What a background check may do. Manual "Check for updates now" does not
+-- use this: it always runs, and it may turn Wi-Fi on.
+-- ctx.due: the weekly interval has passed.
+-- ctx.wifi: Wi-Fi is already on and the device is online. Never means "turn it on".
+-- ctx.book_open: a book is open. Quiet install waits for the Library or the next start.
+-- Returns "none", "notify", "install", or "defer".
+function M.planBackground(mode, ctx)
+    ctx = ctx or {}
+    mode = M.mode({ update_mode = mode })
+    if mode == "off" or not ctx.due or not ctx.wifi then return "none" end
+    if mode == "notify" then return "notify" end
+    if ctx.book_open then return "defer" end
+    return "install"
+end
+
 --- version = "0.7.1" inside _meta.lua.
 function M.readVersion(text)
     if type(text) ~= "string" then return nil end
@@ -1053,10 +1078,10 @@ local function tr()
     return _, T
 end
 
-local function tell(text)
+local function tell(text, timeout)
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
-    UIManager:show(InfoMessage:new{ text = text })
+    UIManager:show(InfoMessage:new{ text = text, timeout = timeout })
 end
 
 local function ask(text, ok_text, cancel_text, ok_callback)
@@ -1095,7 +1120,41 @@ function M.installedVersion(plugin_dir, fs)
     return M.readVersion(text)
 end
 
---- Download, check the hash, back up, and replace. info fields: version, url, sha.
+--- Download, check the hash, back up, and replace. No dialogs. A failure
+-- after the backup restores library.koplugin.bak. info: version, url, sha.
+function M.applyRelease(plugin, info)
+    local plugin_dir = M.pluginDir(plugin)
+    if not plugin_dir then return nil, "could not find the plugin folder" end
+    if type(info) ~= "table" or type(info.url) ~= "string" or type(info.sha) ~= "string" then
+        return nil, "the release is incomplete"
+    end
+    local dir, zip_path, stage = workPaths()
+    if not dir then return nil, zip_path end
+    local fs = M.realFS()
+    local mok, merr = M.mkdirp(fs, dir)
+    if not mok then return nil, merr end
+    local function cleanup()
+        fs.removeFile(zip_path)
+        M.removeTree(fs, stage)
+    end
+    local got, gerr = M.httpGet(info.url, zip_path)
+    if not got then cleanup(); return nil, gerr or "couldn't download the update" end
+    local hex, herr = M.sha256File(zip_path)
+    if not hex then cleanup(); return nil, herr end
+    if hex ~= info.sha then
+        cleanup()
+        return nil, "mismatch"
+    end
+    local extracted, eerr = M.extractZipFile(zip_path, stage)
+    if not extracted then cleanup(); return nil, eerr end
+    local installed, ierr = M.installReplacing(fs, plugin_dir, stage .. "/" .. M.PLUGIN_DIRNAME)
+    cleanup()
+    if not installed then return nil, ierr end
+    return true
+end
+
+--- Download, check the hash, back up, and replace. May turn Wi-Fi on.
+-- info fields: version, url, sha.
 function M.installRelease(plugin, info)
     local _, T = tr()
     local plugin_dir = M.pluginDir(plugin)
@@ -1108,30 +1167,7 @@ function M.installRelease(plugin, info)
         return
     end
     local result, err = withBusy(T(_("Downloading Library GUI %1…"), info.version), function()
-        local dir, zip_path, stage = workPaths()
-        if not dir then return nil, zip_path end
-        local fs = M.realFS()
-        local mok, merr = M.mkdirp(fs, dir)
-        if not mok then return nil, merr end
-        local function cleanup()
-            fs.removeFile(zip_path)
-            M.removeTree(fs, stage)
-        end
-        local got, gerr = M.httpGet(info.url, zip_path)
-        if not got then cleanup(); return nil, gerr or "couldn't download the update" end
-        local hex, herr = M.sha256File(zip_path)
-        if not hex then cleanup(); return nil, herr end
-        if hex ~= info.sha then
-            cleanup()
-            return nil, "mismatch"
-        end
-        local extracted, eerr = M.extractZipFile(zip_path, stage)
-        if not extracted then cleanup(); return nil, eerr end
-        local staged = stage .. "/" .. M.PLUGIN_DIRNAME
-        local installed, ierr = M.installReplacing(fs, plugin_dir, staged)
-        cleanup()
-        if not installed then return nil, ierr end
-        return true
+        return M.applyRelease(plugin, info)
     end)
     if result then
         ask(
@@ -1193,9 +1229,14 @@ function M.check(plugin, opts)
     end
     M._busy = true
     local _, T = tr()
-    local release, rerr = withBusy(_("Checking for updates…"), function()
-        return M.fetchRelease()
-    end)
+    local release, rerr
+    if opts.quiet then
+        release, rerr = M.fetchRelease()
+    else
+        release, rerr = withBusy(_("Checking for updates…"), function()
+            return M.fetchRelease()
+        end)
+    end
     M._busy = false
     if not release then
         stamp(plugin, "update_check_failed_at")
@@ -1231,31 +1272,95 @@ function M.check(plugin, opts)
         end
         return
     end
-    offer(plugin, {
+    local found = {
         version = version,
         url = asset.url,
         sha = sha,
         notes = M.shortNotes(release.description or ""),
-    }, installed)
+    }
+    -- Notify me: a short notice only. Install quietly is a different path.
+    if opts.notify_only then
+        tell(T(_("Library GUI %1 is available."), version), 4)
+        return
+    end
+    offer(plugin, found, installed)
 end
 
 function M.prompt(plugin)
     M.check(plugin, { quiet = false })
 end
 
---- Weekly checks only. Never installs, and only when Wi-Fi is already on.
-function M.maybeWeekly(plugin)
-    local settings = type(plugin) == "table" and plugin.settings or nil
-    if type(settings) ~= "table" or settings.check_updates_weekly ~= true then return end
+local function wifiAlreadyOn()
+    local ok, NetworkMgr = pcall(require, "ui/network/manager")
+    if not ok or type(NetworkMgr) ~= "table" then return false end
+    if not NetworkMgr.isWifiOn or not NetworkMgr.isOnline then return false end
+    return NetworkMgr:isWifiOn() and NetworkMgr:isOnline() and true or false
+end
+
+local function bookOpen(plugin)
+    return type(plugin) == "table" and type(plugin.ui) == "table" and plugin.ui.document and true or false
+end
+
+--- Quiet install. No Wi-Fi prompt, no progress dialog, no restart. A failure
+-- restores the backup inside applyRelease and is not shown.
+function M.quietInstall(plugin)
+    if M._busy then return end
+    local settings = plugin.settings or {}
     if not M.weeklyDue(settings.update_checked_at, os.time(), settings.update_check_failed_at) then
         return
     end
-    local ok, NetworkMgr = pcall(require, "ui/network/manager")
-    if not ok or type(NetworkMgr) ~= "table" then return end
-    if not NetworkMgr:isWifiOn() or not NetworkMgr:isOnline() then return end
-    -- already_online skips the Wi-Fi prompt. quiet keeps a current install silent.
-    -- The Update button is still the only way the zip is installed.
-    M.check(plugin, { quiet = true, already_online = true })
+    if bookOpen(plugin) or not wifiAlreadyOn() then return end
+    M._busy = true
+    local _, T = tr()
+    local release, rerr = M.fetchRelease()
+    if not release then
+        M._busy = false
+        stamp(plugin, "update_check_failed_at")
+        return
+    end
+    local version = M.tagVersion(release.tag_name)
+    local sha = M.parseSha256(release.description or "")
+    local asset = version and M.pickAsset(release, version) or nil
+    local installed = M.installedVersion(M.pluginDir(plugin))
+    local state = version and M.offerState(version, installed) or "unknown"
+    if state ~= "newer" or not asset or not sha then
+        M._busy = false
+        -- A real answer, even "nothing newer", counts as this week's check.
+        -- An incomplete release does not, so a later one can still install.
+        if state == "current" or state == "unknown" then
+            stamp(plugin, "update_checked_at")
+        else
+            stamp(plugin, "update_check_failed_at")
+        end
+        return
+    end
+    local ok = M.applyRelease(plugin, { version = version, url = asset.url, sha = sha })
+    M._busy = false
+    if not ok then
+        stamp(plugin, "update_check_failed_at")
+        return
+    end
+    stamp(plugin, "update_checked_at")
+    tell(T(_("Library updated to v%1 — takes effect next restart"), version), 4)
+end
+
+--- Background check. Off does nothing. Notify me only posts a notice.
+-- Install quietly never turns Wi-Fi on and never restarts KOReader.
+function M.maybeWeekly(plugin)
+    local settings = type(plugin) == "table" and plugin.settings or nil
+    if type(settings) ~= "table" then return end
+    local mode = M.mode(settings)
+    local due = M.weeklyDue(settings.update_checked_at, os.time(), settings.update_check_failed_at)
+    local plan = M.planBackground(mode, {
+        due = due,
+        wifi = mode ~= "off" and wifiAlreadyOn() or false,
+        book_open = bookOpen(plugin),
+    })
+    if plan == "notify" then
+        M.check(plugin, { quiet = true, already_online = true, notify_only = true })
+    elseif plan == "install" then
+        M.quietInstall(plugin)
+    end
 end
 
 return M

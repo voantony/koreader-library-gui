@@ -219,7 +219,7 @@ else:
         "coveronly": ["v070-cover-only.png"],
         "badges": ["v070-badges.png"],
         "gesturepages": ["v070-gestures.png", "v070-gesture-choices.png"],
-        "update": ["update-prompt.png", "update-success.png"],
+        "update": ["update-menu.png", "update-prompt.png", "update-success.png"],
         "gallery": [
             "02-compact-2-columns.png", "03-compact.png", "20-recently-opened.png",
             "04-authors.png", "05-series.png", "06-search-typos.png", "07-sort-picker.png",

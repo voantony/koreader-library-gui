@@ -23,7 +23,7 @@ tools/emulator/shoot.sh footer
 
 `gestures` drives the file-browser top swipe and a two-finger rotate on the Library home. `gesturemenu` opens the Library's Gestures menu and shows a top swipe that does nothing after that choice is set to Nothing.
 
-`update` stamps the installed plugin as 0.7.1, asks GitLab for the latest release, and writes `update-prompt.png` and `update-success.png`. It needs a network.
+`update` stamps the installed plugin as 0.7.1, opens the Updates submenu, asks GitLab for the latest release, and writes `update-menu.png`, `update-prompt.png` and `update-success.png`. It needs a network.
 
 `readme` also writes `v050-az-column.png`, `v050-az-short.png`, `v050-footer-book.png`, `v050-footer-empty.png`, `v070-cover-only.png`, `v070-badges.png`, `v070-gestures.png` and `v070-gesture-choices.png`. Those names are scenarios on their own (`azcolumn`, `azshort`, `footerbook`, `footerempty`, `coveronly`, `badges`, `gesturepages`).
 

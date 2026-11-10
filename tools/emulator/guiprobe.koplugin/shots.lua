@@ -1515,11 +1515,20 @@ local function updateScenario()
             if view and view.onLeftIcon then view:onLeftIcon() end
         end)
         q(0.6, function()
-            if findAnywhere("^Check for updates$") ~= "Check for updates" then
+            if not pressExact("Updates") then return end
+        end)
+        q(0.5, function()
+            local now = findAnywhere("Check for updates now")
+            local off = findAnywhere("turn off update checks")
+            local notify = findAnywhere("Notify me")
+            local quiet = findAnywhere("Install quietly")
+            P("updates menu", tostring(now), tostring(off), tostring(notify), tostring(quiet))
+            if not (now and off and notify and quiet) then
                 state.ok = false
-                P("FAIL menu has no Check for updates", "stack", stackLine())
+                P("FAIL updates submenu", "stack", stackLine())
             end
-            pressExact("Check for updates")
+            shot("update-menu")
+            pressExact("Check for updates now")
         end)
         q(0.5, function()
             local offer = findAnywhere("is available")

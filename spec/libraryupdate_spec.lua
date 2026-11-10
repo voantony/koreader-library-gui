@@ -238,6 +238,45 @@ describe("release document", function()
     end)
 end)
 
+describe("automatic update modes", function()
+    local function ctx(over)
+        local base = { due = true, wifi = true, book_open = false }
+        for k, v in pairs(over or {}) do base[k] = v end
+        return base
+    end
+
+    it("treats an unset choice as Notify me", function()
+        eq(Update.mode(nil), "notify")
+        eq(Update.mode({}), "notify")
+        eq(Update.mode({ update_mode = "nope" }), "notify")
+        eq(Update.mode({ update_mode = "off" }), "off")
+        eq(Update.mode({ update_mode = "install" }), "install")
+        eq(Update.mode({ check_updates_weekly = false }), "notify")
+    end)
+
+    it("does no background work when checks are off", function()
+        eq(Update.planBackground("off", ctx()), "none")
+        eq(Update.planBackground("off", ctx({ book_open = true })), "none")
+        eq(Update.planBackground("off", ctx({ due = false, wifi = false })), "none")
+    end)
+
+    it("notifies only when a weekly check is due and Wi-Fi is already on", function()
+        eq(Update.planBackground("notify", ctx()), "notify")
+        eq(Update.planBackground("notify", ctx({ book_open = true })), "notify")
+        eq(Update.planBackground("notify", ctx({ due = false })), "none")
+        eq(Update.planBackground("notify", ctx({ wifi = false })), "none")
+        eq(Update.planBackground(nil, ctx()), "notify")
+    end)
+
+    it("installs quietly only when Wi-Fi is already on and no book is open", function()
+        eq(Update.planBackground("install", ctx()), "install")
+        eq(Update.planBackground("install", ctx({ book_open = true })), "defer")
+        eq(Update.planBackground("install", ctx({ wifi = false })), "none")
+        eq(Update.planBackground("install", ctx({ due = false })), "none")
+        eq(Update.planBackground("install", ctx({ due = false, book_open = true })), "none")
+    end)
+end)
+
 describe("weekly check schedule", function()
     it("is due when never checked, and not again for seven days", function()
         local now = 1700000000

@@ -127,9 +127,9 @@ SHA256: `638d9a84f093387548193b27109f3abbd5aeb3d6b5e0ba7afd5d8620f4c86f2a`
 
 ### Updating
 
-In KOReader, open the Library and choose ☰ → **Check for updates**. The same entry is under ☰ → **Library**. A newer release shows the version and a short changelog. **Update** downloads it, checks the published SHA256, replaces the plugin, and offers to restart KOReader. Your settings stay in `koreader/settings`. The previous plugin folder is kept as `library.koplugin.bak`.
+In KOReader, open ☰ → **Updates** (on the Library screen, and under ☰ → Library). **Check for updates now** shows the version and a short changelog when a newer release exists. **Update** downloads it, checks the published SHA256, replaces the plugin, and offers to restart KOReader. Your settings stay in `koreader/settings`. The previous plugin folder is kept as `library.koplugin.bak`.
 
-**Check for updates weekly** is off until you turn it on. It only looks when Wi-Fi is already on, and it never installs by itself.
+**Automatic updates** start on **Notify me**. **Off** turns background checks off; checking by hand still works. **Notify me** looks about once a week, only when Wi-Fi is already on, and only tells you. **Install quietly** installs that newer release in the background and leaves a short note. It does not turn Wi-Fi on and does not restart KOReader. An open book is left alone until you are back in the Library.
 
 From a Mac, the same install runs if a Kindle is mounted (including through [Mount Kindle](https://gitlab.com/antonyvo/kindle-mtp-mount)), or with `kpush` when that is on your PATH:
 
