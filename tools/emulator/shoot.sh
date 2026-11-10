@@ -181,10 +181,10 @@ elif scenario == "toptap":
         check(n + ".png", True)
 elif scenario == "status":
     for n in (
-        "status-icon-24", "status-compact-24", "status-bar-24", "status-plain-24",
-        "status-icon-12", "status-compact-12", "status-bar-12", "status-plain-12",
-        "status-icon-charging", "status-compact-charging", "status-bar-charging",
-        "status-icon-low", "status-compact-low", "status-bar-low",
+        "status-icon-24", "status-compact-24", "status-plain-24",
+        "status-icon-12", "status-compact-12", "status-plain-12",
+        "status-icon-charging", "status-compact-charging",
+        "status-icon-low", "status-compact-low",
         "status-icon-night",
     ):
         check(n + ".png", True)

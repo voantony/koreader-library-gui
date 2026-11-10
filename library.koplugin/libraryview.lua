@@ -104,7 +104,7 @@ local LibraryView = InputContainer:extend{
     fuzzy_search = true,     -- "Typo-tolerant search"
     show_clock = true,       -- clock beside the search bar
     show_battery = true,     -- battery beside the search bar
-    status_style = nil,      -- "icon" | "compact" | "bar" | "plain"; nil is the default (icon)
+    status_style = nil,      -- "icon" | "compact" | "plain"; nil is the default (icon)
     use_koreader_keyboard = false, -- stock InputDialog instead of the Library keyboard
     search_suggestions = true, -- "Word suggestions": a row of words above the keyboard
     timing = nil,            -- the "Timing log" (librarytiming.lua), from the plugin
@@ -468,7 +468,7 @@ function LibraryView:setSearchClearShown(on)
     end
 end
 
---- The drawn battery (icon or thin bar). The clock is a TextWidget beside it.
+--- The drawn battery. The clock is a TextWidget beside it.
 local StatusMark = Widget:extend{
     kind = "icon",
     percent = 0,

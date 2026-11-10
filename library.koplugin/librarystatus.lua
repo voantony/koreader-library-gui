@@ -4,15 +4,15 @@
 -- Styles:
 --   icon     bold time and a drawn battery (fill plus a bolt while charging)
 --   compact  KOReader status-bar battery symbol and a percentage
---   bar      a smaller time and a thin gauge
 --   plain    the original "12:59  ·  78%" line
+-- A saved "bar" (the removed thin gauge) is read as the battery icon.
 --
 -- Drawn marks are black and white only, so night mode can invert them.
 
 local Status = {}
 
 Status.DEFAULT = "icon"
-Status.ORDER = { "icon", "compact", "bar", "plain" }
+Status.ORDER = { "icon", "compact", "plain" }
 
 -- Same private-use glyphs as BasePowerD:getBatterySymbol in KOReader v2026.07.1.
 -- Order of arguments there is (is_charged, is_charging, capacity).
@@ -36,7 +36,6 @@ Status.SYMBOL = {
 Status.FACE = {
     icon    = { font = "cfont",    size = 22, bold = true },
     compact = { font = "infofont", size = 16, bold = false },
-    bar     = { font = "cfont",    size = 18, bold = false },
     plain   = { font = "cfont",    size = 20, bold = true },
 }
 
@@ -58,7 +57,7 @@ local BANDS = {
 }
 
 function Status.style(id)
-    if id == "icon" or id == "compact" or id == "bar" or id == "plain" then
+    if id == "icon" or id == "compact" or id == "plain" then
         return id
     end
     return Status.DEFAULT
@@ -181,30 +180,7 @@ function Status.boltBox(unit)
     return w, h
 end
 
-function Status.barMetrics(unit)
-    local u = Status.unit(unit)
-    local h = math.max(3, math.floor(4 * u + 0.5))
-    if h > 8 then h = 8 end
-    if h < 3 then h = 3 end
-    local w = math.max(28, math.floor(36 * u + 0.5))
-    local stroke = 1
-    local bolt_w, bolt_h = Status.boltBox(unit)
-    local bolt_gap = math.max(3, math.floor(4 * u + 0.5))
-    return {
-        w = w, h = h, stroke = stroke,
-        inner_w = math.max(1, w - 2 * stroke),
-        inner_h = math.max(1, h - 2 * stroke),
-        bolt_w = bolt_w, bolt_h = bolt_h, bolt_gap = bolt_gap,
-        total_w = w + bolt_gap + bolt_w,
-        total_h = math.max(h, bolt_h),
-    }
-end
-
 function Status.markSize(kind, unit)
-    if kind == "bar" then
-        local m = Status.barMetrics(unit)
-        return m.total_w, m.total_h
-    end
     local m = Status.iconMetrics(unit)
     return m.total_w, m.total_h
 end
@@ -321,26 +297,7 @@ function Status.iconOps(percent, charging, unit)
     return ops, m.total_w, m.total_h
 end
 
-function Status.barOps(percent, charging, unit)
-    local m = Status.barMetrics(unit)
-    percent = Status.percent(percent) or 0
-    local ops = {}
-    local bar_y = math.floor((m.total_h - m.h) / 2)
-    rect(ops, 0, bar_y, m.w, m.h, "black", "shell")
-    rect(ops, m.stroke, bar_y + m.stroke, m.inner_w, m.inner_h, "white", "well")
-    local fw = Status.fillWidth(m.inner_w, percent)
-    rect(ops, m.stroke, bar_y + m.stroke, fw, m.inner_h, "black", "fill")
-    if charging then
-        local bx = m.w + m.bolt_gap
-        local by = math.floor((m.total_h - m.bolt_h) / 2)
-        local bolt = boltOps(bx, by, m.bolt_w, m.bolt_h)
-        for i = 1, #bolt do ops[#ops + 1] = bolt[i] end
-    end
-    return ops, m.total_w, m.total_h
-end
-
 function Status.markOps(kind, percent, charging, unit)
-    if kind == "bar" then return Status.barOps(percent, charging, unit) end
     return Status.iconOps(percent, charging, unit)
 end
 

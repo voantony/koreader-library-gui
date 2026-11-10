@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Clock and battery.** Beside the search bar, three looks: **Battery icon** (the default: a bold time and a battery that fills, with a bolt while charging), **Status bar** (KOReader's own battery icon and the percentage), and **Plain text** (the original line). A saved thin-bar choice shows the battery icon. The clock follows KOReader's 12-hour clock setting, and the header rebuilds when that setting changes. Tap the clock or battery to open Controls, as before.
+
 ## 0.7.1 (2026-11-10)
 
 - **Details card fix.** The book details card (long-press a book) crashed while drawing pages, last read, file size and path, a bug since v0.6.0. Fixed.

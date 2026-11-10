@@ -55,7 +55,7 @@ local DEFAULTS = {
     use_koreader_keyboard = false, -- "Use KOReader's keyboard": stock InputDialog for the search bar
     show_clock = true,          -- clock beside the search bar
     show_battery = true,        -- battery beside the search bar
-    -- status_style: "icon" (default) | "compact" | "bar" | "plain"
+    -- status_style: "icon" (default) | "compact" | "plain". A saved "bar" is read as "icon".
     show_scrubber = true,       -- A–Z strip on the right when the list is alphabetical
     fuzzy_search = true,        -- "Typo-tolerant search": accents ignored, small typos forgiven
     search_suggestions = true,  -- "Word suggestions": words from the library above the search keyboard
@@ -97,7 +97,6 @@ local VIEW_NAMES = {
 local STATUS_STYLE_LABEL = {
     icon = _("Battery icon"),
     compact = _("Status bar"),
-    bar = _("Thin bar"),
     plain = _("Plain text"),
 }
 
@@ -124,7 +123,7 @@ function Library:statusStyleId()
         return Status.styleOf(self.settings)
     end
     local id = self.settings and self.settings.status_style
-    if id == "icon" or id == "compact" or id == "bar" or id == "plain" then return id end
+    if id == "icon" or id == "compact" or id == "plain" then return id end
     return "icon"
 end
 
@@ -135,7 +134,7 @@ end
 function Library:applyStatusStyle(id, view)
     if Status and type(Status.style) == "function" then
         id = Status.style(id)
-    elseif id ~= "icon" and id ~= "compact" and id ~= "bar" and id ~= "plain" then
+    elseif id ~= "icon" and id ~= "compact" and id ~= "plain" then
         id = "icon"
     end
     self.settings.status_style = id
@@ -147,7 +146,7 @@ end
 function Library:showStatusStyleDialog(view)
     local rows = {}
     local dialog
-    for _, id in ipairs(Status and Status.ORDER or { "icon", "compact", "bar", "plain" }) do
+    for _, id in ipairs(Status and Status.ORDER or { "icon", "compact", "plain" }) do
         rows[#rows + 1] = {{
             text = (self:statusStyleId() == id and "✓ " or "") .. STATUS_STYLE_LABEL[id],
             callback = function()
@@ -166,7 +165,7 @@ end
 
 function Library:statusStyleMenu()
     local items = {}
-    for _, id in ipairs(Status and Status.ORDER or { "icon", "compact", "bar", "plain" }) do
+    for _, id in ipairs(Status and Status.ORDER or { "icon", "compact", "plain" }) do
         items[#items + 1] = {
             text = STATUS_STYLE_LABEL[id],
             radio = true,
@@ -178,7 +177,7 @@ function Library:statusStyleMenu()
         text_func = function()
             return T(_("Clock and battery: %1"), self:statusStyleLabel())
         end,
-        help_text = _("How the time and battery beside the search bar are drawn. Battery icon is a bold time and a battery outline that fills with the charge, with a bolt while charging. Status bar uses the same battery icons as KOReader's status bar, plus the percentage. Thin bar is a smaller time and a narrow gauge. Plain text is the original line. The clock follows KOReader's 12-hour clock setting."),
+        help_text = _("How the time and battery beside the search bar are drawn. Battery icon is a bold time and a battery outline that fills with the charge, with a bolt while charging. Status bar uses the same battery icons as KOReader's status bar, plus the percentage. Plain text is the original line. The clock follows KOReader's 12-hour clock setting."),
         sub_item_table = items,
     }
 end

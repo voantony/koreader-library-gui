@@ -356,12 +356,45 @@ describe("Header settings in the menu", function()
         rows[#rows - 4][1].callback()
         local picker = shown[#shown]
         eq(picker.title, "Clock and battery")
+        eq(#picker.buttons, 3)
         eq(picker.buttons[1][1].text, "\u{2713} Battery icon")
         eq(picker.buttons[2][1].text, "Status bar")
-        eq(picker.buttons[3][1].text, "Thin bar")
-        eq(picker.buttons[4][1].text, "Plain text")
+        eq(picker.buttons[3][1].text, "Plain text")
         picker.buttons[3][1].callback()
-        eq(self.settings.status_style, "bar")
-        eq(view.style, "bar")
+        eq(self.settings.status_style, "plain")
+        eq(view.style, "plain")
+    end)
+
+    it("reads a saved thin bar as the battery icon", function()
+        local shown = {}
+        local UIManager = {
+            show = function(_, w) shown[#shown + 1] = w end,
+            close = function() end,
+            nextTick = function(_, f) f() end,
+            scheduleIn = function() end,
+        }
+        local Library = load("main.lua", {
+            ["ui/uimanager"] = UIManager,
+            ["ui/widget/buttondialog"] = { new = function(_, o) return o end },
+            ["ui/widget/container/widgetcontainer"] = cls(),
+            librarystatus = require("librarystatus"),
+        })
+        local view = {
+            sort = "recent", view_mode = "grid",
+            placeName = function() return "Books" end,
+            viewKey = function() return "books" end,
+            hasRemembered = function() return false end,
+            setStatusStyle = function(v, id) v.style = id end,
+        }
+        local self = setmetatable({
+            settings = { columns = 4, status_style = "bar" },
+            saveSettings = function() end,
+        }, { __index = Library })
+        eq(self:statusStyleId(), "icon")
+        Library.showLibraryMenu(self, view)
+        local rows = shown[1].buttons
+        eq(rows[#rows - 4][1].text, "Clock and battery: Battery icon")
+        rows[#rows - 4][1].callback()
+        eq(shown[#shown].buttons[1][1].text, "\u{2713} Battery icon")
     end)
 end)
