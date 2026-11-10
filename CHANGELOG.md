@@ -1,8 +1,6 @@
 # Changelog
 
-## 0.5.0 (draft)
-
-Not tagged and not released. This is a draft of what would go in v0.5.0, from !4 through !11.
+## 0.5.0 (2026-11-09)
 
 Thanks to @drkhn1234, the first outside contributor, for the issues and the mockups. Thanks to Muse for the patch behind !4.
 
@@ -23,6 +21,7 @@ Thanks to @drkhn1234, the first outside contributor, for the issues and the mock
 - On the Library screen the A–Z strip wins. A tap, drag, or vertical swipe that starts on it picks a letter and is not offered to LiveLight. The painted column is only as wide as the letters; the hit area still reaches the screen edge and a gutter, and a cover keeps a tap that lands on it. The centered letter is cleared however the finger comes off, including a missing release, and that rectangle gets a UI refresh (#8).
 - The footer Resume button is removed. The current-book cover opens that book, and a long-press shows the title and progress. With no book, the slot stays empty so the footer does not shift (#4).
 - A vertical drag on the left edge sets brightness with `setIntensity` on each step, the same call as the Controls slider, and does not repaint the Library during the drag. This plugin does not ship LiveLight; warmth on the right edge is still forwarded to that plugin when the swipe starts outside the strip (#8).
+- Scrubbing the A–Z strip no longer crashes. The touch area is always a rectangle with a `contains` method, including before the strip is laid out, so the first touch does not call `contains` on a plain table (!14, #8).
 
 ### Shelf, footer, search, and startup (!4)
 
