@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-Reported by ucsilahsor on Reddit.
+Reported by u/ucsilahsor on Reddit.
 
 - **Duplicate books.** The same file is one book. A symlink, a second path onto it, `/mnt/us` and `/mnt/base-us`, and a capitalisation difference on those volumes used to show up as separate tiles, each with its own progress. **Merge copies of the same book** (on, in ☰ → Library) also folds several formats or folders of one work into one tile: the same title and authors, or the same Calibre id. The copy you have started is kept, then the one you read last, then EPUB, AZW3, MOBI, PDF. Long-press the tile: the details card lists the other copies, and each one opens that file. Turn the setting off to see every format again. The same file is still listed only once.
 - **Files that are not books.** The grid was filling up with notes, readme files, exported highlights and folders from code and the device (`latest-captures`, `launchers`, `annotations`, and the like). Hidden folders, `.sdr` sidecar folders, KOReader's own folders, and common code and system folders (`node_modules`, `.git`, `build`, `venv`, `__pycache__`, `system`, `Android`, and others) are not scanned. EPUB, PDF, MOBI, AZW, AZW3, KFX, FB2, DjVu, CBZ, CBR, CB7, DOCX, RTF and CHM stay. TXT, HTML, Markdown and JSON are off until **Show plain text and web files** is on. Exported highlight and annotation files stay hidden either way. **Folders to skip** edits the folder-name list; clear it and save to put the default list back. The next time the library is opened, the new defaults apply. Nothing has to be switched on by hand.
 - **Counts.** All, Unread, Reading, Barely started and Finished are counted after duplicates are folded and those files are left out. A book KOReader has marked finished (`summary.status` `complete`, including the spellings `finished` and `read`) counts as Finished, including when the sidecar was stored under `/mnt/us` and the library saw `/mnt/base-us`.
+- **Menu close.** Closing a menu or a dialog over the Library leaves the Library on top and repaints the whole screen with a full flash, including the A–Z strip, the clock and the footer. A partial refresh was leaving ghosted menu text and NEW badges down the right-hand covers and the A–Z strip, and could paint the file browser through that area. Seen on a Kindle Colorsoft.
 
 ## 0.7.3 (2026-11-10)
 

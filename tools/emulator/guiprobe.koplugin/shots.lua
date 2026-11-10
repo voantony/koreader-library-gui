@@ -385,7 +385,18 @@ jobs.menu = function(done)
             end
             capture("v050-menu", nil)
             closeAboveView()
-            done()
+            -- The close flash is scheduled for the frame after the menu's
+            -- own refresh. Wait, then shoot the Library with the menu gone.
+            q(0.6, function()
+                local top = stackLine()
+                P("menu closed", top)
+                if V() == nil then
+                    state.ok = false
+                    P("FAIL Library was closed with the menu")
+                end
+                capture("v050-menu-closed", nil)
+                done()
+            end)
         end)
     end)
 end
@@ -1580,6 +1591,129 @@ local function updateScenario()
     end)
 end
 
+--- Open and close the Library menu, the clock dialog, and KOReader's menu.
+-- The PNGs are the framebuffer after each close: the Library is still the
+-- screen. The emulator does not simulate e-ink ghosting.
+local function menuCloseScenario()
+    whenLibrary(function()
+        dismissNotices()
+        q(0.3, function()
+            home{ widgets = "default", continue = false, sort = "title", view = "grid",
+                tab = "books", filter = "all" }
+            closeAboveView()
+        end)
+        q(0.6, function()
+            shot("menuclose-01-library")
+            local view = V()
+            if not (view and view.onLeftIcon) then
+                state.ok = false
+                P("FAIL no library")
+                return
+            end
+            view:onLeftIcon()
+        end)
+        q(0.6, function()
+            local title = findAnywhere("^Library")
+            P("library menu", tostring(title), "stack", stackLine())
+            if not title then
+                state.ok = false
+                P("FAIL library menu did not open")
+            end
+            shot("menuclose-02-library-menu-open")
+            local stack = UIManager._window_stack or {}
+            local top = stack[#stack] and stack[#stack].widget
+            if top and top.onClose then
+                top:onClose()
+            else
+                state.ok = false
+                P("FAIL library menu has no onClose")
+                closeAboveView()
+            end
+        end)
+        q(0.6, function()
+            shot("menuclose-03-after-library-menu")
+            if not V() then
+                state.ok = false
+                P("FAIL library gone after its menu closed")
+            else
+                P("PASS library still shown after its menu")
+            end
+            local view = V()
+            if view and view.onLeftIcon then view:onLeftIcon() end
+        end)
+        q(0.5, function()
+            local pressed = false
+            local stack = UIManager._window_stack or {}
+            local top = stack[#stack] and stack[#stack].widget
+            walk(top, function(w)
+                if pressed or type(w.text) ~= "string" or not w.callback then return end
+                if w.text:find("Clock and battery", 1, true) then
+                    pressed = true
+                    w.callback()
+                end
+            end, {})
+            if not pressed then
+                state.ok = false
+                P("FAIL no Clock and battery row", "stack", stackLine())
+            end
+        end)
+        q(0.5, function()
+            shot("menuclose-04-clock-open")
+            local stack = UIManager._window_stack or {}
+            local top = stack[#stack] and stack[#stack].widget
+            if top and top ~= V() and top.onClose then
+                top:onClose()
+            else
+                closeAboveView()
+            end
+        end)
+        q(0.6, function()
+            shot("menuclose-05-after-clock")
+            if not V() then
+                state.ok = false
+                P("FAIL library gone after the clock dialog")
+            else
+                P("PASS library still shown after the clock dialog")
+            end
+            local plugin = lib()
+            if plugin and plugin.showKoreaderMenu then
+                plugin:showKoreaderMenu()
+            end
+        end)
+        q(0.6, function()
+            local fm = FM()
+            local open = fm and fm.menu and fm.menu.menu_container ~= nil
+            P("koreader menu", open and "open" or "closed", "stack", stackLine())
+            if not open then
+                state.ok = false
+                P("FAIL KOReader menu did not open")
+            end
+            shot("menuclose-06-koreader-menu-open")
+            local touch = open and fm.menu.menu_container[1]
+            if touch and touch.onClose then
+                touch:onClose()
+            elseif fm and fm.menu and fm.menu.onCloseFileManagerMenu then
+                fm.menu:onCloseFileManagerMenu()
+            end
+        end)
+        q(0.6, function()
+            shot("menuclose-07-after-koreader-menu")
+            local fm = FM()
+            local still_open = fm and fm.menu and fm.menu.menu_container ~= nil
+            if still_open then
+                state.ok = false
+                P("FAIL KOReader menu still open")
+            end
+            if not V() then
+                state.ok = false
+                P("FAIL library gone after KOReader's menu")
+            else
+                P("PASS library still shown after KOReader's menu")
+            end
+        end)
+    end)
+end
+
 local scenarios = { readme = function()
     whenLibrary(function() runList(ORDER) end)
 end }
@@ -1588,5 +1722,6 @@ scenarios.controls = solo("controls")
 scenarios.gestures = gesturesScenario
 scenarios.gesturemenu = gestureMenuScenario
 scenarios.update = updateScenario
+scenarios.menuclose = menuCloseScenario
 return scenarios
 end

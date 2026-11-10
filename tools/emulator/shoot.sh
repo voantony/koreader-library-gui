@@ -19,7 +19,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 scenario="${1:-}"
 if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
-    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|aznav|toptap|status|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|update|gallery|readme>" >&2
+    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|aznav|toptap|status|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|update|menuclose|gallery|readme>" >&2
     echo "  EMU_OUT     output directory (default: emulator-out/<scenario>)" >&2
     echo "  EMU_PLUGIN  library.koplugin to copy (default: ./library.koplugin)" >&2
     echo "  EMU_COUNT   books in the seeded library (default: 200)" >&2
@@ -28,7 +28,7 @@ if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
     exit 2
 fi
 case "$scenario" in
-    smoke|footer|az|aznav|toptap|status|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|update|azcolumn|azshort|footerbook|footerempty|coveronly|badges|gesturepages|gallery|readme) ;;
+    smoke|footer|az|aznav|toptap|status|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|update|menuclose|azcolumn|azshort|footerbook|footerempty|coveronly|badges|gesturepages|gallery|readme) ;;
     *) echo "unknown scenario: $scenario" >&2; exit 2 ;;
 esac
 
@@ -220,6 +220,15 @@ else:
         "badges": ["v070-badges.png"],
         "gesturepages": ["v070-gestures.png", "v070-gesture-choices.png"],
         "update": ["update-menu.png", "update-prompt.png", "update-success.png"],
+        "menuclose": [
+            "menuclose-01-library.png",
+            "menuclose-02-library-menu-open.png",
+            "menuclose-03-after-library-menu.png",
+            "menuclose-04-clock-open.png",
+            "menuclose-05-after-clock.png",
+            "menuclose-06-koreader-menu-open.png",
+            "menuclose-07-after-koreader-menu.png",
+        ],
         "gallery": [
             "02-compact-2-columns.png", "03-compact.png", "20-recently-opened.png",
             "04-authors.png", "05-series.png", "06-search-typos.png", "07-sort-picker.png",

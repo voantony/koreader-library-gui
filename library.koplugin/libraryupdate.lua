@@ -1078,16 +1078,22 @@ local function tr()
     return _, T
 end
 
-local function tell(text, timeout)
-    local UIManager = require("ui/uimanager")
-    local InfoMessage = require("ui/widget/infomessage")
-    UIManager:show(InfoMessage:new{ text = text, timeout = timeout })
+local function present(plugin, widget)
+    if type(plugin) == "table" and type(plugin.showOverLibrary) == "function" then
+        plugin:showOverLibrary(widget)
+        return
+    end
+    require("ui/uimanager"):show(widget)
 end
 
-local function ask(text, ok_text, cancel_text, ok_callback)
-    local UIManager = require("ui/uimanager")
+local function tell(text, timeout, plugin)
+    local InfoMessage = require("ui/widget/infomessage")
+    present(plugin, InfoMessage:new{ text = text, timeout = timeout })
+end
+
+local function ask(text, ok_text, cancel_text, ok_callback, plugin)
     local ConfirmBox = require("ui/widget/confirmbox")
-    UIManager:show(ConfirmBox:new{
+    present(plugin, ConfirmBox:new{
         text = text,
         ok_text = ok_text,
         cancel_text = cancel_text,
@@ -1096,11 +1102,11 @@ local function ask(text, ok_text, cancel_text, ok_callback)
     })
 end
 
-local function withBusy(text, fn)
+local function withBusy(text, fn, plugin)
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
     local widget = InfoMessage:new{ text = text }
-    UIManager:show(widget)
+    present(plugin, widget)
     if UIManager.forceRePaint then UIManager:forceRePaint() end
     local ok, a, b = pcall(fn)
     pcall(function() UIManager:close(widget) end)
@@ -1159,7 +1165,7 @@ function M.installRelease(plugin, info)
     local _, T = tr()
     local plugin_dir = M.pluginDir(plugin)
     if not plugin_dir then
-        tell(_("Could not find the library.koplugin folder."))
+        tell(_("Could not find the library.koplugin folder."), nil, plugin)
         return
     end
     local NetworkMgr = require("ui/network/manager")
@@ -1168,7 +1174,7 @@ function M.installRelease(plugin, info)
     end
     local result, err = withBusy(T(_("Downloading Library GUI %1…"), info.version), function()
         return M.applyRelease(plugin, info)
-    end)
+    end, plugin)
     if result then
         ask(
             T(_("Library GUI %1 is installed. The previous copy is library.koplugin.bak. Restart KOReader now?"), info.version),
@@ -1177,7 +1183,7 @@ function M.installRelease(plugin, info)
             function()
                 local UIManager = require("ui/uimanager")
                 UIManager:restartKOReader()
-            end)
+            end, plugin)
         return
     end
     local message
@@ -1186,7 +1192,7 @@ function M.installRelease(plugin, info)
     else
         message = T(_("The update failed. %1"), shortErr(err))
     end
-    tell(message)
+    tell(message, nil, plugin)
 end
 
 local function offer(plugin, info, installed)
@@ -1201,7 +1207,7 @@ local function offer(plugin, info, installed)
     if notes ~= "" then text = text .. "\n\n" .. notes end
     ask(text, _("Update"), _("Cancel"), function()
         M.installRelease(plugin, info)
-    end)
+    end, plugin)
 end
 
 --- Query GitLab. allow_install shows Update. silent_current skips "up to date".
@@ -1212,7 +1218,7 @@ function M.check(plugin, opts)
     if not plugin_dir then
         if not opts.quiet then
             local _ = tr()
-            tell(_("Could not find the library.koplugin folder."))
+            tell(_("Could not find the library.koplugin folder."), nil, plugin)
         end
         return
     end
@@ -1235,13 +1241,13 @@ function M.check(plugin, opts)
     else
         release, rerr = withBusy(_("Checking for updates…"), function()
             return M.fetchRelease()
-        end)
+        end, plugin)
     end
     M._busy = false
     if not release then
         stamp(plugin, "update_check_failed_at")
         if not opts.quiet then
-            tell(T(_("Couldn't check for updates. %1"), shortErr(rerr)))
+            tell(T(_("Couldn't check for updates. %1"), shortErr(rerr)), nil, plugin)
         end
         return
     end
@@ -1253,7 +1259,7 @@ function M.check(plugin, opts)
     local state = version and M.offerState(version, installed) or "unknown"
     if state == "current" then
         if not opts.quiet then
-            tell(T(_("Library GUI is up to date (%1)."), installed))
+            tell(T(_("Library GUI is up to date (%1)."), installed), nil, plugin)
         end
         return
     end
@@ -1262,13 +1268,13 @@ function M.check(plugin, opts)
     if state == "unknown" and opts.quiet then return end
     if not asset then
         if not opts.quiet then
-            tell(_("The release has no library.koplugin zip, so nothing was changed."))
+            tell(_("The release has no library.koplugin zip, so nothing was changed."), nil, plugin)
         end
         return
     end
     if not sha then
         if not opts.quiet then
-            tell(_("This release has no SHA256 line, so nothing was installed."))
+            tell(_("This release has no SHA256 line, so nothing was installed."), nil, plugin)
         end
         return
     end
@@ -1280,7 +1286,7 @@ function M.check(plugin, opts)
     }
     -- Notify me: a short notice only. Install quietly is a different path.
     if opts.notify_only then
-        tell(T(_("Library GUI %1 is available."), version), 4)
+        tell(T(_("Library GUI %1 is available."), version), 4, plugin)
         return
     end
     offer(plugin, found, installed)
@@ -1341,7 +1347,7 @@ function M.quietInstall(plugin)
         return
     end
     stamp(plugin, "update_checked_at")
-    tell(T(_("Library updated to v%1 — takes effect next restart"), version), 4)
+    tell(T(_("Library updated to v%1 — takes effect next restart"), version), 4, plugin)
 end
 
 --- Background check. Off does nothing. Notify me only posts a notice.

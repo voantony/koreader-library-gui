@@ -25,6 +25,8 @@ tools/emulator/shoot.sh footer
 
 `update` stamps the installed plugin as 0.7.1, opens the Updates submenu, asks GitLab for the latest release, and writes `update-menu.png`, `update-prompt.png` and `update-success.png`. It needs a network.
 
+`menuclose` writes the Library, the ☰ menu open and closed, the clock dialog open and closed, and KOReader's menu open and closed (`menuclose-01` … `menuclose-07`). The PNGs are the framebuffer. The emulator does not simulate e-ink ghosting; they show that the Library is still the screen after each close.
+
 `readme` also writes `v050-az-column.png`, `v050-az-short.png`, `v050-footer-book.png`, `v050-footer-empty.png`, `v070-cover-only.png`, `v070-badges.png`, `v070-gestures.png` and `v070-gesture-choices.png`. Those names are scenarios on their own (`azcolumn`, `azshort`, `footerbook`, `footerempty`, `coveronly`, `badges`, `gesturepages`).
 
 `readme` writes the README shots that show the v0.5.0 home screen and gallery. It waits until the covers on screen have been extracted, so the PNGs are not grey placeholders. The same shots can be taken on their own:
