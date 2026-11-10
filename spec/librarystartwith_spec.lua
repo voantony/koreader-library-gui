@@ -301,22 +301,57 @@ describe("Migration from the old startup toggle", function()
     end)
 end)
 
-describe("Return to Library menu entry", function()
-    it("is only enabled when the Library is the home screen", function()
+describe("After closing a book, and On startup", function()
+    it("offers Return to Library and Return to file browser", function()
         local Library = mainLib()
         local store = {}
         _G.G_reader_settings = fakeSettings(store)
-        local self = setmetatable({ ui = {}, settings = { return_to_library = true } }, { __index = Library })
+        local self = setmetatable({
+            ui = {}, settings = { return_to_library = true }, saveSettings = function() end,
+        }, { __index = Library })
         local items = {}
         Library.addToMainMenu(self, items)
         local entry
         for _, e in ipairs(items.library.sub_item_table) do
-            if e.text == "Return to Library after closing a book" then entry = e end
+            if e.text_func and e.text_func():find("After closing a book", 1, true) == 1 then
+                entry = e
+            end
         end
         eq(entry ~= nil, true)
-        eq(entry.enabled_func(), false)
-        store.start_with = "library"
-        eq(entry.enabled_func(), true)
+        eq(entry.sub_item_table[1].text, "Return to Library")
+        eq(entry.sub_item_table[2].text, "Return to file browser")
+        eq(entry.sub_item_table[1].checked_func(), true)
+        eq(entry.sub_item_table[2].checked_func(), false)
+        entry.sub_item_table[2].callback()
+        eq(self.settings.after_close, "filemanager")
+        eq(self.settings.return_to_library, false)
+        eq(entry.sub_item_table[2].checked_func(), true)
+        eq(entry.text_func(), "After closing a book: Return to file browser")
+        _G.G_reader_settings = nil
+    end)
+
+    it("Resume last book saves Start with last and does not leave it on library", function()
+        local Library = mainLib()
+        local store = { start_with = "library" }
+        _G.G_reader_settings = fakeSettings(store)
+        local self = setmetatable({
+            ui = {}, settings = {}, saveSettings = function() end,
+        }, { __index = Library })
+        local items = {}
+        Library.addToMainMenu(self, items)
+        local entry
+        for _, e in ipairs(items.library.sub_item_table) do
+            if e.text_func and e.text_func():find("On startup", 1, true) == 1 then entry = e end
+        end
+        eq(entry.sub_item_table[1].text, "Open Library")
+        eq(entry.sub_item_table[2].text, "Resume last book")
+        eq(entry.sub_item_table[1].checked_func(), true)
+        entry.sub_item_table[2].callback()
+        eq(self.settings.on_startup, "last")
+        eq(store.start_with, "last")
+        eq(entry.sub_item_table[2].checked_func(), true)
+        eq(entry.sub_item_table[1].checked_func(), false)
+        eq(entry.text_func(), "On startup: Resume last book")
         _G.G_reader_settings = nil
     end)
 

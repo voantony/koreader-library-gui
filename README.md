@@ -43,7 +43,7 @@ The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com
 
 ![The Library menu open over the book grid](docs/screenshots/v050-menu.png)
 
-**Start with.** KOReader's own Start with setting, in the file browser menu, can be set to library. KOReader then opens the Library at startup and returns to it after a book closes. An older "Open Library at startup" tick is moved to that setting.
+**Start with.** KOReader's own Start with setting, in the file browser menu, can be set to library. KOReader then opens the Library at startup. **On startup** in the Library's ☰ menu is the same choice, plus **Resume last book**, which leaves KOReader on the last file and does not open the Library over it. **After closing a book** is **Return to Library** (the Library is the first thing drawn, with no file-browser flash) or **Return to file browser**. An older "Open Library at startup" tick is moved to Start with.
 
 ## Screenshots
 
@@ -110,7 +110,7 @@ The shots on this page were taken in the KOReader emulator (1264×1680) with the
 - **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
 - **Controls panel**: swipe down from the top right (the right half of the top of the screen; a slightly diagonal pull is fine) for Brightness and Warmth sliders and buttons for Light, Night mode, Refresh (clears e-ink ghosting), Wi-Fi, Rotate, Cover sleep and Exit (asks first, then quits KOReader). You can also tap the clock or battery beside the search bar, or choose **Controls** in the ☰ menu. Anything your device doesn't have is left out.
 - **Top tap while reading** (☰ → Library → **Top tap opens**): **Library GUI bar** (the default) opens a small menu: Library, Contents, Go to page, Search, Font & size, Readability, Light, Bookmark, Book details, Exit, and **More…** for KOReader's full reader menu. **KOReader menu** opens KOReader's own reader menu with that same tap. A swipe down from the top of a page opens KOReader's menu with either choice. The search keyboard stays on **Use KOReader's keyboard**.
-- **Start with**: KOReader's own Start with setting (file browser menu) includes library. Choose it to open the Library when KOReader starts and to come back to it after closing a book. A vertical drag on the left edge of the Library sets brightness directly, at the same pace as the Controls slider.
+- **Start with**: KOReader's own Start with setting (file browser menu) includes library. **On startup** in the Library's ☰ menu chooses **Open Library** (Start with set to library) or **Resume last book** (Start with set to the last file; the Library is not drawn over that book). **After closing a book** chooses **Return to Library** or **Return to file browser**. Return to Library paints the Library immediately, so the file browser does not flash in between. A vertical drag on the left edge of the Library sets brightness directly, at the same pace as the Controls slider.
 - **Covers without other plugins.** Library GUI extracts covers itself in the background. If Project: Title or Cover browser is enabled, it reuses their cover cache.
 - **Gestures** (☰ on the Library, or ☰ → Library → **Gestures**). On the Library home, a swipe down from the top opens KOReader's menu, and a two-finger swipe does whatever you set for the file browser (often rotate). That is **Same as file browser**, the default for every gesture. You can instead pick **Nothing**, or an action of your own: open KOReader's menu, rotate, brightness, warmth, open the current book, the Library menu, Controls, or turn a page. The list is the top swipe, two-finger swipes (right, left, up, down, diagonal), the screen edges, corner taps and holds, and multiswipe, pinch and spread. **KOReader gesture manager** in that menu opens the file-browser profile, which is what Same as file browser follows. A one-finger tap or swipe that starts on the A–Z strip still jumps to a letter. Open Library, Search library, Resume last book, Rescan library, and Next / Previous in series can also be assigned under *Taps and gestures*.
 
@@ -125,7 +125,7 @@ SHA256: `a4eec1aeb9bd6b3339b7706591acd721fb9f1bb89f490526afcbf5b2fb604928`
    - On a Mac, newer Kindles such as the Colorsoft connect over MTP and don't show up in Finder on their own. [Mount Kindle](https://gitlab.com/antonyvo/kindle-mtp-mount) (a small menu-bar app from the same author) shows the Kindle as a drive in Finder, and [OpenMTP](https://openmtp.ganeshrvel.com/) also works for copying the folder across.
    - Kobo: `/mnt/onboard/.adds/koreader/plugins/`. PocketBook: `/mnt/ext1/applications/koreader/plugins/`. Android: `koreader/plugins/` on internal storage.
 2. Restart KOReader (☰ → Exit → Restart KOReader).
-3. Open ☰ → **Library** → **Open Library**. To open it every time KOReader starts, set **Start with** to library in the file browser's menu.
+3. Open ☰ → **Library** → **Open Library**. To open it every time KOReader starts, set **On startup** to **Open Library** (or **Start with** to library in the file browser's menu). **Resume last book** opens the last file instead, and does not cover it with the Library.
 
 ### Updating
 

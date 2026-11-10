@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Straight back to the Library.** Closing a book that was opened from the Library, or when the Library is the home screen, paints the Library first. KOReader's file browser stays underneath and is not shown on the way. One full-screen refresh clears the ghost of that file browser on a colour e-ink screen such as the Kindle Colorsoft. Thanks to u/ucsilahsor, who reported the flash on Reddit.
+- **After closing a book.** In the Library's ☰ menu, and under ☰ → Library: **Return to Library** (the default, above) or **Return to file browser** (KOReader's file browser, and the Library stays closed). Choosing Library from inside a book still opens it.
+- **On startup.** **Open Library** or **Resume last book**. Resume last book uses KOReader's Start with set to the last file. If KOReader opens that book, the Library is not drawn on top of it.
+
 ## 0.7.4 (2026-11-10)
 
 Reported by u/ucsilahsor on Reddit.

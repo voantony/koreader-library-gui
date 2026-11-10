@@ -49,7 +49,9 @@ local DEFAULTS = {
     merge_copies = true,     -- one tile for the same book in several formats or folders
     show_plain_text = false, -- TXT, HTML, Markdown and JSON stay out unless this is on
     -- skip_folders: nil uses Core.defaultSkipDirs(); a list replaces that list
-    return_to_library = true,   -- when the Library is the home screen, come back to it after reading
+    return_to_library = true,   -- legacy checkbox; after_close ("library"|"filemanager") wins when set
+    -- after_close: nil (same as "library") | "library" | "filemanager"
+    -- on_startup: nil | "library" | "last" (Resume last book). See libraryreturn.lua.
     debounce_ms = 150,
     barely_threshold = 0.10,    -- "Barely started" when chapters are unknown: below this fraction
     series_skip_finished = true, -- Next in series skips books already finished
@@ -115,9 +117,12 @@ local shared = {
     index = nil,
     started = false,      -- the start-up Library has been shown once
     reopen = false,       -- a book was opened from the Library
+    closed_book = false,  -- a document just closed (any book, not only one we opened)
     view = nil,
     controls = nil,       -- the open Controls panel
     after_book = nil,     -- "show" / "search": open the Library once the book has closed
+    return_pending = nil, -- "show" / "search": paint the Library before the file browser
+    opening_file_manager = false, -- inside the patched showFiles / showFileManager
 }
 Library.shared = shared
 
@@ -308,30 +313,29 @@ function Library:init()
         if self.settings[k] == nil then self.settings[k] = v end
     end
     self:migrateStartupSetting()
+    self:migrateReturnSetting()
+    self:applyStartupChoice()
     self:registerStartWithMenu()
+    self:registerReturnHooks()
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
     if self.ui.document then
         self:hookReaderMenuTap()
         self:hookFooterGestures()
-    end
-
-    -- In the file browser: show the Library at start-up, or again after reading.
-    -- (file_chooser is only created after plugins, so test for the reader instead.)
-    if not self.ui.document and shared.after_book then
-        -- Library was asked for from inside a book, which has now closed.
-        local focus_search = shared.after_book == "search"
-        shared.after_book = nil
-        shared.started = true
-        shared.reopen = false
-        UIManager:nextTick(function() self:onShowLibrary(focus_search) end)
-    elseif not self.ui.document and self:isHomeScreen() then
-        local first = not shared.started
-        local back_from_book = shared.reopen and self.settings.return_to_library
-        if first or back_from_book then
-            shared.started = true
-            shared.reopen = false
-            UIManager:nextTick(function() self:onShowLibrary() end)
+        -- A reader at startup is KOReader resuming a book. Do not queue the
+        -- Library on top of it, including when Start with used to be library.
+        shared.return_pending = nil
+    else
+        -- File browser: queue the Library (startup, or the book that just closed).
+        -- file_chooser is only created after plugins, so test for the reader instead.
+        self:considerReturn()
+        if shared.return_pending and not shared.opening_file_manager then
+            -- No patched showFiles around this init (the very first startup, or a
+            -- spec that builds the plugin by hand). nextTick still runs before
+            -- the first repaint of UIManager:run. A close from the reader does
+            -- not use this: showFileManager paints in the same call, because
+            -- TouchMenu forceRePaints as soon as that call returns.
+            UIManager:nextTick(function() self:finishReturn() end)
         end
     end
     -- Off unless the reader turned it on. It only looks, and only if Wi-Fi is already up.
@@ -366,6 +370,145 @@ function Library:migrateStartupSetting()
     if start_with ~= "library" then return end
     self.settings.start_with_library = nil
     self:saveSettings()
+end
+
+--- The old "Return to Library after closing a book" checkbox, off.
+-- Stored as after_close so the menu can offer both choices. An explicit
+-- after_close is left alone. The checkbox key is kept when it was on:
+-- that is the default, and writing it again is noise.
+function Library:migrateReturnSetting()
+    if self.settings.after_close ~= nil then return end
+    if self.settings.return_to_library ~= false then return end
+    self.settings.after_close = "filemanager"
+    self:saveSettings()
+end
+
+--- "Resume last book" has to win over Start with → library, or the next
+-- launch still opens the file browser and this plugin covers it.
+-- History, favorites and folder shortcuts are left as they are.
+function Library:applyStartupChoice()
+    if self.settings.on_startup ~= "last" then return end
+    if not (G_reader_settings and G_reader_settings.readSetting) then return end
+    local start_with = G_reader_settings:readSetting("start_with")
+    if start_with ~= nil and start_with ~= "filemanager" and start_with ~= "library" then
+        return
+    end
+    if start_with == "last" then return end
+    G_reader_settings:saveSetting("start_with", "last")
+    if G_reader_settings.flush then G_reader_settings:flush() end
+end
+
+function Library:returnState()
+    local start_with = G_reader_settings and G_reader_settings.readSetting
+        and G_reader_settings:readSetting("start_with")
+    return {
+        has_document = self.ui and self.ui.document and true or false,
+        after_book = shared.after_book,
+        reopen = shared.reopen,
+        closed_book = shared.closed_book,
+        home = start_with == "library",
+        first = not shared.started,
+        after_close = self.settings and self.settings.after_close,
+        legacy_return = self.settings and self.settings.return_to_library,
+        on_startup = self.settings and self.settings.on_startup,
+        start_with = start_with,
+    }
+end
+
+--- Decide whether this FileManager should be covered by the Library.
+-- Clears the one-shot flags either way, so a later file browser does not
+-- inherit them. Does nothing if a decision is already waiting to paint.
+function Library:considerReturn()
+    if self.ui and self.ui.document then return nil end
+    if shared.return_pending then return shared.return_pending end
+    local Return = require("libraryreturn")
+    local mode = Return.plan(self:returnState())
+    local from_book = shared.reopen or shared.closed_book or shared.after_book
+    shared.after_book = nil
+    if from_book then
+        shared.reopen = false
+        shared.closed_book = false
+    end
+    if not mode then return nil end
+    shared.started = true
+    shared.return_pending = mode
+    return mode
+end
+
+--- Paint the Library now, with one full-screen refresh, and drop the flag
+-- so a queued nextTick does not paint it again.
+function Library:finishReturn()
+    local mode = shared.return_pending
+    if not mode then return false end
+    shared.return_pending = nil
+    if self.ui and self.ui.document then return false end
+    self:onShowLibrary(mode == "search", { full = true })
+    if shared.view and UIManager.setDirty then
+        UIManager:setDirty(shared.view, "full")
+    end
+    return true
+end
+
+local function finishOnFileManager()
+    local FM = package.loaded["apps/filemanager/filemanager"]
+    local lib = FM and FM.instance and FM.instance.library
+    if lib and lib.finishReturn then return lib:finishReturn() end
+    return false
+end
+
+--- Show the Library before showFileManager / showFiles returns.
+-- KOReader's file-browser button does onClose, showFileManager, then
+-- TouchMenu forceRePaints (frontend/ui/widget/touchmenu.lua). A nextTick
+-- from FileManager:init runs too late: that forceRePaint has already
+-- flashed the file browser. The FileManager instance stays underneath;
+-- the Library is covers_fullscreen, so the repaint does not paint it.
+function Library:registerReturnHooks()
+    local function wrapShowFiles(FileManager)
+        if type(FileManager) ~= "table" or type(FileManager.showFiles) ~= "function" then
+            return
+        end
+        if FileManager._library_return_patched then return end
+        FileManager._library_return_patched = true
+        local orig = FileManager.showFiles
+        FileManager.showFiles = function(self_fm, ...)
+            shared.opening_file_manager = true
+            local ok, err = pcall(orig, self_fm, ...)
+            shared.opening_file_manager = false
+            if not ok then error(err, 0) end
+            if not finishOnFileManager() and shared.return_pending then
+                UIManager:nextTick(finishOnFileManager)
+            end
+        end
+    end
+    local function wrapShowFileManager(ReaderUI)
+        if type(ReaderUI) ~= "table" or type(ReaderUI.showFileManager) ~= "function" then
+            return
+        end
+        if ReaderUI._library_return_patched then return end
+        ReaderUI._library_return_patched = true
+        local orig = ReaderUI.showFileManager
+        ReaderUI.showFileManager = function(self_ui, ...)
+            local FM = package.loaded["apps/filemanager/filemanager"]
+            local existed = FM and FM.instance and true or false
+            -- An existing file browser is only retargeted (changeToPath);
+            -- its plugin init does not run, so decide here. A new one
+            -- decides inside init, while opening_file_manager is set.
+            if existed and self_ui.library and self_ui.library.considerReturn then
+                self_ui.library:considerReturn()
+            end
+            shared.opening_file_manager = true
+            local ok, err = pcall(orig, self_ui, ...)
+            shared.opening_file_manager = false
+            if not ok then error(err, 0) end
+            if not finishOnFileManager() and shared.return_pending then
+                UIManager:nextTick(finishOnFileManager)
+            end
+        end
+    end
+    local ok_fm, FileManager = pcall(require, "apps/filemanager/filemanager")
+    if ok_fm then wrapShowFiles(FileManager) end
+    local ok_ui, ReaderUI = pcall(require, "apps/reader/readerui")
+    if ok_ui then wrapShowFileManager(ReaderUI) end
 end
 
 --- The Library plugin on the file browser that is open now. The Start
@@ -798,7 +941,8 @@ function Library:onLibraryResume()
     return true
 end
 
-function Library:onShowLibrary(focus_search)
+function Library:onShowLibrary(focus_search, opts)
+    opts = type(opts) == "table" and opts or {}
     if shared.view then
         local shelf = shared.open_shelf
         shared.open_shelf = nil
@@ -806,6 +950,9 @@ function Library:onShowLibrary(focus_search)
             shared.view:openNamedShelf(shelf.kind, shelf.name)
         elseif focus_search then
             shared.view:focusSearch()
+        end
+        if opts.full and UIManager.setDirty then
+            UIManager:setDirty(shared.view, "full")
         end
         return true
     end
@@ -817,15 +964,27 @@ function Library:onShowLibrary(focus_search)
     local function show()
         local view = self:newView()
         shared.view = view
-        UIManager:show(view)
+        -- "full" is the one flashing refresh for a Colorsoft that would
+        -- otherwise ghost the file browser we just covered.
+        if opts.full then
+            UIManager:show(view, "full")
+        else
+            UIManager:show(view)
+        end
         if focus_search then UIManager:nextTick(function() view:focusSearch() end) end
     end
     if index.needs_build then
-        local msg = InfoMessage:new{ text = _("Loading library…") }
-        UIManager:show(msg)
-        UIManager:forceRePaint()
-        self:ensureIndex()
-        UIManager:close(msg)
+        if opts.full then
+            -- Do not forceRePaint here. The file browser is already on the
+            -- stack; a paint now would be the flash we are avoiding.
+            self:ensureIndex()
+        else
+            local msg = InfoMessage:new{ text = _("Loading library…") }
+            UIManager:show(msg)
+            UIManager:forceRePaint()
+            self:ensureIndex()
+            UIManager:close(msg)
+        end
     else
         -- Cheap refresh of reading state and history order.
         self:refreshReadingState()
@@ -853,8 +1012,17 @@ function Library:leaveBook(focus_search)
     shared.after_book = focus_search and "search" or "show"
     ui:onClose()
     ui:showFileManager(file)
-    if shared.after_book then
-        -- the file browser was already there, so no new plugin copy ran init
+    if shared.return_pending then
+        -- The showFileManager hook did not paint (this ui:showFileManager is
+        -- not the patched class method). Paint before we return.
+        local FileManager = package.loaded["apps/filemanager/filemanager"]
+        local lib = FileManager and FileManager.instance and FileManager.instance.library or self
+        if lib and lib.finishReturn and not (lib.ui and lib.ui.document) then
+            lib:finishReturn()
+        end
+    elseif shared.after_book then
+        -- The file browser was already there, and nothing queued a return
+        -- (hooks not installed). Same hand-off as before.
         local FileManager = package.loaded["apps/filemanager/filemanager"]
         local lib = FileManager and FileManager.instance and FileManager.instance.library
         shared.after_book = nil
@@ -1787,6 +1955,24 @@ function Library:showLibraryMenu(view)
             end,
         },
     })
+    table.insert(buttons, {
+        {
+            text = self:afterCloseMenuText(),
+            callback = function()
+                close()
+                self:showAfterCloseDialog(view)
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
+            text = self:onStartupMenuText(),
+            callback = function()
+                close()
+                self:showOnStartupDialog(view)
+            end,
+        },
+    })
     -- Last item: leave the Library for the file browser (there is no X).
     table.insert(buttons, {
         {
@@ -2292,6 +2478,158 @@ function Library:showKoreaderMenu(ges)
     return true
 end
 
+function Library:afterCloseMode()
+    return require("libraryreturn").afterClose(
+        self.settings and self.settings.after_close,
+        self.settings and self.settings.return_to_library)
+end
+
+function Library:afterCloseLabel()
+    if self:afterCloseMode() == "filemanager" then return _("Return to file browser") end
+    return _("Return to Library")
+end
+
+function Library:afterCloseMenuText()
+    return T(_("After closing a book: %1"), self:afterCloseLabel())
+end
+
+function Library:setAfterClose(mode)
+    local Return = require("libraryreturn")
+    if mode ~= Return.LIBRARY and mode ~= Return.FILEMANAGER then return end
+    self.settings.after_close = mode
+    self.settings.return_to_library = mode == Return.LIBRARY
+    self:saveSettings()
+end
+
+--- ☰ on the Library. Closed through closeOverLibrary so the cover grid
+-- flashes the way every other picker does (libraryrefresh.lua).
+function Library:showAfterCloseDialog(view)
+    local Return = require("libraryreturn")
+    local dialog
+    local function pick(mode)
+        self:setAfterClose(mode)
+        self:closeOverLibrary(dialog, view)
+    end
+    local current = self:afterCloseMode()
+    dialog = ButtonDialog:new{
+        title = _("After closing a book"),
+        title_align = "center",
+        buttons = {
+            {{
+                text = (current == Return.LIBRARY and "\u{2713} " or "") .. _("Return to Library"),
+                callback = function() pick(Return.LIBRARY) end,
+            }},
+            {{
+                text = (current == Return.FILEMANAGER and "\u{2713} " or "") .. _("Return to file browser"),
+                callback = function() pick(Return.FILEMANAGER) end,
+            }},
+        },
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
+    UIManager:show(dialog)
+    return dialog
+end
+
+function Library:afterCloseMenu()
+    local Return = require("libraryreturn")
+    return {
+        text_func = function() return self:afterCloseMenuText() end,
+        help_text = _("Return to Library paints the Library as soon as the book closes, with no file browser in between. Return to file browser is KOReader's own screen, and the Library stays closed. Choosing Library from inside a book still opens it."),
+        sub_item_table = {
+            {
+                text = _("Return to Library"),
+                radio = true,
+                checked_func = function() return self:afterCloseMode() == Return.LIBRARY end,
+                callback = function() self:setAfterClose(Return.LIBRARY) end,
+            },
+            {
+                text = _("Return to file browser"),
+                radio = true,
+                checked_func = function() return self:afterCloseMode() == Return.FILEMANAGER end,
+                callback = function() self:setAfterClose(Return.FILEMANAGER) end,
+            },
+        },
+    }
+end
+
+function Library:startupMode()
+    local start_with = G_reader_settings and G_reader_settings.readSetting
+        and G_reader_settings:readSetting("start_with")
+    return require("libraryreturn").startupChoice(
+        self.settings and self.settings.on_startup, start_with)
+end
+
+function Library:startupLabel()
+    if self:startupMode() == "last" then return _("Resume last book") end
+    if self:startupMode() == "library" then return _("Open Library") end
+    return _("KOReader's Start with")
+end
+
+function Library:onStartupMenuText()
+    return T(_("On startup: %1"), self:startupLabel())
+end
+
+function Library:setOnStartup(mode)
+    local Return = require("libraryreturn")
+    if mode ~= Return.LIBRARY and mode ~= Return.LAST then return end
+    self.settings.on_startup = mode
+    self:saveSettings()
+    if not (G_reader_settings and G_reader_settings.saveSetting) then return end
+    local start_with = mode == Return.LAST and "last" or "library"
+    G_reader_settings:saveSetting("start_with", start_with)
+    if G_reader_settings.flush then G_reader_settings:flush() end
+end
+
+function Library:showOnStartupDialog(view)
+    local Return = require("libraryreturn")
+    local dialog
+    local function pick(mode)
+        self:setOnStartup(mode)
+        self:closeOverLibrary(dialog, view)
+    end
+    local current = self:startupMode()
+    dialog = ButtonDialog:new{
+        title = _("On startup"),
+        title_align = "center",
+        buttons = {
+            {{
+                text = (current == Return.LIBRARY and "\u{2713} " or "") .. _("Open Library"),
+                callback = function() pick(Return.LIBRARY) end,
+            }},
+            {{
+                text = (current == Return.LAST and "\u{2713} " or "") .. _("Resume last book"),
+                callback = function() pick(Return.LAST) end,
+            }},
+        },
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
+    UIManager:show(dialog)
+    return dialog
+end
+
+function Library:onStartupMenu()
+    local Return = require("libraryreturn")
+    return {
+        text_func = function() return self:onStartupMenuText() end,
+        help_text = _("Open Library is KOReader's Start with set to library. Resume last book is Start with set to the last file: KOReader opens that book, and the Library is not drawn on top of it."),
+        separator = true,
+        sub_item_table = {
+            {
+                text = _("Open Library"),
+                radio = true,
+                checked_func = function() return self:startupMode() == Return.LIBRARY end,
+                callback = function() self:setOnStartup(Return.LIBRARY) end,
+            },
+            {
+                text = _("Resume last book"),
+                radio = true,
+                checked_func = function() return self:startupMode() == Return.LAST end,
+                callback = function() self:setOnStartup(Return.LAST) end,
+            },
+        },
+    }
+end
+
 function Library:addToMainMenu(menu_items)
     menu_items.library = {
         text = _("Library"),
@@ -2307,17 +2645,8 @@ function Library:addToMainMenu(menu_items)
                 callback = function() self:onRescanLibrary() end,
                 separator = true,
             },
-            {
-                text = _("Return to Library after closing a book"),
-                help_text = _("When the Library is your home screen (Start with → library in the file browser menu), come back to it after closing a book."),
-                enabled_func = function() return self:isHomeScreen() end,
-                checked_func = function() return self.settings.return_to_library end,
-                callback = function()
-                    self.settings.return_to_library = not self.settings.return_to_library
-                    self:saveSettings()
-                end,
-                separator = true,
-            },
+            self:afterCloseMenu(),
+            self:onStartupMenu(),
             {
                 text_func = function()
                     return T(_("Library folder: %1"), BD.dirpath(filemanagerutil.abbreviate(self:getRoot())))
@@ -3221,6 +3550,9 @@ function Library:onCloseDocument()
     if self.ui.document and shared.index then
         shared.index:refreshBook(self.ui.document.file)
     end
+    -- Any close, including one that did not start in the Library. The file
+    -- browser that comes next reads this once.
+    shared.closed_book = true
 end
 
 --- A custom cover was set or removed in Book information: drop our thumbnail.
