@@ -1,6 +1,6 @@
 # Library GUI for KOReader
 
-[![Release](https://gitlab.com/antonyvo/koreader-library-gui/-/badges/release.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.5.0)
+[![Release](https://gitlab.com/antonyvo/koreader-library-gui/-/badges/release.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.6.0)
 [![Pipeline](https://gitlab.com/antonyvo/koreader-library-gui/badges/main/pipeline.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/pipelines)
 
 Library GUI (`library.koplugin`) is a KOReader plugin that replaces the file browser with a library screen that looks and works more like the Kindle's own home screen: book covers with reading progress, a search bar with the clock and battery at the top, tabs for Books, Collections, Authors and Series, the menu in the footer, and a Controls panel you pull down from the top right (or open from the clock or the ☰ menu).
@@ -9,7 +9,7 @@ It sits alongside KOReader's file browser, History and Collections. It never mov
 
 <p align="center"><img src="docs/screenshots/v050-widgets.png" width="420" alt="Books tab with Continue Reading and Favorites above the cover grid and one A–Z column on the right"></p>
 
-The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. The current release is [v0.5.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.5.0) (9 November 2026). The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
+The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. The current release is [v0.6.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.6.0) (9 November 2026). The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
 
 ## Home screen
 
@@ -75,7 +75,7 @@ The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com
 |---|---|---|
 | ![Filter chips with their full labels. Finished is cut off at the right edge](docs/screenshots/v050-filters.png) | ![KOReader's file browser, filing-cabinet tab, with Start with set to library](docs/screenshots/v050-start-with.png) | ![The frontlight level, 31, while a drag on the left edge is still down](docs/screenshots/v050-brightness.png) |
 
-The shots on this page are the v0.5.0 layout, taken in the KOReader emulator with the dummy library. Finished keeps its full label and is cut off at the screen edge when the row is wider than the screen; swipe the chips to bring it across. The level in the brightness shot is drawn by the plugin while the finger is down, and it is cleared when the finger lifts.
+The shots on this page show the home screen (widgets and the A–Z strip). They were taken in the KOReader emulator with the dummy library. v0.6.0 adds Read / New badges, time left, Want to Read, and Cover only. Finished keeps its full label and is cut off at the screen edge when the row is wider than the screen; swipe the chips to bring it across. The level in the brightness shot is drawn by the plugin while the finger is down, and it is cleared when the finger lifts.
 
 ## Features
 
@@ -84,12 +84,15 @@ The shots on this page are the v0.5.0 layout, taken in the KOReader emulator wit
 - **Footer**: the ☰ menu, the book count and sort (*201 books · Last read ▾*), the cover of the book you are reading, size and view buttons, and the page number with arrows. Tap the cover to open that book; hold it for the title and progress. The ☰ menu opens upward from the bottom-left button.
 - **Filters**: All, Unread, Reading, Barely started and Finished, each with a count. A book you opened but did not start (still on the cover, title page or contents) stays **Unread**. **Barely started** means past the contents but not through the first chapter; **Reading** means at least a chapter in. The Library learns a book's chapters from its table of contents the next time you open it. Until then, or without a table of contents, it goes by percentage: the first 2 % or 3 pages are Unread, then Barely started below 5, 10, 20 or 25 % (pick the cut-off in the ☰ menu).
 - **Sort** by Author, Title, Date added, Last read or Series. Tap the label in the footer to change it, or use the ☰ menu.
-- **Views**: Small, Medium or Large covers, List, Compact, and Compact · 2 columns. The view, sort and filter are remembered for each tab and each author, series or collection you open (**Reset default layout** in the ☰ menu forgets them).
+- **Views**: Small, Medium or Large covers, List, Compact, Compact · 2 columns, and Cover only. Cover only keeps the progress row and the badges, and drops the title and author so more covers fit. The view, sort and filter are remembered for each tab and each author, series or collection you open (**Reset default layout** in the ☰ menu forgets them).
+- **Read / New badges.** **New** is only for a book that has never been opened. A book you opened and left on the cover stays unmarked. **Read** means KOReader's doc settings say the book is finished. On hold is unchanged.
+- **Time left** on in-progress books, next to the percent (*42 % · 2h*). It uses that book's own reading speed. If KOReader has no speed for the book, the duration is hidden; nothing is filled in with a default pace.
+- **Want to Read.** From the details card or the book's More menu, add or remove the book from a KOReader collection named Want to Read. That collection then shows on the Collections tab like any other.
 - **Dates**: sorted by Last read or Date added, each book shows its date (*3h ago*, *Yesterday*, *12 Oct*). Under Last read, books you've never opened follow in author order.
 - **Widgets**: the area above the books. The default is still Continue reading, a row of the books you are in the middle of. Long-press the title to switch the slot to Favorites, Recently added (newest file first), a series, a collection, or a folder, or to clear it. Two widgets can sit side by side; tap a title to expand one and turn the other into a tab. A widget remembers its page when you open a book and come back. Swipe up on the grid to hide the band, and swipe down to restore it.
 - **Collections and Series** as tabs. A series lists its books in order, and swiping past its last page opens the next series.
 - **Genres**: a Collections | Genres switch at the top of the Collections tab. Genres are grouped from each book's keywords and Calibre tags, with a count and progress for each.
-- **Book details**: long-press a book, or choose **Book details** in the reader's ☰ menu, for its cover, progress, series, genres, collections and the Calibre description. Tap the author, series, a genre or a collection to open that shelf. Along the bottom: **Mark finished** (or **Mark unread**), **More** for KOReader's usual book menu, and **Close**.
+- **Book details**: long-press a book, or choose **Book details** in the reader's ☰ menu, for its cover, progress (and time left when it is known), series, genres, collections, pages, last read, file size, path, and the Calibre description. **Add to Want to Read** or **Remove from Want to Read** is on the card and on More. Tap the author, series, a genre or a collection to open that shelf. Along the bottom: **Mark finished** (or **Mark unread**), **More** for KOReader's usual book menu, and **Close**.
 - **Library from inside a book**: **Library** is the first item in the reader's ☰ menu, and there is a Library tab (book icon) in the reader's top menu bar. Both save your place, close the book and open the Library.
 - **Reader status bar**: when you open a book, the tappable bar at the bottom of the page shows the current page out of the total (for example *42 / 310*), once, if it was showing pages left. A tap cycles through current page, time left in the chapter, time left in the book, percent read, pages left in the chapter, and the clock. Long-press to pick a view, to choose which of those a tap cycles through, or to skim, go to a page, or hide the bar (a tap brings it back). Turn it off in the ☰ menu to leave KOReader's status bar as it is.
 - **Go to page**: tap the page number in the footer (*1 / 50*) and type a page.
@@ -105,9 +108,9 @@ The shots on this page are the v0.5.0 layout, taken in the KOReader emulator wit
 
 ## Install
 
-The current release is **[v0.5.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.5.0)**. Download **[library.koplugin-v0.5.0.zip](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.5.0/downloads/library.koplugin-v0.5.0.zip)** and unzip it. You get a folder called `library.koplugin`.
+The current release is **[v0.6.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.6.0)**. Download **[library.koplugin-v0.6.0.zip](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.6.0/downloads/library.koplugin-v0.6.0.zip)** and unzip it. You get a folder called `library.koplugin`.
 
-SHA256: `b5a3f6429fc370ea17fc57901f2a006664878859dca47cb6d7790b987abaacd9`
+SHA256: `fd1fa0ed1976e1ce522b216332471c8848c3cff20e37de0e800bf8984a0ba69b`
 
 1. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).

@@ -101,5 +101,5 @@ Match the Lua already in `library.koplugin/`.
 ## Building the release zip
 
 ```sh
-make zip VERSION=0.5.0    # dist/library.koplugin-v0.5.0.zip and dist/SHA256SUMS
+make zip VERSION=0.6.0    # dist/library.koplugin-v0.6.0.zip and dist/SHA256SUMS
 ```
