@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.3 (2026-11-10)
 
 - **Updates.** ☰ → Updates, and the same entry under ☰ → Library. **Check for updates now** looks up the latest release. A newer one shows the version and a short changelog. Update checks the published SHA256, replaces `library.koplugin` (the previous folder is kept as `library.koplugin.bak` and put back if the install fails), and offers to restart KOReader. Settings stay in `koreader/settings`. **Automatic updates** are **Notify me** until you change them (an unset choice is Notify me). **Off** turns background checks off; checking by hand still works. **Notify me** looks about once a week, only when Wi-Fi is already on, and only shows a short notice. **Install quietly** does that check and, when a newer release is found and no book is open, downloads it, checks the SHA256, installs it, and says it takes effect at the next restart. It does not turn Wi-Fi on, does not restart KOReader, and says nothing if the install fails. On a Mac, `curl -fsSL https://gitlab.com/antonyvo/koreader-library-gui/-/raw/main/tools/install.sh | bash` does the same install when a Kindle volume is mounted, or with `kpush` when that is on your PATH.
 
