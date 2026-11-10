@@ -16,7 +16,7 @@ stage: clean
 	cd dist/$(PLUGIN) && shasum -a 256 $(FILES) > ../SHA256SUMS 2>/dev/null || sha256sum $(FILES) > ../SHA256SUMS
 
 zip: stage
-	cd dist && zip -rX library-gui-$(VERSION).zip $(PLUGIN) && (shasum -a 256 library-gui-$(VERSION).zip 2>/dev/null || sha256sum library-gui-$(VERSION).zip) >> SHA256SUMS
+	cd dist && zip -rX library.koplugin-v$(VERSION).zip $(PLUGIN) && (shasum -a 256 library.koplugin-v$(VERSION).zip 2>/dev/null || sha256sum library.koplugin-v$(VERSION).zip) >> SHA256SUMS
 
 clean:
 	rm -rf dist

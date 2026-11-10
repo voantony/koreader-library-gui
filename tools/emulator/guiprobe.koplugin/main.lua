@@ -3,7 +3,7 @@ Dev-only probe. Runs inside KOReader, drives Library GUI, and writes PNGs.
 
 Environment:
   GUIPROBE_OUT     directory for PNGs and probe.log (required)
-  GUIPROBE_SCRIPT  scenario name: smoke, footer, az, aznav, toptap (default smoke)
+  GUIPROBE_SCRIPT  scenario name (default smoke). See tools/emulator/README.md.
   GUIPROBE_TAG     optional filename prefix
 
 Scenarios
@@ -17,6 +17,12 @@ Scenarios
           and Last read (off, sort unchanged)
   toptap  in a book: top tap with "Library GUI bar", then "KOReader menu",
           then Book details opened from the reader
+  readme  every README shot that has to be retaken (widgets, accordion,
+          recently added, the shelf pair, the letter bubble, the menu,
+          filter chips, brightness, the gallery, Start with, the reader
+          menu). Each of those names is also its own scenario.
+          These wait until visible covers are on disk. smoke, footer, az,
+          aznav and toptap still shoot as soon as the page is up.
 ]]
 
 local Device = require("device")
@@ -584,6 +590,36 @@ scenarios.toptap = function()
             shot("toptap-03-details-from-reader")
         end)
     end)
+end
+
+local function scriptDir()
+    local src = debug.getinfo(1, "S").source
+    if src:sub(1, 1) == "@" then src = src:sub(2) end
+    return src:match("^(.*)/") or "."
+end
+
+local function shotRaw(name)
+    local path = OUT .. "/" .. TAG .. name .. ".png"
+    Screen:shot(path)
+    P("SHOT", name .. ".png", Screen:getWidth() .. "x" .. Screen:getHeight())
+end
+
+local function again(delay, fn)
+    table.insert(steps, 1, { d = delay, f = fn })
+end
+
+local shots_ok, shots_loader = pcall(dofile, scriptDir() .. "/shots.lua")
+if not shots_ok then
+    P("FAIL loading shots.lua", shots_loader)
+else
+    local extra = shots_loader{
+        P = P, q = q, again = again, shot = shot, shotRaw = shotRaw,
+        V = V, lib = lib, FM = FM, state = state,
+        dismissNotices = dismissNotices, findText = findText, walk = walk,
+        whenLibrary = whenLibrary, RUI = RUI, stackLine = stackLine,
+        Screen = Screen, UIManager = UIManager, Device = Device,
+    }
+    for name, fn in pairs(extra) do scenarios[name] = fn end
 end
 
 function Probe:init()
