@@ -142,7 +142,7 @@ local function stub()
 end
 
 local function withView(fn)
-    local real = { libraryview = true, librarycore = true, librarytile = true, librarycovers = true,
+    local real = { libraryview = true, librarycore = true, libraryzones = true, librarytile = true, librarycovers = true,
         string = true, table = true, math = true, io = true, os = true }
     local base = {}
     base.__index = base

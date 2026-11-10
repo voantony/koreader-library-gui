@@ -1183,6 +1183,41 @@ function Core.viewPick(view_mode, columns)
     return nil
 end
 
+--- Cover sizes, in picker order: Small (5 columns), Medium (4), Large (3).
+Core.COVER_COLUMNS = { 5, 4, 3 }
+
+--- Next cover size after `cols`, wrapping Large back to Small.
+-- The footer size control (issue #5) steps through these.
+function Core.nextColumns(cols)
+    for i, c in ipairs(Core.COVER_COLUMNS) do
+        if c == cols then return Core.COVER_COLUMNS[i % #Core.COVER_COLUMNS + 1] end
+    end
+    return 4 -- unknown count: Medium
+end
+
+--- View forms in picker order.
+Core.VIEW_FORMS = { "grid", "list", "compact", "compact2" }
+
+--- Next view form after `mode`, wrapping back to the grid.
+-- The footer view control (issue #5) steps through these.
+function Core.nextViewMode(mode)
+    mode = Core.viewMode(mode)
+    for i, m in ipairs(Core.VIEW_FORMS) do
+        if m == mode then return Core.VIEW_FORMS[i % #Core.VIEW_FORMS + 1] end
+    end
+    return "grid"
+end
+
+--- Footer view button icon for the current form: the form's columnar
+-- shape (grid: three columns of lines; two-column compact: two; the
+-- one-column forms: one).
+function Core.viewFormIcon(mode)
+    mode = Core.viewMode(mode)
+    if mode == "compact2" then return "column.two" end
+    if mode == "grid" then return "column.three" end
+    return "column.one"
+end
+
 --- List rows of shelves are text only (no cover art) on Authors and Series.
 function Core.textRows(view_mode, kind, tab)
     return Core.viewMode(view_mode) == "list" and kind == "groups" and (tab == "authors" or tab == "series")
@@ -1921,6 +1956,18 @@ function Core.inControlsCorner(x, y, w, h)
     x, y, w, h = tonumber(x), tonumber(y), tonumber(w), tonumber(h)
     if not (x and y and w and h) or w <= 0 or h <= 0 then return false end
     return x >= w * Core.CONTROLS_ZONE_LEFT and y <= h * Core.CONTROLS_ZONE_HEIGHT
+end
+
+--- Which edge of the screen `x` sits on, if it is inside one of the outer
+-- eighths (the strips LiveLight's brightness/warmth slides use): "left",
+-- "right", or nil. `w` is the screen width. On a 1264 px Colorsoft each
+-- strip is 158 px wide.
+function Core.edgeStrip(x, w)
+    x, w = tonumber(x), tonumber(w)
+    if not (x and w) or w <= 0 then return nil end
+    if x < w / 8 then return "left" end
+    if x >= w * 7 / 8 then return "right" end
+    return nil
 end
 
 --- Pixel rectangle { x, y, w, h } of that zone on a screen of `w` × `h`.
@@ -2821,23 +2868,43 @@ function Core.scrubberMode(state)
     return nil
 end
 
+--- `size` items starting at `start` (1-based), or fewer at the end of the
+-- list. Unlike Core.page, the start is explicit: a letter jump shows its
+-- first matching book at the top instead of wherever the page boundary
+-- falls (issue #7).
+function Core.pageFrom(list, start, size)
+    list = list or {}
+    local n = #list
+    start = math.floor(tonumber(start) or 1)
+    if start < 1 then start = 1 end
+    if start > n then start = n > 0 and n or 1 end
+    size = math.max(0, math.floor(tonumber(size) or 0))
+    local out = {}
+    for i = start, math.min(n, start + size - 1) do
+        out[#out + 1] = list[i]
+    end
+    return out
+end
+
 --- First page (1-based) whose item falls under each letter.
 -- `items` is already in the order on screen. `per_page` is how many of
 -- them page 1 holds; `later_per_page` (optional) is how many pages 2+
 -- hold, matching Core.page. Letters with no item are absent from `page`
--- and false in `active`.
+-- and false in `active`. `first` is the index of the first item under
+-- each letter, so a jump can start the page at that book (issue #7).
 function Core.scrubberIndex(items, per_page, key_fn, later_per_page)
     per_page = math.floor(tonumber(per_page) or 1)
     if per_page < 1 then per_page = 1 end
     if type(key_fn) ~= "function" then
         key_fn = function(item) return Core.scrubberItemKey(item, "title") end
     end
-    local page_of = {}
+    local page_of, first_of = {}, {}
     if type(items) == "table" then
         for i, item in ipairs(items) do
             local letter = Core.scrubberBucket(key_fn(item))
             if page_of[letter] == nil then
                 page_of[letter] = Core.pageOfIndex(i, per_page, later_per_page)
+                first_of[letter] = i
             end
         end
     end
@@ -2845,7 +2912,7 @@ function Core.scrubberIndex(items, per_page, key_fn, later_per_page)
     for _, letter in ipairs(Core.SCRUBBER_LETTERS) do
         active[letter] = page_of[letter] ~= nil
     end
-    return { letters = Core.SCRUBBER_LETTERS, page = page_of, active = active }
+    return { letters = Core.SCRUBBER_LETTERS, page = page_of, active = active, first = first_of }
 end
 
 --- Page to open for `letter`, or nil when that letter has nothing under it.
@@ -2855,6 +2922,16 @@ function Core.scrubberTargetPage(index, letter)
     local page = index.page and index.page[letter]
     if type(page) ~= "number" or page < 1 then return nil end
     return page
+end
+
+--- Index (1-based) of the first item under `letter`, or nil when that
+-- letter has nothing under it.
+function Core.scrubberFirstIndex(index, letter)
+    if type(index) ~= "table" or type(letter) ~= "string" then return nil end
+    if not (index.active and index.active[letter]) then return nil end
+    local first = index.first and index.first[letter]
+    if type(first) ~= "number" or first < 1 then return nil end
+    return first
 end
 
 --- Which letter a finger at screen `y` is on. Slots share the strip height

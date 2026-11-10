@@ -58,6 +58,7 @@ local Core = require("librarycore")
 local Scrubber = require("libraryscrubber")
 local Tiles = require("librarytile")
 local Covers = require("librarycovers")
+local Zones = require("libraryzones")
 local Keyboard = require("librarykeyboard")
 local Suggest = require("librarysuggest")
 local Screen = Device.screen
@@ -321,6 +322,15 @@ function LibraryView:buildSearchRow(text)
     self._status_slot_w = status_w
     local field_w = self.width - 2 * margin - status_w - (status_w > 0 and gap or 0)
     if field_w < Screen:scaleBySize(140) then field_w = Screen:scaleBySize(140) end
+    -- What this row will show: what was passed, what the old box held, or
+    -- nothing yet. The clear button is always in the row (issue #6). Showing
+    -- and hiding it does not rebuild this text box: that would drop the
+    -- keyboard. Its slot stays reserved so the field does not jump.
+    if self.search_input then
+        text = text or self.search_input:getText()
+        self.search_input:onCloseWidget() -- frees its keyboard
+    end
+    text = text or ""
     local magnifier = IconButton:new{
         icon = "appbar.search",
         width = icon_size,
@@ -337,14 +347,13 @@ function LibraryView:buildSearchRow(text)
         callback = function() self:clearSearch() end,
         show_parent = self,
     }
-    local input_w = field_w - 2 * border - 2 * hpad - magnifier:getSize().w - clear:getSize().w - 2 * Size.padding.default
-    if self.search_input then
-        text = text or self.search_input:getText()
-        self.search_input:onCloseWidget() -- frees its keyboard
-    end
+    -- Spans in the row: one after the magnifier, and one before the clear button.
+    local gaps = 2
+    local input_w = field_w - 2 * border - 2 * hpad - magnifier:getSize().w
+        - clear:getSize().w - gaps * Size.padding.default
     self._search_hint = self:searchHint()
     self.search_input = SearchInput:new{
-        text = text or "",
+        text = text,
         hint = self._search_hint,
         width = input_w,
         face = face,
@@ -362,6 +371,14 @@ function LibraryView:buildSearchRow(text)
         enter_callback = function() self:closeKeyboard() end,
     }
     local inner_h = math.max(self.search_input:getSize().h, Tiles.minTouch() - 2 * border)
+    local row = {
+        align = "center",
+        magnifier,
+        HorizontalSpan:new{ width = Size.padding.default },
+        self.search_input,
+        HorizontalSpan:new{ width = Size.padding.default },
+        clear,
+    }
     self.search_field = FrameContainer:new{
         padding = 0,
         padding_left = hpad,
@@ -372,17 +389,34 @@ function LibraryView:buildSearchRow(text)
         background = Blitbuffer.COLOR_WHITE,
         CenterContainer:new{
             dimen = Geom:new{ w = field_w - 2 * border - hpad - Size.padding.small, h = inner_h },
-            HorizontalGroup:new{
-                align = "center",
-                magnifier,
-                HorizontalSpan:new{ width = Size.padding.default },
-                self.search_input,
-                HorizontalSpan:new{ width = Size.padding.default },
-                clear,
-            },
+            HorizontalGroup:new(row),
         },
     }
+    self._search_clear = clear
+    self._search_clear_visible = text ~= ""
+    self:setSearchClearShown(text ~= "")
     self:assembleHeader()
+end
+
+--- Paint the clear button only while there is a query. The text box and the
+-- keyboard stay as they are.
+function LibraryView:setSearchClearShown(on)
+    local clear = self._search_clear
+    if not clear then return end
+    on = on and true or false
+    if not clear._library_clear_saved then
+        clear._library_clear_saved = true
+        clear._library_paint = clear.paintTo
+        clear._library_callback = clear.callback
+    end
+    self._search_clear_visible = on
+    if on then
+        clear.paintTo = clear._library_paint
+        clear.callback = clear._library_callback
+    else
+        clear.paintTo = function() end
+        clear.callback = function() end
+    end
 end
 
 --- Width reserved for the clock and battery, from a wide sample so "9:59"
@@ -821,6 +855,32 @@ function LibraryView:buildChips(counts)
     }
 end
 
+--- The current book's cover in the middle of the footer (issue #4): the
+-- same book the Resume button opens, as a miniature with a 2:3 shape.
+-- Tap it to return to the reader. No cover yet: the book's initial in a
+-- bordered box, like the mockup's "B". No book being read: no button, and
+-- the footer is exactly as before. Returns the button and its width.
+function LibraryView:buildCurrentBookButton(height)
+    local book = self.last_book
+    if not book then return nil, 0 end
+    local cover, _w, _h, needs = Tiles.bookCover(self, book,
+        math.floor(height * 2 / 3 + 0.5), height,
+        Core.scrubberBucket(book.title or book.name or ""), nil)
+    if needs and self.missing_covers then
+        local seen = false
+        for _, b in ipairs(self.missing_covers) do
+            if b == book then seen = true break end
+        end
+        if not seen then table.insert(self.missing_covers, book) end
+    end
+    local btn = TapArea:new{
+        min_w = Tiles.minTouch(), min_h = Tiles.minTouch(), align = "center",
+        callback = function() self:onResume() end,
+        cover,
+    }
+    return btn, btn:getSize().w
+end
+
 function LibraryView:buildFooter(page, pages, total, kind)
     local margin = Size.margin.default + Size.padding.default
     local f = Font:getFace("cfont", 15)
@@ -910,6 +970,20 @@ function LibraryView:buildFooter(page, pages, total, kind)
         if not enabled and btn.image then btn.image.dim = true end
         return btn
     end
+    -- Size and view beside the page navigation (issue #5): same thumb-sized
+    -- target as the other chrome buttons, always enabled.
+    local function navButton(icon, callback, hold)
+        return IconButton:new{
+            icon = icon,
+            width = chrome_icon, height = chrome_icon,
+            padding = chrome_pad,
+            enabled = true,
+            allow_flash = false,
+            callback = callback,
+            hold_callback = hold,
+            show_parent = self,
+        }
+    end
     local menu_btn, resume_btn
     for _, item in ipairs(Core.footerChrome(self.last_book ~= nil)) do
         local btn = chromeButton(item)
@@ -918,12 +992,26 @@ function LibraryView:buildFooter(page, pages, total, kind)
     self.footer_menu, self.footer_resume = menu_btn, resume_btn
     local button_gap = Size.padding.small
     local buttons_w = menu_btn:getSize().w + button_gap + resume_btn:getSize().w + Size.padding.default
+    -- Size steps the cover size, view steps the form factor; a long-press
+    -- on either opens the sort and view picker.
+    local size_btn = navButton("zoom.page",
+        function() self:cycleCoverSize() end,
+        function() self:showSortPicker() end)
+    local view_btn = navButton(Core.viewFormIcon(self.view_mode),
+        function() self:cycleViewMode() end,
+        function() self:showSortPicker() end)
+    self.footer_size, self.footer_view = size_btn, view_btn
+    local nav_w = size_btn:getSize().w + button_gap + view_btn:getSize().w + button_gap + pager:getSize().w
+    -- The current book's cover, centred between the text and the pager.
+    -- A touch-sized target; the visible miniature keeps its 2:3 shape.
+    local current_btn, current_w = self:buildCurrentBookButton(Tiles.minTouch())
+    self.footer_current = current_btn
     -- "202 books · Last read ▾": tap it to pick the sort (books only; a
     -- series keeps its reading order).
     local sortable = kind == "books" and not self:inSeries()
     if sortable then left = left .. " \u{25BE}" end
     local max_text = math.max(Screen:scaleBySize(72),
-        self.width - 2 * margin - buttons_w - pager:getSize().w - Size.padding.default)
+        self.width - 2 * margin - buttons_w - nav_w - current_w - Size.padding.default)
     local text = TextWidget:new{ text = left, face = f, fgcolor = Blitbuffer.COLOR_GRAY_4, max_width = max_text }
     self.sort_label = nil
     if sortable then
@@ -931,23 +1019,36 @@ function LibraryView:buildFooter(page, pages, total, kind)
         self.sort_label = text
     end
     local h = math.max(text:getSize().h, pager:getSize().h, menu_btn:getSize().h)
-    local spacer = self.width - 2 * margin - buttons_w - text:getSize().w - pager:getSize().w
+    local rest = self.width - 2 * margin - buttons_w - text:getSize().w - nav_w - current_w
+    local row = {
+        align = "center",
+        menu_btn,
+        HorizontalSpan:new{ width = button_gap },
+        resume_btn,
+        HorizontalSpan:new{ width = Size.padding.default },
+        text,
+    }
+    if current_btn then
+        -- Split the free space around the cover so it sits in the middle.
+        local half = math.max(Size.padding.small, math.floor(rest / 2))
+        table.insert(row, HorizontalSpan:new{ width = half })
+        table.insert(row, current_btn)
+        table.insert(row, HorizontalSpan:new{ width = half })
+    else
+        table.insert(row, HorizontalSpan:new{ width = math.max(Size.padding.small, rest) })
+    end
+    table.insert(row, size_btn)
+    table.insert(row, HorizontalSpan:new{ width = button_gap })
+    table.insert(row, view_btn)
+    table.insert(row, HorizontalSpan:new{ width = button_gap })
+    table.insert(row, pager)
     return FrameContainer:new{
         padding = 0,
         padding_left = margin,
         bordersize = 0,
         width = self.width,
         height = h,
-        HorizontalGroup:new{
-            align = "center",
-            menu_btn,
-            HorizontalSpan:new{ width = button_gap },
-            resume_btn,
-            HorizontalSpan:new{ width = Size.padding.default },
-            text,
-            HorizontalSpan:new{ width = math.max(Size.padding.small, spacer) },
-            pager,
-        },
+        HorizontalGroup:new(row),
     }
 end
 
@@ -1156,7 +1257,10 @@ function LibraryView:buildBody()
     local sep = VerticalSpan:new{ width = Size.padding.small }
     local footer_probe = self:buildFooter(1, 1, 0, data.kind)
     local header_h = self.header and self.header:getSize().h or 0
-    local fixed = header_h + Size.padding.small
+    -- The expand hairline sits between the search bar and the padding under
+    -- it. Count it here so the grid does not run past the bottom of the screen.
+    local rule_h = self._shelf_expanded and (Size.line.thin or 1) or 0
+    local fixed = header_h + rule_h + Size.padding.small
         + tabs:getSize().h + (chips and chips:getSize().h or 0) + sep:getSize().h
         + footer_probe:getSize().h
     local keyboard_h = self:keyboardHeight()
@@ -1176,9 +1280,16 @@ function LibraryView:buildBody()
     self.continue_books = nil
     local continue_books, continue_layout
     local full_h = grid_h
-    if data.kind == "books" and not Core.isCompact(self.view_mode) and Core.showContinue{
-            enabled = self.show_continue, tab = self.tab, group = self.group,
-            query = self.query, filter = self.filter, keyboard = keyboard_h > 0 } then
+    -- A swipe up hides the strip for now (issue #3): the shelf takes its
+    -- space, exactly as when "Show Continue Reading" is off. The flag
+    -- clears itself when there is no strip to hide (another tab, a search,
+    -- the keyboard), so the hairline under the search bar only ever marks
+    -- a real, temporary hide.
+    local strip_possible = data.kind == "books" and not Core.isCompact(self.view_mode) and Core.showContinue{
+        enabled = self.show_continue, tab = self.tab, group = self.group,
+        query = self.query, filter = self.filter, keyboard = keyboard_h > 0 }
+    if not strip_possible then self._shelf_expanded = nil end
+    if strip_possible and not self._shelf_expanded then
         local cbooks = Core.topRowBooks(self.top_row, self.all_books, self.continue_slots, fileExists)
         local min_rest = self.view_mode == "list" and 3 * self.list_row_h or (self.label_h + 100)
         local cl = Core.continueLayout(self.width, full_h, #cbooks, self.continue_label_h,
@@ -1234,6 +1345,10 @@ function LibraryView:buildBody()
         -- The footer still counts all books.
         local grid_items = continue_books and Core.withoutShown(data.items, continue_books) or data.items
         local page_items, page, pages = Core.page(grid_items, first_per, self.page, later_per)
+        -- A letter jump anchors the page at its first matching book (#7):
+        -- the matching books start at the top instead of wherever the page
+        -- boundary falls.
+        page_items = self:anchoredPageItems(grid_items, page_items, page, first_per, later_per, letter_mode)
         return later_layout, page1_layout, page1_h, first_per, later_per, grid_items, page_items, page, pages
     end
     local later_layout, page1_layout, page1_h, first_per, later_per, grid_items, page_items, page, pages = pageSlice()
@@ -1288,18 +1403,27 @@ function LibraryView:buildBody()
     table.insert(self.body, footer)
     if suggest_row then table.insert(self.body, suggest_row) end
 
+    -- While the shelf is expanded by a swipe, a hairline under the search
+    -- bar marks the widgets as only temporarily hidden (issue #3).
+    local frame = {
+        align = "left",
+        self.header,
+    }
+    if self._shelf_expanded then
+        table.insert(frame, LineWidget:new{
+            background = Blitbuffer.COLOR_GRAY_B,
+            dimen = Geom:new{ w = self.dimen.w, h = Size.line.thin },
+        })
+    end
+    table.insert(frame, VerticalSpan:new{ width = Size.padding.small })
+    table.insert(frame, self.body)
     self[1] = FrameContainer:new{
         padding = 0,
         bordersize = 0,
         background = Blitbuffer.COLOR_WHITE,
         width = self.dimen.w,
         height = self.dimen.h,
-        VerticalGroup:new{
-            align = "left",
-            self.header,
-            VerticalSpan:new{ width = Size.padding.small },
-            self.body,
-        },
+        VerticalGroup:new(frame),
     }
     self.body_y = (self.header and self.header:getSize().h or 0) + Size.padding.small
     self.timings.filter_s = time.to_s(t1 - t0)
@@ -1491,7 +1615,21 @@ function LibraryView:applySearch(text)
     self.query = text
     self.page = 1
     if self.timing then self.timing:arm("search", "query=" .. #text) end
+    self:updateSearchClear()
     self:refreshBody()
+end
+
+--- Show the clear (X) button only while there is a query to clear, and hide
+-- it again once the query is empty (issue #6). The text box is not rebuilt
+-- and the keyboard is not reopened.
+function LibraryView:updateSearchClear()
+    if not self.search_input or not self._search_clear then return end
+    local want = self.search_input:getText() ~= ""
+    if want == self._search_clear_visible then return end
+    self:setSearchClearShown(want)
+    if UIManager.setDirty then
+        UIManager:setDirty(self, function() return "ui", self:headerRegion(), true end)
+    end
 end
 
 function LibraryView:clearSearch()
@@ -1801,20 +1939,154 @@ end
 -- neighbouring series instead of wrapping.
 function LibraryView:turnPage(dir, wrap)
     if not self.pages then return end
+    -- A letter jump keeps its own windows: the next page starts where this
+    -- one ended, and the previous page ends where this one starts (#7).
+    if self:_turnAnchoredPage(dir, wrap) then return end
     local target = self.page + dir
     if target >= 1 and target <= self.pages then return self:goToPage(target) end
     if self:inSeries() and self:stepSeries(dir) then return end
     if wrap then self:goToPage(dir > 0 and 1 or self.pages) end
 end
 
-function LibraryView:goToPage(page)
+--- Step the letter-jump window by one page. True when the anchor handled
+-- the turn (including a wrap off either end, which drops back to fixed pages).
+function LibraryView:_turnAnchoredPage(dir, wrap)
+    local anchor = self._jump_anchor
+    if not anchor or type(anchor.index) ~= "number" or type(anchor.count) ~= "number" then
+        return false
+    end
+    if anchor.key ~= self:_jumpAnchorKey() then
+        self._jump_anchor = nil
+        return false
+    end
+    local n = math.floor(tonumber(anchor.n) or 0)
+    if n < 1 then return false end
+    local first_per = math.max(1, math.floor(tonumber(anchor.first_per) or anchor.count))
+    local later_per = math.max(1, math.floor(tonumber(anchor.later_per) or first_per))
+    local function leave()
+        self._jump_anchor = nil
+        self._shelf_expanded = nil
+        if self.inSeries and self:inSeries() and self:stepSeries(dir) then return true end
+        if wrap then self:goToPage(dir > 0 and 1 or self.pages) end
+        return true
+    end
+    local next_index, count, page
+    if dir > 0 then
+        next_index = anchor.index + anchor.count
+        if next_index > n then return leave() end
+        page = Core.pageOfIndex(next_index, first_per, later_per)
+        local cap = (page == 1) and first_per or later_per
+        count = math.min(cap, n - next_index + 1)
+    else
+        if anchor.index <= 1 then return leave() end
+        local back = math.min(later_per, anchor.index - 1)
+        next_index = anchor.index - back
+        if Core.pageOfIndex(next_index, first_per, later_per) == 1 then
+            back = math.min(first_per, anchor.index - 1)
+            next_index = anchor.index - back
+        end
+        count = back
+        page = Core.pageOfIndex(next_index, first_per, later_per)
+    end
+    anchor.index = next_index
+    anchor.count = count
+    self._shelf_expanded = nil
+    -- The footer page is the fixed page that holds the first book on screen.
+    -- A window that reaches the last book is the last page, so Next does not
+    -- look like it has another page of the same books.
+    if next_index + count - 1 >= n then page = self.pages end
+    self:timeStart("page", true)
+    self.page = math.max(1, math.min(page, self.pages))
+    self._turned_ms = time.to_ms(time.now())
+    self:refreshBody(nil, "page")
+    return true
+end
+
+function LibraryView:goToPage(page, anchor)
     if not self.pages then return end
     page = math.max(1, math.min(page, self.pages))
-    if page == self.page then return end
+    if page == self.page and anchor == nil and self._jump_anchor == nil then return end
+    -- The expand is for the page that was showing. Another page draws its
+    -- own layout, and page 2+ never had the Continue strip.
+    if page ~= self.page then self._shelf_expanded = nil end
+    -- A letter jump carries its first matching book: the page is shown from
+    -- that book, so its books start at the top (issue #7). A direct page
+    -- request (the footer number, a long-press) clears the anchor and
+    -- returns to fixed pages. Paging with the arrows keeps the window;
+    -- see _turnAnchoredPage.
+    if anchor then
+        self._jump_anchor = {
+            index = anchor.index, origin = anchor.index, letter = anchor.letter,
+            key = self:_jumpAnchorKey(),
+        }
+    else
+        self._jump_anchor = nil
+    end
     self:timeStart("page", true)
     self.page = page
     self._turned_ms = time.to_ms(time.now())
     self:refreshBody(nil, "page")
+end
+
+--- Jump to a letter on the A–Z strip, with the first matching book at the
+-- top of the grid (issue #7). Returns false when the letter has nothing
+-- under it, or when the view is already showing exactly that jump.
+function LibraryView:jumpToLetter(letter)
+    local index = self.scrubber and self.scrubber.index
+    local page = Core.scrubberTargetPage(index, letter)
+    local first = Core.scrubberFirstIndex(index, letter)
+    if not page or not first then return false end
+    local anchor = self._jump_anchor
+    if page == self.page and anchor and anchor.index == first and anchor.letter == letter then return false end
+    self:goToPage(page, { index = first, letter = letter })
+    return true
+end
+
+--- What the list a letter jump was made on looked like: tab, group, sort,
+-- filter, query, and whether Continue reading takes books out of the grid.
+-- A jump only holds while all of it is unchanged (#7).
+function LibraryView:_jumpAnchorKey()
+    return table.concat({
+        tostring(self.tab), tostring(self.group), tostring(self.sort),
+        tostring(self.filter), tostring(self.query), tostring(self.show_continue),
+    }, "|")
+end
+
+--- The page's items when a letter jump is holding the view (#7): the page
+-- starts at the anchor instead of at the fixed page boundary. Paging keeps
+-- that window and continues from either end. Returns `page_items` unchanged
+-- when there is no jump, the list has changed since the jump, or the book
+-- the jump landed on no longer falls under that letter.
+function LibraryView:anchoredPageItems(grid_items, page_items, page, first_per, later_per, letter_mode)
+    local anchor = self._jump_anchor
+    if not anchor or type(anchor.index) ~= "number" or type(anchor.letter) ~= "string" then return page_items end
+    if anchor.key ~= self:_jumpAnchorKey() then self._jump_anchor = nil; return page_items end
+    if type(letter_mode) ~= "string" then self._jump_anchor = nil; return page_items end
+    grid_items = grid_items or {}
+    local origin = anchor.origin or anchor.index
+    local item = grid_items[origin]
+    if not item or Core.scrubberBucket(Core.scrubberItemKey(item, letter_mode)) ~= anchor.letter then
+        self._jump_anchor = nil
+        return page_items
+    end
+    local first = math.max(1, math.floor(tonumber(first_per) or 1))
+    local later = math.max(1, math.floor(tonumber(later_per) or first))
+    local size = anchor.count
+    if type(size) ~= "number" then
+        size = (page == 1) and first or later
+    end
+    local n = #grid_items
+    if anchor.index > n then
+        self._jump_anchor = nil
+        return page_items
+    end
+    size = math.min(math.max(1, math.floor(size)), n - anchor.index + 1)
+    anchor.count = size
+    anchor.first_per = first
+    anchor.later_per = later
+    anchor.n = n
+    anchor.origin = origin
+    return Core.pageFrom(grid_items, anchor.index, size)
 end
 
 function LibraryView:onNextPage() self:turnPage(1); return true end
@@ -1938,6 +2210,28 @@ function LibraryView:tryOpenControlsFromTap(ges)
     return false
 end
 
+--- Gestures the view itself does not keep go to the file browser underneath
+-- (issue #8): UIManager only delivers an event to the topmost widget, so
+-- without this the file browser's zones -- LiveLight's edge slides,
+-- KOReader's own edge swipes and menu gestures -- never see anything while
+-- the Library is showing. The view's own widgets and handlers run first;
+-- only what they leave is offered on. A gesture-lock screensaver is left
+-- alone so its wake gesture still reaches it.
+function LibraryView:handleEvent(event)
+    if event.handler == "onGesture" then
+        if Device.screen_saver_lock then return false end
+        if InputContainer.handleEvent(self, event) then return true end
+        local ev = event.args and event.args[1]
+        if ev and Zones.tryLiveZones(ev) then return true end
+        return false
+    end
+    -- A Dispatcher action the view does not handle (a Gestures-plugin
+    -- binding fired by the zone walk above, issue #9) goes to the file
+    -- browser, which is the widget that can run it.
+    if InputContainer.handleEvent(self, event) then return true end
+    return Zones.forwardToLive(event, self)
+end
+
 function LibraryView:onSwipe(_, ges)
     if self.scrubber and self.scrubber._drag then
         local pos = ges and (ges.end_pos or ges.pos)
@@ -1950,17 +2244,58 @@ function LibraryView:onSwipe(_, ges)
         self.scrubber:onSwipeScrubber(nil, ges)
         return true
     end
+    -- A horizontal swipe the reader gave their own action in KOReader's
+    -- Gestures (top/bottom edge swipes, issue #9) runs that action before
+    -- the Library turns its page. Only a configured one fires; anything
+    -- else falls through to the page turn below.
+    local d = ges and ges.direction
+    if (d == "west" or d == "east") and Zones.tryUserFirst(ges, Zones.liveHost()) then
+        return true
+    end
+    -- A vertical slide that starts on an edge strip is LiveLight's (issue #8):
+    -- brightness on the left, warmth on the right. Offer it to the file
+    -- browser's zones first; if nothing there takes it (LiveLight off, or
+    -- the edge set to Off), it falls through to the shelf expand below. The
+    -- A–Z strip and the Controls corner above keep their own gestures.
+    if (d == "north" or d == "south") and ges.pos and Core.edgeStrip(ges.pos.x, self.dimen.w) then
+        if Zones.tryLiveZones(ges) then return true end
+    end
     -- Left is next, right is previous. Up and down are not page turns.
     -- They are still consumed: the file browser under the Library must not
-    -- see them. A diagonal that is not the Controls gesture is left alone
-    -- (a long diagonal swipe is also how KOReader takes a screenshot).
+    -- see them, except for an edge-starting slide, which is offered to its
+    -- zones above (issue #8). A diagonal that is not the Controls gesture
+    -- is left alone (a long diagonal swipe is also how KOReader takes a
+    -- screenshot).
+    -- A straight up/down swipe expands or restores the shelf (issue #3).
     local turn = Core.libraryPageTurn(ges and ges.direction)
     if not turn then
-        local d = ges and ges.direction
-        if d == "north" or d == "south" then return true end
+        if d == "north" or d == "south" then
+            self:toggleShelfExpand(d == "north", ges)
+            return true
+        end
         return false
     end
     self:turnPage(turn, true)
+    return true
+end
+
+--- Swipe up on the lower library area hides the Continue strip for now
+-- (issue #3); swipe down brings it back. Only a real swipe counts: a
+-- tap that drifted a little (tapWasSwipe) has no end_pos, so it still
+-- opens the book instead of expanding. The swipe must start below the
+-- search bar, and expanding only applies while a strip is showing.
+function LibraryView:toggleShelfExpand(expand, ges)
+    local pos = ges and ges.pos
+    if not (ges and ges.end_pos and pos and pos.y) then return false end
+    if self.body_y and pos.y < self.body_y then return false end
+    if expand then
+        if self._shelf_expanded or not self.continue_books then return false end
+        self._shelf_expanded = true
+    else
+        if not self._shelf_expanded then return false end
+        self._shelf_expanded = nil
+    end
+    self:refreshBody(true, "shelf")
     return true
 end
 
@@ -2223,6 +2558,30 @@ function LibraryView:setViewMode(mode)
     self:rememberPref("view", self.view_mode)
     self.page = 1
     self:refreshBody(true)
+end
+
+--- Footer size control (issue #5): tap steps the cover size Small ->
+-- Medium -> Large, switching to the grid form; hold opens the sort and
+-- view picker. The columns setting is saved, like the picker does.
+function LibraryView:cycleCoverSize()
+    local cols = Core.nextColumns(self.cols)
+    if self.plugin and self.plugin.settings then
+        self.plugin.settings.columns = cols
+        if self.plugin.saveSettings then self.plugin:saveSettings() end
+    end
+    -- One rebuild: setColumns and setViewMode each refresh on their own.
+    self.cols = cols
+    if self.cover_cache and self.cover_cache.clear then self.cover_cache:clear() end
+    self.view_mode = Core.viewMode("grid")
+    self:rememberPref("view", self.view_mode)
+    self.page = 1
+    self:refreshBody(true)
+end
+
+--- Footer view control (issue #5): tap steps the form factor Grid ->
+-- List -> Compact -> Compact 2 columns; hold opens the picker.
+function LibraryView:cycleViewMode()
+    self:setViewMode(Core.nextViewMode(self.view_mode))
 end
 
 function LibraryView:setShowContinue(on)

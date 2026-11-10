@@ -43,7 +43,6 @@ local DEFAULTS = {
     top_row = "continue",    -- what that strip shows: "continue" | "recent" (Recently opened)
     max_depth = 10,
     show_hidden = false,
-    start_with_library = false, -- open the Library instead of the file browser
     return_to_library = true,   -- when the Library is the home screen, come back to it after reading
     debounce_ms = 150,
     barely_threshold = 0.10,    -- "Barely started" when chapters are unknown: below this fraction
@@ -112,13 +111,36 @@ local function collate(a, b)
 end
 Library.collate = collate
 
+--- Tag broadcast events so the view's host-forwarding can tell them apart
+-- from events sent to the top widget only (issue #9): a broadcast already
+-- reaches the file browser directly, so forwarding it again would run
+-- toggle actions twice. Install is idempotent: init runs once per host
+-- context (file browser and reader). Mirrors Bookshelf's
+-- _installBroadcastTag, including the bare-string guard: some plugins call
+-- broadcastEvent with a string as the event name, and writing a field to
+-- a string crashes the VM.
+local function installBroadcastTag()
+    if UIManager._library_broadcast_wrapped then return end
+    UIManager._library_broadcast_wrapped = true
+    local orig = UIManager.broadcastEvent
+    UIManager.broadcastEvent = function(self_um, event, ...)
+        if type(event) == "table" then
+            event._library_from_broadcast = true
+        end
+        return orig(self_um, event, ...)
+    end
+end
+
 function Library:init()
+    installBroadcastTag()
     self.settings = G_reader_settings:readSetting(SETTINGS_KEY) or {}
     -- The old checkbox has to be read before the default writes top_tap = "bar".
     require("libraryreadermenu").migrateTopTap(self.settings)
     for k, v in pairs(DEFAULTS) do
         if self.settings[k] == nil then self.settings[k] = v end
     end
+    self:migrateStartupSetting()
+    self:registerStartWithMenu()
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
     if self.ui.document then
@@ -135,7 +157,7 @@ function Library:init()
         shared.started = true
         shared.reopen = false
         UIManager:nextTick(function() self:onShowLibrary(focus_search) end)
-    elseif not self.ui.document and self.settings.start_with_library then
+    elseif not self.ui.document and self:isHomeScreen() then
         local first = not shared.started
         local back_from_book = shared.reopen and self.settings.return_to_library
         if first or back_from_book then
@@ -143,6 +165,102 @@ function Library:init()
             shared.reopen = false
             UIManager:nextTick(function() self:onShowLibrary() end)
         end
+    end
+end
+
+--- True when KOReader's own "Start with" setting points at the Library:
+-- the Library is the home screen (issue #10).
+function Library:isHomeScreen()
+    return G_reader_settings:readSetting("start_with") == "library"
+end
+
+--- Migration from the plugin's own "Open Library at startup" toggle
+-- (removed in favour of KOReader's Start with setting, issue #10).
+-- A user who had it on, and whose Start with is still the file browser
+-- (unset or "filemanager"), moves to Start with → library. The old key
+-- is removed only once Start with is library, including when it was
+-- already library. An explicit choice such as history, last, or
+-- favorites is left as it is, and the old key is kept: it is not
+-- thrown away, and if Start with is later put back to the file browser
+-- the next start can still migrate.
+function Library:migrateStartupSetting()
+    if not self.settings.start_with_library then return end
+    local start_with = G_reader_settings:readSetting("start_with")
+    if start_with == nil or start_with == "filemanager" then
+        G_reader_settings:saveSetting("start_with", "library")
+        if G_reader_settings.flush then G_reader_settings:flush() end
+        start_with = "library"
+    end
+    if start_with ~= "library" then return end
+    self.settings.start_with_library = nil
+    self:saveSettings()
+end
+
+--- The Library plugin on the file browser that is open now. The Start
+-- with menu is patched once, from whichever instance inits first, so the
+-- callback must not keep that instance: a reader that loaded first would
+-- show the Library through a UI that has already closed.
+local function liveLibrary()
+    local FM = package.loaded["apps/filemanager/filemanager"]
+    local ui = FM and FM.instance
+    local plugin = ui and ui.library
+    if plugin and plugin.onShowLibrary then return plugin end
+end
+
+--- Offer the Library in KOReader's file-browser "Start with" menu, the way
+-- BookShelf does (issue #10). KOReader builds that submenu lazily in
+-- FileManagerMenu:getStartWithMenuTable(), after addToMainMenu callbacks
+-- have fired, so the only reliable injection point is a class-level wrap
+-- of that method. The wrap is idempotent, and a no-op when the KOReader
+-- menu module is unavailable (older KOReader, or the spec harness).
+function Library:registerStartWithMenu()
+    local ok, FMMenu = pcall(require, "apps/filemanager/filemanagermenu")
+    if not ok or type(FMMenu) ~= "table" or type(FMMenu.getStartWithMenuTable) ~= "function" then
+        logger.dbg("Library: FileManagerMenu not available; skipping Start with registration")
+        return
+    end
+    if FMMenu._library_patched then return end
+    FMMenu._library_patched = true
+    local orig_fn = FMMenu.getStartWithMenuTable
+    FMMenu.getStartWithMenuTable = function(self_fm)
+        local result = orig_fn(self_fm)
+        if type(result) ~= "table" or type(result.sub_item_table) ~= "table" then
+            return result
+        end
+        local already = false
+        for i, entry in ipairs(result.sub_item_table) do
+            if entry.text == _("library") then already = true break end
+        end
+        if not already then
+            table.insert(result.sub_item_table, {
+                text = _("library"),
+                radio = true,
+                checked_func = function()
+                    return G_reader_settings:readSetting("start_with") == "library"
+                end,
+                callback = function(touchmenu_instance)
+                    G_reader_settings:saveSetting("start_with", "library")
+                    if G_reader_settings.flush then G_reader_settings:flush() end
+                    if touchmenu_instance then touchmenu_instance:closeMenu() end
+                    -- Show the Library now (onShowLibrary just refocuses
+                    -- when it is already up). The live file browser's
+                    -- plugin, not the instance that first patched the menu.
+                    local plugin = liveLibrary()
+                    if plugin then plugin:onShowLibrary() end
+                end,
+            })
+        end
+        -- Upstream text_func only knows its own hard-coded values, so a
+        -- "library" home would read as "Start with: file browser".
+        -- Label ours; defer to the original for everything else.
+        local orig_text_func = result.text_func
+        result.text_func = function()
+            if G_reader_settings:readSetting("start_with") == "library" then
+                return T(_("Start with: %1"), _("library"))
+            end
+            return orig_text_func and orig_text_func() or ""
+        end
+        return result
     end
 end
 
@@ -1054,14 +1172,6 @@ function Library:showLibraryMenu(view)
     end
     table.insert(buttons, {
         {
-            text = (self.settings.start_with_library and "✓ " or "") .. _("Start with Library"),
-            callback = function()
-                close()
-                self.settings.start_with_library = not self.settings.start_with_library
-                self:saveSettings()
-            end,
-        },
-        {
             text = _("Rescan"),
             callback = function()
                 close()
@@ -1382,17 +1492,9 @@ function Library:addToMainMenu(menu_items)
                 separator = true,
             },
             {
-                text = _("Open Library at startup"),
-                help_text = _("Show the Library instead of the file browser when KOReader starts. Close the Library (X) to get to the file browser."),
-                checked_func = function() return self.settings.start_with_library end,
-                callback = function()
-                    self.settings.start_with_library = not self.settings.start_with_library
-                    self:saveSettings()
-                end,
-            },
-            {
                 text = _("Return to Library after closing a book"),
-                enabled_func = function() return self.settings.start_with_library end,
+                help_text = _("When the Library is your home screen (Start with → library in the file browser menu), come back to it after closing a book."),
+                enabled_func = function() return self:isHomeScreen() end,
                 checked_func = function() return self.settings.return_to_library end,
                 callback = function()
                     self.settings.return_to_library = not self.settings.return_to_library

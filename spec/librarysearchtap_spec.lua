@@ -18,7 +18,7 @@ end
 local function withStubbedUI(fn)
     local saved_loaded, saved_preload = {}, {}
     local real = {
-        libraryview = true, librarycore = true, librarytile = true, librarycovers = true,
+        libraryview = true, librarycore = true, libraryzones = true, librarytile = true, librarycovers = true,
         string = true, table = true, math = true, io = true, os = true,
     }
     local base_class = {}

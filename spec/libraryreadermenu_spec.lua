@@ -364,7 +364,7 @@ describe("Simple reader menu: the top tap", function()
     end)
     it("reads a turned-off Simple reader menu as KOReader menu at startup", function()
         local Library = mainLib()
-        local stored = { simple_reader_menu = false, start_with_library = false }
+        local stored = { simple_reader_menu = false }
         _G.G_reader_settings = {
             readSetting = function() return stored end,
             saveSetting = function() end,
@@ -378,7 +378,7 @@ describe("Simple reader menu: the top tap", function()
         eq(self.settings.top_tap, "koreader")
         eq(self.settings.simple_reader_menu, false)
         -- a fresh install still gets the bar
-        stored = { start_with_library = false }
+        stored = {}
         local fresh = setmetatable({ ui = ui }, { __index = Library })
         Library.init(fresh)
         eq(fresh.settings.top_tap, "bar")
