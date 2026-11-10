@@ -431,6 +431,36 @@ describe("Exit KOReader", function()
         runTicks()
         eq(table.concat(log, ";"), "event IterateRotation")
     end)
+    it("closes the Library, rotates, then rebuilds it where it was", function()
+        local Library = mainLib()
+        local log = {}
+        local ui = { handleEvent = function(_, ev) log[#log + 1] = "event " .. ev.name end }
+        local self = setmetatable({ settings = {}, ui = ui }, { __index = Library })
+        local restored
+        local view = { placeState = function() return { tab = "authors", page = 3 } end }
+        Library.shared.view = view
+        self.onShowLibrary = function()
+            log[#log + 1] = "show"
+            Library.shared.view = {
+                restorePlace = function(_, st)
+                    restored = st
+                    log[#log + 1] = "restore"
+                end,
+            }
+            return true
+        end
+        package.loaded["apps/reader/readerui"] = nil
+        package.loaded["apps/filemanager/filemanager"] = { instance = { library = self } }
+        eq(self:rotateForEvent({ name = "IterateRotation" }), true)
+        eq(closed[#closed], view, "the old layout is closed before the screen turns")
+        eq(table.concat(log, ";"), "event IterateRotation")
+        runTicks()
+        eq(table.concat(log, ";"), "event IterateRotation;show;restore")
+        eq(restored.tab, "authors")
+        eq(restored.page, 3)
+        Library.shared.view = nil
+        package.loaded["apps/filemanager/filemanager"] = nil
+    end)
 end)
 
 describe("Packaging", function()

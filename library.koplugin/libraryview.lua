@@ -31,6 +31,7 @@ opens KOReader's InputDialog instead, and leaves this keyboard unused.
 
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
+local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -55,6 +56,7 @@ local TopContainer = require("ui/widget/container/topcontainer")
 local time = require("ui/time")
 local util = require("util")
 local Core = require("librarycore")
+local Gestures = require("librarygestures")
 local Scrubber = require("libraryscrubber")
 local Tiles = require("librarytile")
 local Covers = require("librarycovers")
@@ -2609,26 +2611,171 @@ end
 -- Hold and double-tap in the bottom-left corner belong to the file
 -- browser's corner gestures, not to the menu button that sits there.
 -- A tap is not in this set: a tap on the button opens the menu (#1).
+-- A downward swipe from the top edge is the file browser's top menu
+-- (issue #9). It is offered before the grid, the search bar and the A–Z
+-- strip, which would otherwise keep it. The Controls panel still wins
+-- in its own corner when that panel is switched on.
 local CORNER_GESTURE = { hold = true, hold_release = true, double_tap = true }
+
+-- What the letter strip actually handles. A two-finger swipe or a
+-- multiswipe that happens to start on the strip is not one of these, so
+-- it is still offered to the file browser (issue #9).
+local STRIP_GESTURE = {
+    tap = true, touch = true, swipe = true,
+    pan = true, pan_release = true,
+    hold = true, hold_pan = true, hold_release = true,
+}
+
+local ROTATION_EVENT = {
+    onIterateRotation = true,
+    onSwapRotation = true,
+    onInvertRotation = true,
+    onSetRotationMode = true,
+}
+
+function LibraryView:gestureSettings()
+    return self.plugin and self.plugin.settings
+end
+
+--- "filebrowser" when this library has no gesture menu choice yet.
+function LibraryView:gestureChoice(slot)
+    local G = package.loaded.librarygestures or Gestures
+    if type(G) ~= "table" or type(G.choice) ~= "function" then return "filebrowser" end
+    local value = G.choice(self:gestureSettings(), slot)
+    if type(value) ~= "string" then return "filebrowser" end
+    return value
+end
+
+function LibraryView:gestureSlot(ev)
+    local G = package.loaded.librarygestures or Gestures
+    if type(G) ~= "table" or type(G.slotFor) ~= "function" or not self.dimen then return nil end
+    local slot = G.slotFor(ev, self.dimen.w, self.dimen.h)
+    if type(slot) ~= "string" then return nil end
+    return slot
+end
+
+--- Run an action the reader picked for this gesture. True when the gesture
+-- is finished with (including "nothing", which does not reach the file browser).
+function LibraryView:runLibraryGesture(action, ev)
+    local plugin = self.plugin
+    if action == "nothing" then return true end
+    if action == "show_menu" then
+        if Zones.tryMenuSwipe and Zones.tryMenuSwipe(ev) then return true end
+        if plugin and plugin.showKoreaderMenu then plugin:showKoreaderMenu(ev) end
+        return true
+    end
+    if action == "rotate_cw" or action == "rotate_ccw" or action == "toggle_orientation" then
+        if plugin and plugin.rotateForEvent and Event and Event.new then
+            local name = action == "toggle_orientation" and "SwapRotation" or "IterateRotation"
+            local arg = action == "rotate_ccw" and true or nil
+            plugin:rotateForEvent(Event:new(name, arg))
+        end
+        return true
+    end
+    if action == "brightness" then
+        local kind = ev and (ev.ges == "pan" or ev.ges == "hold_pan" or ev.ges == "pan_release"
+            or ev.ges == "hold_release") and ev.ges or "swipe"
+        self:trackEdgeLight(kind, ev, true)
+        return true
+    end
+    if action == "warmth" then
+        if Zones.tryLiveZones then Zones.tryLiveZones(ev) end
+        return true
+    end
+    if action == "open_book" then
+        if plugin and plugin.onLibraryResume then plugin:onLibraryResume() end
+        return true
+    end
+    if action == "library_menu" then
+        if plugin and plugin.showLibraryMenu then plugin:showLibraryMenu(self) end
+        return true
+    end
+    if action == "controls" then
+        if plugin and plugin.openControls then plugin:openControls() end
+        return true
+    end
+    if action == "page_next" or action == "page_prev" then
+        self:turnPage(action == "page_next" and 1 or -1, true)
+        return true
+    end
+    return false
+end
+
+--- A gesture the reader gave their own action, or turned off. False when
+-- the choice is still "same as file browser", so the existing path runs.
+function LibraryView:libraryGesture(ev)
+    local slot = self:gestureSlot(ev)
+    if not slot or slot == "other" then return false end
+    local choice = self:gestureChoice(slot)
+    if choice == "filebrowser" then return false end
+    local moving = ev.ges == "pan" or ev.ges == "hold_pan"
+        or ev.ges == "pan_release" or ev.ges == "hold_release"
+    if moving and choice ~= "nothing" and choice ~= "brightness" and choice ~= "warmth" then
+        return false
+    end
+    return self:runLibraryGesture(choice, ev)
+end
+
+--- Unlisted gestures (and "other") are forwarded only while that switch
+-- is still "same as file browser". A listed gesture set to something else
+-- was already handled.
+function LibraryView:forwardSpareGesture(ev)
+    local slot = self:gestureSlot(ev)
+    if slot and slot ~= "other" and self:gestureChoice(slot) ~= "filebrowser" then
+        return false
+    end
+    if (not slot or slot == "other") and self:gestureChoice("other") == "nothing" then
+        return false
+    end
+    return true
+end
 
 function LibraryView:cornerGestureFirst(ev)
     if not (ev and CORNER_GESTURE[ev.ges] and ev.pos and self.dimen) then return false end
     if not Core.inBottomLeftCorner(ev.pos.x, ev.pos.y, self.dimen.w, self.dimen.h) then
         return false
     end
+    if self:gestureChoice("hold_bl") == "nothing" then return true end
     return Zones.tryLiveZones(ev) and true or false
+end
+
+--- The strip keeps a tap, a one-finger swipe or a drag that started on it.
+-- Anything else (a two-finger swipe, a multiswipe) is not the strip's.
+function LibraryView:scrubberKeeps(ev)
+    return ev and STRIP_GESTURE[ev.ges] and self:gestureOnScrubber(ev) and true or false
+end
+
+--- Downward swipe from the top edge: the file browser's top menu, unless
+-- the Controls panel is on and the swipe started in its corner.
+function LibraryView:topMenuSwipeFirst(ev)
+    if not (ev and ev.ges == "swipe" and ev.direction == "south") then return false end
+    if self:gestureChoice("top_down") ~= "filebrowser" then return false end
+    if self:tryOpenControls(ev) then return true end
+    if not Zones.tryMenuSwipe then return false end
+    return Zones.tryMenuSwipe(ev) and true or false
 end
 
 function LibraryView:handleEvent(event)
     if event.handler == "onGesture" then
         if Device.screen_saver_lock then return false end
         local ev = event.args and event.args[1]
+        if ev and self:libraryGesture(ev) then return true end
         if ev and self:cornerGestureFirst(ev) then return true end
+        if ev and self:topMenuSwipeFirst(ev) then return true end
         if InputContainer.handleEvent(self, event) then return true end
-        -- A gesture that started on the A–Z strip is never offered to
-        -- LiveLight. The strip picks the letter, including a vertical swipe.
-        if ev and not self:gestureOnScrubber(ev) and Zones.tryLiveZones(ev) then return true end
+        -- A one-finger gesture that started on the A–Z strip is never
+        -- offered to LiveLight. The strip picks the letter.
+        if ev and not self:scrubberKeeps(ev) and self:forwardSpareGesture(ev)
+            and Zones.tryLiveZones(ev) then
+            return true
+        end
         return false
+    end
+    -- Rotation has to rebuild this view: the file browser turns the screen
+    -- and lays itself out again, and leaves the Library at the old size
+    -- (issue #9).
+    if ROTATION_EVENT[event.handler] and self.plugin and self.plugin.rotateForEvent then
+        return self.plugin:rotateForEvent(event) and true or false
     end
     -- A Dispatcher action the view does not handle (a Gestures-plugin
     -- binding fired by the zone walk above, issue #9) goes to the file
@@ -2657,8 +2804,10 @@ function LibraryView:onSwipe(_, ges)
     -- the Library turns its page. Only a configured one fires; anything
     -- else falls through to the page turn below.
     local d = ges and ges.direction
-    if (d == "west" or d == "east") and Zones.tryUserFirst(ges, Zones.liveHost()) then
-        return true
+    if d == "west" or d == "east" then
+        local slot = self:gestureSlot({ ges = "swipe", direction = d, pos = ges.pos or ges.start_pos })
+        local skip = (slot == "top_side" or slot == "bottom_side") and self:gestureChoice(slot) == "nothing"
+        if not skip and Zones.tryUserFirst(ges, Zones.liveHost()) then return true end
     end
     -- A vertical slide that starts on an edge is LiveLight's (issue #8):
     -- brightness on the left, warmth on the right. The A–Z strip already
@@ -2666,7 +2815,8 @@ function LibraryView:onSwipe(_, ges)
     -- swipe that started outside the strip (above or below a short column).
     -- If nothing there takes it, the shelf expand below still runs.
     if (d == "north" or d == "south") and ges.pos and Core.edgeStrip(ges.pos.x, self.dimen.w) then
-        if Zones.tryLiveZones(ges) then return true end
+        local slot = self:gestureSlot({ ges = "swipe", direction = d, pos = ges.pos })
+        if self:gestureChoice(slot or "") == "filebrowser" and Zones.tryLiveZones(ges) then return true end
     end
     -- Left is next, right is previous. Up and down are not page turns.
     -- They are still consumed: the file browser under the Library must not
@@ -2854,7 +3004,7 @@ end
 --- Left-edge brightness. True when this gesture is part of that slide.
 -- A touch that started on the A–Z strip is not one. No frontlight: false,
 -- so the file browser's own zones still get it.
-function LibraryView:trackEdgeLight(kind, ges)
+function LibraryView:trackEdgeLight(kind, ges, anywhere)
     if type(ges) ~= "table" or not self.dimen then return false end
     local start = ges.start_pos or ges.pos
     if self._edge then
@@ -2871,8 +3021,8 @@ function LibraryView:trackEdgeLight(kind, ges)
         return false
     end
     if not (start and start.x and start.y) then return false end
-    if self:gestureOnScrubber({ pos = start, start_pos = start }) then return false end
-    if Core.edgeStrip(start.x, self.dimen.w) ~= "left" then return false end
+    if not anywhere and self:gestureOnScrubber({ pos = start, start_pos = start }) then return false end
+    if not anywhere and Core.edgeStrip(start.x, self.dimen.w) ~= "left" then return false end
     if kind == "pan" or kind == "hold_pan" then
         local rel = ges.relative
         if rel and math.abs(rel.y or 0) < math.abs(rel.x or 0) then return false end

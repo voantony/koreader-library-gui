@@ -19,7 +19,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 scenario="${1:-}"
 if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
-    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|aznav|toptap|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gallery|readme>" >&2
+    echo "usage: tools/emulator/shoot.sh <smoke|footer|az|aznav|toptap|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|gallery|readme>" >&2
     echo "  EMU_OUT     output directory (default: emulator-out/<scenario>)" >&2
     echo "  EMU_PLUGIN  library.koplugin to copy (default: ./library.koplugin)" >&2
     echo "  EMU_COUNT   books in the seeded library (default: 200)" >&2
@@ -28,7 +28,7 @@ if [[ -z "$scenario" || "$scenario" == "-h" || "$scenario" == "--help" ]]; then
     exit 2
 fi
 case "$scenario" in
-    smoke|footer|az|aznav|toptap|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gallery|readme) ;;
+    smoke|footer|az|aznav|toptap|widgets|accordion|recently|shelf|bubble|menu|filters|brightness|startwith|controls|gestures|gesturemenu|gallery|readme) ;;
     *) echo "unknown scenario: $scenario" >&2; exit 2 ;;
 esac
 
@@ -88,7 +88,10 @@ display_num=99
 while [[ -e "/tmp/.X${display_num}-lock" || -e "/tmp/.X11-unix/X${display_num}" ]]; do
     display_num=$((display_num + 1))
 done
-xvfb_geom="$((EMU_W + 64))x$((EMU_H + 64))x24"
+# Square enough for a rotation: the logical screen swaps width and height.
+xvfb_side="$EMU_W"
+if (( EMU_H > xvfb_side )); then xvfb_side="$EMU_H"; fi
+xvfb_geom="$((xvfb_side + 64))x$((xvfb_side + 64))x24"
 Xvfb ":$display_num" -screen 0 "$xvfb_geom" -nolisten tcp >"$out/xvfb.log" 2>&1 &
 xvfb_pid=$!
 for _ in 1 2 3 4 5 6 7 8 9 10; do

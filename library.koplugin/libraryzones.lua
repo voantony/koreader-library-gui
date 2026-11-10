@@ -28,6 +28,10 @@ not handle it. That half of the circuit is closed by issue #9
 forwarded to the live host, with the broadcast tag (stamped by the
 installer in main.lua) keeping broadcast events from being delivered
 twice. LiveLight needs none of this: it drives the frontlight directly.
+
+The file browser's top menu is not one of those Dispatcher actions. A
+downward swipe from the top edge is the menu module's own zone
+(tryMenuSwipe). The host's fullscreen swipe must not take it first.
 ]]
 
 local logger = require("logger")
@@ -37,9 +41,16 @@ local Zones = {}
 -- Shared zone walk: the host's own _ordered_touch_zones plus every child
 -- module's. `allowed(id)` is the per-host id filter; exclude_child skips
 -- one specific child.
-local function tryHostZones(ev, host, allowed, exclude_child)
+-- `skip_own` leaves out the host's own zones. The file browser's fullscreen
+-- filemanager_swipe turns pages and returns true for every direction, so a
+-- downward swipe in the top menu band has to reach the menu module's zone
+-- and not that one.
+local function tryHostZones(ev, host, allowed, exclude_child, skip_own)
     if not host then return false end
-    local zone_lists = { host._ordered_touch_zones }
+    local zone_lists = {}
+    if not skip_own then
+        zone_lists[1] = host._ordered_touch_zones
+    end
     for _, child in ipairs(host) do
         if child ~= exclude_child
            and type(child) == "table"
@@ -114,6 +125,23 @@ function Zones.tryUserFirst(ev, fm)
     return tryHostZones(ev, fm, function(id)
         return USER_FIRST_SWIPE[id] and user_gestures[id] ~= nil
     end, fm.file_chooser)
+end
+
+-- tryMenuSwipe(ev) -> boolean
+-- A downward swipe in the file browser's top menu band (issue #9). KOReader
+-- opens the top menu from the menu module's filemanager_swipe /
+-- filemanager_ext_swipe zones, and only for direction "south". The host's
+-- own filemanager_swipe is fullscreen and would swallow the swipe, so it
+-- is not walked.
+local MENU_SWIPE = {
+    filemanager_swipe = true,
+    filemanager_ext_swipe = true,
+}
+function Zones.tryMenuSwipe(ev)
+    if not (ev and ev.ges == "swipe" and ev.direction == "south") then return false end
+    return tryHostZones(ev, Zones.liveHost(), function(id)
+        return MENU_SWIPE[id] == true
+    end, nil, true)
 end
 
 -- ── Forwarding Dispatcher actions to the host (issue #9) ───────────────────

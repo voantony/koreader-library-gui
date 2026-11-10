@@ -1,8 +1,8 @@
 # KOReader's own LuaJIT works too, e.g. LUA=/path/to/koreader/luajit
 LUA ?= luajit
 PLUGIN := library.koplugin
-VERSION ?= 0.6.0
-FILES := _meta.lua main.lua librarycore.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua libraryfooter.lua libraryrefresh.lua libraryreadability.lua librarysuggest.lua librarytiming.lua libraryscrubber.lua libraryzones.lua librarywidgets.lua
+VERSION ?= 0.7.0
+FILES := _meta.lua main.lua librarycore.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua libraryfooter.lua libraryrefresh.lua libraryreadability.lua librarysuggest.lua librarytiming.lua libraryscrubber.lua libraryzones.lua librarygestures.lua librarywidgets.lua
 
 .PHONY: test zip stage clean
 
