@@ -266,7 +266,7 @@ function TapArea:init()
         w = math.max(size.w, self.min_w or 0),
         h = math.max(size.h, self.min_h or 0),
     }
-    local range = function() return self.dimen end
+    local range = function() return Core.gestureRect(self.dimen) end
     self.ges_events = { TapArea = { GestureRange:new{ ges = "tap", range = range } } }
     if self.hold_callback then
         self.ges_events.HoldArea = { GestureRange:new{ ges = "hold", range = range } }
@@ -304,7 +304,7 @@ function WidgetTitle:init()
     local label = self[1]
     local sz = label and label.getSize and label:getSize() or { w = 40, h = 20 }
     self.dimen = Geom:new{ x = 0, y = 0, w = math.max(sz.w, self.min_w or 0), h = math.max(sz.h, self.min_h or 24) }
-    local range = function() return self.dimen end
+    local range = function() return Core.gestureRect(self.dimen) end
     self.ges_events = {
         TapWidgetTitle = { GestureRange:new{ ges = "tap", range = range } },
         HoldWidgetTitle = { GestureRange:new{ ges = "hold", range = range } },
@@ -865,7 +865,7 @@ function FilterStrip:init()
     local scroll = Core.filterScroll(self.offset, self.content_w, self.dimen.w, 0)
     self.offset = scroll.offset
     self._scroll = scroll
-    local range = function() return self.dimen end
+    local range = function() return Core.gestureRect(self.dimen) end
     self.ges_events = {
         PanFilter = { GestureRange:new{ ges = "pan", range = range } },
         SwipeFilter = { GestureRange:new{ ges = "swipe", range = range } },
@@ -2715,17 +2715,20 @@ function LibraryView:applyEdgeLevel(level)
     local edge = self._edge
     local p = edge and edge.powerd
     if not p then return end
+    -- A Kindle without warmth, or a powerd that throws, must not take the
+    -- gesture handler down with it. The light call is the whole update:
+    -- nothing here repaints the Library.
     if level <= p.fl_min and type(p.turnOffFrontlight) == "function" then
-        p:turnOffFrontlight()
-    else
-        p:setIntensity(level)
-        if type(p.isFrontlightOff) == "function" and type(p.turnOnFrontlight) == "function"
-            and p:isFrontlightOff() then
-            p:turnOnFrontlight()
+        pcall(p.turnOffFrontlight, p)
+    elseif type(p.setIntensity) == "function" then
+        pcall(p.setIntensity, p, level)
+        if type(p.isFrontlightOff) == "function" and type(p.turnOnFrontlight) == "function" then
+            local ok_off, off = pcall(p.isFrontlightOff, p)
+            if ok_off and off then pcall(p.turnOnFrontlight, p) end
         end
     end
     if type(p.updateResumeFrontlightState) == "function" then
-        p:updateResumeFrontlightState()
+        pcall(p.updateResumeFrontlightState, p)
     end
     edge.level = level
     self:paintEdgeLevel(level)

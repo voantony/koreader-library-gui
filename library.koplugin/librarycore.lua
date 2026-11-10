@@ -1962,6 +1962,34 @@ end
 -- eighths (the strips LiveLight's brightness/warmth slides use): "left",
 -- "right", or nil. `w` is the screen width. On a 1264 px Colorsoft each
 -- strip is 158 px wide.
+--- A rectangle GestureRange can ask `:contains` on. Never nil. A missing
+-- or plain box becomes an empty one that matches nothing, so a scrub
+-- cannot crash with "attempt to call method 'contains' (a nil value)".
+function Core.gestureRect(rect)
+    local x = type(rect) == "table" and tonumber(rect.x) or 0
+    local y = type(rect) == "table" and tonumber(rect.y) or 0
+    local w = type(rect) == "table" and tonumber(rect.w) or 0
+    local h = type(rect) == "table" and tonumber(rect.h) or 0
+    x, y = x or 0, y or 0
+    w, h = w or 0, h or 0
+    if w < 0 then w = 0 end
+    if h < 0 then h = 0 end
+    if type(rect) == "table" and type(rect.contains) == "function"
+        and rect.x == x and rect.y == y and rect.w == w and rect.h == h then
+        return rect
+    end
+    local g = { x = x, y = y, w = w, h = h }
+    function g:contains(p)
+        if self.w <= 0 or self.h <= 0 then return false end
+        if type(p) ~= "table" or not p.x or not p.y then return false end
+        local pw, ph = tonumber(p.w) or 0, tonumber(p.h) or 0
+        return self.x <= p.x and self.y <= p.y
+            and self.x + self.w >= p.x + pw
+            and self.y + self.h >= p.y + ph
+    end
+    return g
+end
+
 function Core.edgeStrip(x, w)
     x, w = tonumber(x), tonumber(w)
     if not (x and w) or w <= 0 then return nil end
@@ -3089,7 +3117,8 @@ end
 --- Which letter a finger at screen `y` is on. Slots share the strip height
 -- equally. Nil when the point is outside the strip.
 function Core.scrubberLetterAt(y, strip_y, strip_h, letters)
-    letters = letters or Core.SCRUBBER_LETTERS
+    if letters == nil then letters = Core.SCRUBBER_LETTERS end
+    if type(letters) ~= "table" then return nil end
     local n = #letters
     y = tonumber(y)
     strip_y = tonumber(strip_y) or 0

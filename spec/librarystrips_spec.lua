@@ -341,6 +341,68 @@ describe("letter bubble is cleared however the scrub ends", function()
         eq(sc._bubble_timeout, nil)
     end)
 
+    it("a fast scrub past both ends, then a release, does not index off the alphabet", function()
+        local sc = scrubber()
+        sc.letters = Core.SCRUBBER_LETTERS
+        local ys = { sc.dimen.y - 1000, sc.dimen.y, sc.dimen.y + sc.dimen.h - 1,
+            sc.dimen.y + sc.dimen.h, sc.dimen.y + 5000 }
+        for _, y in ipairs(ys) do
+            local letter = sc:letterAt(y)
+            eq(type(letter), "string")
+            local known = false
+            for _, item in ipairs(Core.SCRUBBER_LETTERS) do
+                if item == letter then known = true end
+            end
+            eq(known, true)
+        end
+        for i = 0, 40 do
+            sc._tick = nil
+            sc:dragTo({ x = sc.dimen.x + 2, y = sc.dimen.y - 100 + i * 40 })
+            if sc.bubble_letter ~= nil then
+                eq(type(sc.bubble_letter), "string")
+            end
+        end
+        eq(sc:onPanReleaseScrubber(), true)
+        eq(sc.bubble_letter, nil)
+        local hit = sc:hitRect()
+        eq(type(hit.contains), "function")
+        eq(hit:contains({ x = sc.dimen.x + 2, y = sc.dimen.y + 2, w = 0, h = 0 }), true)
+        eq(hit:contains({ x = -20, y = sc.dimen.y, w = 0, h = 0 }), false)
+    end)
+
+    it("an empty strip and a single letter do not crash a scrub", function()
+        local sc = scrubber()
+        sc.letters = {}
+        eq(sc:letterAt(sc.dimen.y + 10), nil)
+        sc:dragTo({ x = sc.dimen.x, y = sc.dimen.y + 10 })
+        eq(sc.bubble_letter, nil)
+        sc:onPanReleaseScrubber()
+        sc.letters = { "Q" }
+        eq(sc:letterAt(sc.dimen.y - 30), "Q")
+        eq(sc:letterAt(sc.dimen.y + sc.dimen.h + 30), "Q")
+        sc._tick = nil
+        sc:dragTo({ x = sc.dimen.x, y = sc.dimen.y + 10 })
+        eq(sc.bubble_letter, "Q")
+        sc._tick = nil
+        sc:dragTo({ x = sc.dimen.x, y = sc.dimen.y + 400 })
+        eq(sc.bubble_letter, "Q")
+        sc:onSwipeScrubber(nil, {
+            direction = "north", pos = { x = sc.dimen.x, y = sc.dimen.y },
+            end_pos = { x = 10, y = 10 },
+        })
+        eq(sc.bubble_letter, nil)
+    end)
+
+    it("a closed library does not refresh the strip or jump", function()
+        local jumped = {}
+        local sc = scrubber(jumped)
+        down(sc, 200)
+        sc.view._closed = true
+        eq(sc:endDrag(), true)
+        eq(#jumped, 0)
+        eq(sc.bubble_letter, nil)
+    end)
+
     it("a fallback timeout clears the bubble when no release arrives", function()
         local jumped = {}
         local sc = scrubber(jumped)
@@ -350,5 +412,51 @@ describe("letter bubble is cleared however the scrub ends", function()
         eq(sc.bubble_letter, nil)
         eq(#jumped, 1, "the letter under the finger is still applied")
         eq(sc.last_refresh.mode, "ui")
+    end)
+end)
+
+describe("gesture ranges never crash contains", function()
+    -- The device crash: gesturerange.lua calls range:contains. A nil range
+    -- is skipped. A plain table is not, and that is what hitRect returned.
+    local function deviceMatch(range_fn, pos)
+        local range = range_fn()
+        if not range or not range:contains(pos) then return false end
+        return true
+    end
+
+    it("an empty or missing box is a rectangle that matches nothing", function()
+        local function check(box)
+            local g = Core.gestureRect(box)
+            eq(g ~= nil, true)
+            eq(type(g.contains), "function")
+            eq(g:contains({ x = 10, y = 10, w = 0, h = 0 }), false)
+            eq(deviceMatch(function() return Core.gestureRect(box) end, { x = 1, y = 1, w = 0, h = 0 }), false)
+        end
+        check(nil)
+        check({})
+        check({ x = "no" })
+        check({ w = -4, h = -2 })
+    end)
+
+    it("keeps a box that already has contains", function()
+        local g = { x = 0, y = 0, w = 10, h = 10, contains = function() return true end }
+        eq(Core.gestureRect(g), g)
+    end)
+
+    it("the strip hit box matches a point and does not crash before layout", function()
+        local Scrubber = loadScrubber({})
+        local sc = Scrubber:new{
+            letters = { "A" }, width = 50, height = 400, dpi = 300,
+            screen_w = 1264, screen_h = 1680,
+        }
+        sc:init()
+        sc.dimen = nil
+        local bare = sc:hitRect()
+        eq(bare ~= nil, true)
+        eq(type(bare.contains), "function")
+        eq(deviceMatch(function() return sc:hitRect() end, { x = 100, y = 100, w = 0, h = 0 }), false)
+        sc.dimen = { x = 1214, y = 200, w = 50, h = 400 }
+        eq(deviceMatch(function() return sc:hitRect() end, { x = 1230, y = 300, w = 0, h = 0 }), true)
+        eq(sc:hitRect():contains({ x = -5, y = 300, w = 0, h = 0 }), false)
     end)
 end)

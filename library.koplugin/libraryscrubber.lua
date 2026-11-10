@@ -90,7 +90,7 @@ function Scrubber:hitRect()
     if edge > 0 and x0 > edge * 0.5 and right < edge then
         right = edge
     end
-    return {
+    return Core.gestureRect{
         x = x,
         y = math.floor(d.y or 0),
         w = math.max(0, right - x),
@@ -137,7 +137,9 @@ end
 
 function Scrubber:paintStrip(bb, x, y)
     local d = self.dimen
-    local w, h = d.w, d.h
+    if not d or not bb then return end
+    local w, h = tonumber(d.w) or 0, tonumber(d.h) or 0
+    if w < 1 or h < 1 then return end
     bb:paintRect(x, y, w, h, C.COLOR_WHITE)
     -- Hairline where the covers stop. The letters sit just to its right.
     -- The wider hit area is not painted; it overlaps the gutter and the edge.
@@ -163,28 +165,30 @@ function Scrubber:paintStrip(bb, x, y)
             local widget, sz = textSize(dot_face, "·", true, C.COLOR_GRAY_6, C.COLOR_WHITE)
             widget:paintTo(bb, glyph_x + math.floor((glyph_w - sz.w) / 2), sy + math.floor((sh - sz.h) / 2))
             widget:free()
-        else
+        elseif type(mark.letter) == "string" and mark.letter ~= "" then
             local letter = mark.letter
             local on = self:active(letter)
             local hot = highlight == letter
             local bg = C.COLOR_WHITE
             local fg = on and C.COLOR_BLACK or C.COLOR_GRAY_6
+            local box_w = math.max(1, glyph_w - 4)
             if hot then
                 bg = on and C.COLOR_BLACK or C.COLOR_GRAY_8
                 fg = C.COLOR_WHITE
                 local pad = math.max(1, math.floor(sh * 0.08))
-                bb:paintRoundedRect(glyph_x + 2, sy + pad, glyph_w - 6, math.max(1, sh - 2 * pad), bg,
-                    math.floor(sh / 2))
+                local box_h = math.max(1, sh - 2 * pad)
+                bb:paintRoundedRect(glyph_x + 2, sy + pad, box_w, box_h, bg,
+                    math.min(math.floor(sh / 2), math.floor(box_w / 2), math.floor(box_h / 2)))
             end
             local widget, sz = textSize(face, letter, true, fg, hot and bg or C.COLOR_WHITE)
-            local tx = glyph_x + math.floor((glyph_w - sz.w) / 2)
-            local ty = sy + math.floor((sh - sz.h) / 2)
+            local tx = glyph_x + math.floor((glyph_w - (sz.w or 0)) / 2)
+            local ty = sy + math.floor((sh - (sz.h or 0)) / 2)
             widget:paintTo(bb, tx, ty)
             widget:free()
             if not hot and letter == self.anchor and on then
-                local mark_w = math.max(4, math.floor(sz.w * 0.7))
+                local mark_w = math.max(4, math.floor((sz.w or 0) * 0.7))
                 local mx = glyph_x + math.floor((glyph_w - mark_w) / 2)
-                bb:paintRect(mx, ty + sz.h - 1, mark_w, math.max(1, math.floor(sh * 0.08)), C.COLOR_BLACK)
+                bb:paintRect(mx, ty + (sz.h or 0) - 1, mark_w, math.max(1, math.floor(sh * 0.08)), C.COLOR_BLACK)
             end
         end
     end
@@ -220,7 +224,10 @@ function Scrubber:pushRefresh(plan, prefer_view)
     -- page. Dirty the view, which stays, so the panel still updates the
     -- rectangle the bubble covered.
     local host = (prefer_view and self.view) or self
-    if not host then host = self end
+    -- A jump rebuilds the page and drops this strip. Refreshing a widget
+    -- that is already closed crashes the repaint, so the region is asked
+    -- for on its own.
+    if host and host._closed then host = nil end
     for _, r in ipairs(plan.regions or {}) do
         local rect = Geom:new{ x = r.x, y = r.y, w = r.w, h = r.h }
         local mode = plan.mode
@@ -385,6 +392,7 @@ function Scrubber:endDrag()
     local letter = self.bubble_letter
     self:clearBubble()
     local view = self.view
+    if view and view._closed then return true end
     if view and view.jumpToLetter then
         view:jumpToLetter(letter)
     else

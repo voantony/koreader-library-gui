@@ -468,4 +468,32 @@ describe("left-edge brightness", function()
         }), false)
         eq(#sets, 0)
     end)
+
+    it("a frontlight that throws does not crash the swipe", function()
+        local View = loadView()
+        local p = {
+            fl_min = 0, fl_max = 10, fl_intensity = 3,
+            frontlightIntensity = function(self) return self.fl_intensity end,
+            setIntensity = function() error("no warmth") end,
+            updateResumeFrontlightState = function() error("nil warmth") end,
+        }
+        device_stub.getPowerDevice = function() return p end
+        local v = swipeView(View, {})
+        eq(v:onPan(nil, {
+            pos = { x = 20, y = 300 },
+            start_pos = { x = 20, y = 700 },
+            relative = { x = 0, y = -400 },
+        }), true)
+        eq(v.refreshed(), 0)
+        eq(v:onPanRelease(nil, { pos = { x = 20, y = 300 } }), true)
+        eq(v._edge, nil)
+    end)
+
+    it("no power device leaves the left edge to whatever zone is installed", function()
+        local View = loadView()
+        device_stub.getPowerDevice = nil
+        local v = swipeView(View, {})
+        eq(v:onSwipe(nil, ges("south", 20, 500)), true)
+        eq(#live_calls, 1)
+    end)
 end)
