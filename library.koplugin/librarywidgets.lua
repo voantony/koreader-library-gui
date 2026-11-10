@@ -156,6 +156,20 @@ function Widgets.folderChoices(books)
     return out
 end
 
+--- Accordion (#2). With two widgets, tapping a title expands that one
+-- and the other becomes the tab. Tapping the expanded title again, or
+-- the tab, returns to the side-by-side pair. One widget does not expand.
+-- `tapped` nil means the tab (collapse).
+function Widgets.accordion(n_slots, expanded, tapped)
+    n_slots = math.floor(tonumber(n_slots) or 0)
+    if n_slots < 2 then return nil end
+    if tapped == nil then return nil end
+    tapped = math.floor(tonumber(tapped) or 0)
+    if tapped < 1 or tapped > n_slots then return nil end
+    if expanded == tapped then return nil end
+    return tapped
+end
+
 function Widgets.names(groups)
     local out = {}
     for _, g in ipairs(groups or {}) do

@@ -89,6 +89,14 @@ describe("home widgets", function()
         eq(slots[1].kind, "series")
     end)
 
+    it("a title tap expands one of two widgets, and a second tap restores the pair", function()
+        eq(W.accordion(1, nil, 1), nil)
+        eq(W.accordion(2, nil, 1), 1)
+        eq(W.accordion(2, 1, 1), nil)
+        eq(W.accordion(2, 1, nil), nil)
+        eq(W.accordion(2, nil, 2), 2)
+    end)
+
     it("folder choices are the directories the books live in", function()
         local dirs = W.folderChoices({
             book("/mnt/books/Novels/a.epub"),
