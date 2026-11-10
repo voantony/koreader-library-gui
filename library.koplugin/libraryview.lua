@@ -224,6 +224,7 @@ function LibraryView:init()
     self.group = nil         -- { kind=, name=, books= } when inside a collection/author/series
     self.timings = {}
     self.label_h = Tiles.labelHeight()
+    self.cover_label_h = Tiles.coverLabelHeight()
     self.list_row_h = Tiles.listRowHeight()
     self.continue_label_h = Tiles.labelHeight()
     self.gap = Size.padding.default
@@ -1179,6 +1180,7 @@ function LibraryView:buildGrid(items, kind, layout, height, width)
                 width = layout.tile_w,
                 height = layout.tile_h,
                 cover_h = layout.cover_h,
+                cover_only = kind == "books" and Core.isCoverOnly(self.view_mode),
                 book = kind == "books" and item or nil,
                 group = kind == "groups" and item or nil,
                 series_number = kind == "books" and self:inSeries(),
@@ -1678,8 +1680,15 @@ function LibraryView:buildBody()
         elseif self.view_mode == "list" then
             return Core.listLayout(h, self.list_row_h, Size.padding.small, { max_rows = 10 })
         else
-            -- Under the Continue reading strip, accept smaller covers for a second row.
-            return Core.gridLayout(grid_w, h, self.cols, self.label_h, self.gap, under_strip and 0.6 or nil)
+            -- Cover only keeps the progress row and drops the title, so more
+            -- covers fit. Shelves still need their names, so they keep the
+            -- full label. Under the Continue reading strip, accept smaller
+            -- covers for a second row.
+            local label_h = self.label_h
+            if Core.isCoverOnly(self.view_mode) and data.kind == "books" then
+                label_h = self.cover_label_h
+            end
+            return Core.gridLayout(grid_w, h, self.cols, label_h, self.gap, under_strip and 0.6 or nil)
         end
     end
 

@@ -1128,17 +1128,19 @@ function Core.listLayout(height, min_row_h, pad, opts)
     return { rows = rows, row_h = row_h, thumb_w = thumb_w, thumb_h = thumb_h, per_page = rows }
 end
 
--- grid: covers; list: a row per item (covers for books, text for authors
--- and series); compact: one line per row, many rows per page.
-Core.VIEWS = { "grid", "list", "compact", "compact2" }
+-- grid: covers with titles; covers: the cover and its progress only;
+-- list: a row per item (covers for books, text for authors and series);
+-- compact: one line per row, many rows per page.
+Core.VIEWS = { "grid", "list", "compact", "compact2", "covers" }
 
 --- A saved view mode, falling back to "grid".
 function Core.viewMode(v)
-    if v == "list" or v == "compact" or v == "compact2" then return v end
+    if v == "list" or v == "compact" or v == "compact2" or v == "covers" then return v end
     return "grid"
 end
 
---- The ☰ menu's View picker: three cover sizes (columns), List, Compact.
+--- The ☰ menu's View picker: three cover sizes (columns), List, Compact,
+-- and Cover only. Remembered per shelf, same as the other layouts.
 Core.VIEW_PICKER = {
     { id = "small", view = "grid", columns = 5 },
     { id = "medium", view = "grid", columns = 4 },
@@ -1146,11 +1148,17 @@ Core.VIEW_PICKER = {
     { id = "list", view = "list" },
     { id = "compact", view = "compact" },
     { id = "compact2", view = "compact2" },
+    { id = "covers", view = "covers" },
 }
 
 --- One line per row (Compact, or Compact in two columns).
 function Core.isCompact(view_mode)
     return view_mode == "compact" or view_mode == "compact2"
+end
+
+--- Covers with no title or author under them. Progress and badges stay.
+function Core.isCoverOnly(view_mode)
+    return view_mode == "covers"
 end
 
 --- Columns of rows: 2 for "compact2", else 1.
@@ -1534,10 +1542,13 @@ end
 -- Incremental index cache
 ----------------------------------------------------------------------------
 
-Core.CACHE_VERSION = 2
+Core.CACHE_VERSION = 3
 
 --- Reading state kept in the index cache (refreshed when the sidecar changes).
-Core.STATE_FIELDS = { "sc_mtime", "status", "percent", "pages", "m_start", "m_chap" }
+-- `opened`, `doc_status` and `time_left` ride along so a tile never has to
+-- open a sidecar or the statistics database again.
+Core.STATE_FIELDS = { "sc_mtime", "status", "percent", "pages", "m_start", "m_chap",
+    "opened", "doc_status", "time_left" }
 
 function Core.copyState(to, from)
     for _, k in ipairs(Core.STATE_FIELDS) do to[k] = from[k] end
@@ -1573,6 +1584,7 @@ end
 local CACHED_FIELDS = {
     "size", "modification", "title", "authors", "series", "series_index",
     "keywords", "src", "cal", "sc_mtime", "status", "percent", "pages", "m_start", "m_chap",
+    "opened", "doc_status", "time_left",
 }
 
 function Core.toCacheEntries(books)
@@ -2401,6 +2413,109 @@ function Core.progressParts(book)
     return Core.progressPercent(book), left
 end
 
+--- Seconds per page from numbers KOReader already stored for this book.
+-- `avg_time`, or `total_read_time / total_read_pages`. Nil when neither
+-- is a real measurement. There is no default speed.
+function Core.readingSpeed(stats)
+    if type(stats) ~= "table" then return nil end
+    local avg = tonumber(stats.avg_time)
+    if avg and avg > 0 then return avg end
+    local total = tonumber(stats.total_read_time)
+    local pages = tonumber(stats.total_read_pages)
+    if total and pages and total > 0 and pages > 0 then return total / pages end
+    return nil
+end
+
+--- Seconds left in an in-progress book, from that book's own stats.
+-- Nil unless status is "reading", a page count and a percent are known,
+-- and `stats` holds a measured speed. Never fills in a guessed pace.
+function Core.estimateTimeLeft(book, stats)
+    if type(book) ~= "table" or book.status ~= "reading" then return nil end
+    local pages = tonumber(book.pages)
+    if (not pages or pages < 1) and type(stats) == "table" then
+        pages = tonumber(stats.pages)
+    end
+    local pct = tonumber(book.percent)
+    if not pages or pages < 1 or not pct or pct <= 0 or pct >= 1 then return nil end
+    local per = Core.readingSpeed(stats)
+    if not per then return nil end
+    local left_pages = pages * (1 - pct)
+    if left_pages < 0.5 then return nil end
+    return left_pages * per
+end
+
+--- "2h" for an in-progress tile, or nil. Finished and unread books stay blank.
+function Core.tileTimeLeft(book)
+    if type(book) ~= "table" or book.status ~= "reading" then return nil end
+    return Core.timeLeftText(book.time_left)
+end
+
+--- Badge on a cover: "read" (finished in KOReader's doc settings), "new"
+-- (never opened), "hold", or nil. Opening a book and leaving it on the
+-- cover is not "new".
+function Core.tileBadge(book)
+    if type(book) ~= "table" then return nil end
+    if book.doc_status == "complete" or book.status == "complete" then return "read" end
+    if book.status == "abandoned" then return "hold" end
+    -- A history time means it was opened, even if `opened` was left false.
+    if book.opened == true or (book.last_opened and book.last_opened > 0) then return nil end
+    if book.opened == false then return "new" end
+    if (book.status == nil or book.status == "new") and not book.percent and not book.pages then
+        return "new"
+    end
+    return nil
+end
+
+----------------------------------------------------------------------------
+-- Want to Read: one KOReader collection, added and removed by path.
+----------------------------------------------------------------------------
+
+Core.WANT_TO_READ = "Want to Read"
+
+function Core.wantToReadLabel(in_collection)
+    if in_collection then return "Remove from Want to Read" end
+    return "Add to Want to Read"
+end
+
+--- True when `path` is in `coll[name]`. Accepts the map KOReader keeps
+-- (`coll[name][path] = { file = path }`) and a list of `{ file = }` items.
+function Core.bookInCollection(coll, path, name)
+    if type(coll) ~= "table" or type(path) ~= "string" or path == "" then return false end
+    local group = coll[name]
+    if type(group) ~= "table" then return false end
+    if group[path] ~= nil then return true end
+    for _, item in pairs(group) do
+        if item == path or (type(item) == "table" and item.file == path) then return true end
+    end
+    return false
+end
+
+--- Set or clear `path` in `coll[name]`. Returns the membership afterwards.
+function Core.setCollectionMembership(coll, path, name, want)
+    if type(coll) ~= "table" or type(path) ~= "string" or path == ""
+            or type(name) ~= "string" or name == "" then
+        return false
+    end
+    local group = coll[name]
+    if want then
+        if type(group) ~= "table" then
+            group = {}
+            coll[name] = group
+        end
+        if group[path] == nil then group[path] = { file = path } end
+        return true
+    end
+    if type(group) == "table" then group[path] = nil end
+    return false
+end
+
+--- Flip membership. Returns true when the book is in the collection after.
+function Core.toggleCollection(coll, path, name)
+    name = name or Core.WANT_TO_READ
+    local want = not Core.bookInCollection(coll, path, name)
+    return Core.setCollectionMembership(coll, path, name, want)
+end
+
 --- "37%" or "37% · 3h 39m left". `pct` is a whole number, `left` a duration.
 function Core.progressLine(pct, left)
     local text = string.format("%d%%", tonumber(pct) or 0)
@@ -2408,6 +2523,45 @@ function Core.progressLine(pct, left)
         return text .. " \u{00B7} " .. left .. " left"
     end
     return text
+end
+
+--- Read-only lines for the details card. Title, author and series are
+-- included so a caller can show them; the card already draws those, and
+-- `Core.detailLines` leaves them out. Progress includes a stored time left
+-- only while the book is in progress. Missing pages or size are omitted.
+-- Last read is "Never" when the book has no opened time. Nothing is guessed.
+function Core.bookFacts(book, now)
+    local facts = {}
+    if type(book) ~= "table" then return facts end
+    local function add(id, label, value)
+        if type(value) ~= "string" or value == "" then return end
+        facts[#facts + 1] = { id = id, label = label, value = value }
+    end
+    add("title", "Title", book.title or book.name)
+    local authors = Core.authorNames(book)
+    if #authors > 0 then add("author", "Author", table.concat(authors, ", ")) end
+    add("series", "Series", Core.seriesLine(book))
+    local pages = tonumber(book.pages)
+    if pages and pages >= 1 then add("pages", "Pages", tostring(math.floor(pages + 0.5))) end
+    local left = book.status == "reading" and Core.timeLeftText(book.time_left) or nil
+    add("progress", "Progress", Core.progressLine(Core.progressPercent(book), left))
+    add("last_read", "Last read", Core.shortDate(book.last_opened, now) or "Never")
+    if tonumber(book.size) then add("size", "Size", Core.formatSize(tonumber(book.size))) end
+    if type(book.path) == "string" and book.path ~= "" then add("path", "File", book.path) end
+    return facts
+end
+
+local DETAIL_ON_HEADER = { title = true, author = true, series = true, progress = true }
+
+--- The fact lines the card prints under the title (pages, last read, size, path).
+function Core.detailLines(book, now)
+    local lines = {}
+    for _, fact in ipairs(Core.bookFacts(book, now)) do
+        if not DETAIL_ON_HEADER[fact.id] then
+            lines[#lines + 1] = fact.label .. "  " .. fact.value
+        end
+    end
+    return lines
 end
 
 local HTML_ENTITIES = {

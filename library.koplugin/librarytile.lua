@@ -187,6 +187,11 @@ end
 --- Height of everything under a cover: the progress row, the title and a
 -- second line (or the title only when `one_line`). Every tile reserves the
 -- progress row, so titles line up across a row whatever the books' state.
+--- Height under a cover-only tile: the progress row, and no title.
+function M.coverLabelHeight()
+    return Size.padding.default + M.progressRowHeight() + Size.padding.small
+end
+
 function M.labelHeight(one_line)
     local f = getFaces()
     local t = TextWidget:new{ text = "Ag", face = f.title, bold = true }
@@ -372,17 +377,17 @@ local function pill(text, inverted)
 end
 M.pill = pill
 
+local BADGE_TEXT = { read = _("Read"), new = _("New"), hold = _("on hold") }
+
 --- Overlay the status badges on a cover of size (w, h).
+-- Read: finished in KOReader's doc settings. New: never opened.
 local function decorate(cover, w, h, book)
     local layers = OverlapGroup:new{ dimen = Geom:new{ w = w, h = h }, allow_mirroring = false, cover }
     local m = Size.padding.default
+    local badge = Core.tileBadge(book)
     local p
-    if book.status == "complete" then
-        p = pill("\u{2713}", true)
-    elseif book.status == "new" then
-        p = pill(_("NEW"), false)
-    elseif book.status == "abandoned" then
-        p = pill(_("on hold"), false)
+    if badge then
+        p = pill(BADGE_TEXT[badge], badge == "read")
     end
     if p then
         p.overlap_offset = { w - p:getSize().w - m, m }
@@ -404,7 +409,10 @@ local function progressRow(book, w, group)
             fraction, label = pr.read / pr.total, T(_("%1/%2"), pr.read, pr.total)
         end
     elseif book and book.percent and book.status ~= "new" and book.status ~= "complete" then
-        fraction, label = book.percent, T(_("%1 %"), math.floor(book.percent * 100 + 0.5))
+        fraction = book.percent
+        label = T(_("%1 %"), math.floor(book.percent * 100 + 0.5))
+        local left = Core.tileTimeLeft(book)
+        if left then label = label .. " \u{00B7} " .. left end
     end
     if not fraction then
         return VerticalSpan:new{ width = h }
@@ -494,13 +502,24 @@ function M.compactText(item, kind, series_number, author_first, date_text)
         left = author_first and (author .. " · " .. title) or (title .. " · " .. author)
     end
     local right = ""
-    if item.status == "complete" then right = "\u{2713}"
-    elseif item.status == "abandoned" then right = _("on hold")
-    elseif item.percent and item.status ~= "new" then right = T(_("%1 %"), math.floor(item.percent * 100 + 0.5))
+    local badge = Core.tileBadge(item)
+    if badge == "read" then right = _("Read")
+    elseif badge == "new" then right = _("New")
+    elseif badge == "hold" then right = _("on hold")
+    elseif item.percent and item.status ~= "new" then
+        right = T(_("%1 %"), math.floor(item.percent * 100 + 0.5))
+        local left = Core.tileTimeLeft(item)
+        if left then right = right .. " \u{00B7} " .. left end
     end
-    -- Last read / Date added: the date too (the title is cut, never the date)
+    -- Last read / Date added: the date too (the title is cut, never the date).
+    -- A never-opened book has no percent to put first, so the date stands alone;
+    -- the cover and the list row still carry the New badge.
     if date_text and date_text ~= "" then
-        right = right ~= "" and (right .. " · " .. date_text) or date_text
+        if badge == "new" then
+            right = date_text
+        else
+            right = right ~= "" and (right .. " \u{00B7} " .. date_text) or date_text
+        end
     end
     return left, right
 end
@@ -530,6 +549,7 @@ local Tile = InputContainer:extend{
     on_tap = nil,
     on_hold = nil,
     one_line = false, -- title only under the cover
+    cover_only = false, -- cover, badge and progress; no title or author
     caption = nil,    -- second line instead of the author (Continue reading)
     date_text = nil,  -- second line instead of the author (sorted by Last read / Date added)
     series_number = false, -- "3 · Title" (inside a series)
@@ -580,12 +600,14 @@ function Tile:init()
         align = "center",
         VerticalSpan:new{ width = Size.padding.default },
         progressRow(not self.group and book or nil, cover_w, self.group),
-        VerticalSpan:new{ width = Size.padding.small },
-        TextWidget:new{ text = line1 or "", face = f.title, bold = true, max_width = text_w },
     }
-    if not self.one_line then
-        table.insert(label, TextWidget:new{ text = line2 or "", face = f.sub, max_width = text_w,
-            fgcolor = Blitbuffer.COLOR_GRAY_4 })
+    if not self.cover_only or self.group then
+        table.insert(label, VerticalSpan:new{ width = Size.padding.small })
+        table.insert(label, TextWidget:new{ text = line1 or "", face = f.title, bold = true, max_width = text_w })
+        if not self.one_line then
+            table.insert(label, TextWidget:new{ text = line2 or "", face = f.sub, max_width = text_w,
+                fgcolor = Blitbuffer.COLOR_GRAY_4 })
+        end
     end
     self[1] = VerticalGroup:new{
         align = "center",
@@ -661,19 +683,27 @@ function M.listRowHeight()
     return h
 end
 
---- Right-hand status: a pill for finished / new / on hold, else "42 %" over a bar.
+--- Right-hand status: Read / New / on hold, else "42 %" over a bar.
+-- An in-progress book with a known time left adds that duration under the percent.
 local function rowStatus(book, w)
-    if book.status == "complete" then return pill("\u{2713} " .. _("Finished"), true) end
-    if book.status == "new" then return pill(_("NEW"), false) end
-    if book.status == "abandoned" then return pill(_("on hold"), false) end
-    if book.percent then
+    local badge = Core.tileBadge(book)
+    if badge == "read" then return pill(_("Read"), true) end
+    if badge == "new" then return pill(_("New"), false) end
+    if badge == "hold" then return pill(_("on hold"), false) end
+    if book.percent and book.status ~= "new" then
         local f = getFaces()
-        return VerticalGroup:new{
+        local col = VerticalGroup:new{
             align = "right",
             TextWidget:new{ text = T(_("%1 %"), math.floor(book.percent * 100 + 0.5)), face = f.title, bold = true },
-            VerticalSpan:new{ width = Size.padding.default },
-            Bar:new{ width = w, fraction = book.percent },
         }
+        local left = Core.tileTimeLeft(book)
+        if left then
+            table.insert(col, TextWidget:new{ text = left, face = f.sub, fgcolor = Blitbuffer.COLOR_GRAY_4 })
+        else
+            table.insert(col, VerticalSpan:new{ width = Size.padding.default })
+        end
+        table.insert(col, Bar:new{ width = w, fraction = book.percent })
+        return col
     end
     return nil
 end

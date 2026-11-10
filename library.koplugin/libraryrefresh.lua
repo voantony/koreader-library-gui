@@ -37,7 +37,7 @@ function M.everyN(full_refresh_count)
 end
 
 function M.isCoverGrid(view_mode)
-    return view_mode == nil or view_mode == "grid"
+    return view_mode == nil or view_mode == "grid" or view_mode == "covers"
 end
 
 --- Which refresh to use, and the page-turn count to keep.

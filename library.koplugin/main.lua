@@ -87,6 +87,7 @@ local VIEW_NAMES = {
     list = _("List"),
     compact = _("Compact"),
     compact2 = _("Compact · 2 columns"),
+    covers = _("Cover only"),
 }
 
 local Library = WidgetContainer:extend{
@@ -363,6 +364,10 @@ function Library:getIndex()
         calibre_load_full = loadCalibreFull,
         extra_calibre_dirs = { G_reader_settings:readSetting("inbox_dir") },
         clock = function() return require("ui/time").to_s(require("ui/time").now()) end,
+        -- Only the open book's live statistics. Every other book's time
+        -- left comes from its sidecar, already read while indexing. The
+        -- index caches this and never calls it while painting a tile.
+        stats_for = function(path) return self:readingStatsFor(path) end,
     }
     shared.index.needs_build = true
     return shared.index
@@ -845,6 +850,16 @@ function Library:showBookDialog(book, view)
             },
         },
     }
+    local in_want = self:inWantToRead(file)
+    table.insert(buttons, #buttons, {
+        {
+            text = _(Core.wantToReadLabel(in_want)),
+            callback = function()
+                close()
+                self:toggleWantToRead(book, view)
+            end,
+        },
+    })
     dialog = ButtonDialog:new{
         title = book.title .. (book.authors and book.authors[1] and ("\n" .. book.authors[1]) or ""),
         title_align = "center",
@@ -891,6 +906,81 @@ function Library:loadDescription(book)
         if ok then file_text = raw end
     end
     return Core.descriptionFrom(candidates, file_text)
+end
+
+--- Seconds-per-page for the book that is open, from KOReader's statistics
+-- plugin. Nil for every other path, and nil when that plugin has no
+-- measurement yet. Not a guess, and not a database query.
+function Library:readingStatsFor(path)
+    local ui = self.ui
+    local stats = ui and ui.statistics
+    local doc = ui and ui.document
+    if type(path) ~= "string" or not stats or not doc or doc.file ~= path then
+        return nil
+    end
+    local data = type(stats.data) == "table" and stats.data or {}
+    local out = {}
+    local avg = tonumber(stats.avg_time) or tonumber(data.avg_time)
+    if avg and avg > 0 then out.avg_time = avg end
+    local total = tonumber(stats.total_read_time) or tonumber(data.total_read_time)
+    local pages = tonumber(stats.total_read_pages) or tonumber(data.total_read_pages)
+    if total and total > 0 then out.total_read_time = total end
+    if pages and pages > 0 then out.total_read_pages = pages end
+    if out.avg_time or (out.total_read_time and out.total_read_pages) then return out end
+    return nil
+end
+
+function Library:readCollection()
+    local ok, RC = pcall(require, "readcollection")
+    if not ok or type(RC) ~= "table" then return nil end
+    if type(RC._read) == "function" then pcall(RC._read, RC) end
+    return RC
+end
+
+function Library:inWantToRead(path)
+    local RC = self:readCollection()
+    if not RC or type(path) ~= "string" then return false end
+    local name = Core.WANT_TO_READ
+    if type(RC.isFileInCollection) == "function" then
+        local ok, yes = pcall(RC.isFileInCollection, RC, path, name)
+        if ok then return yes and true or false end
+    end
+    return Core.bookInCollection(RC.coll, path, name)
+end
+
+--- Add or remove `path` from the Want to Read collection. Uses KOReader's
+-- collections API when it is there. Returns true when the call landed.
+function Library:setWantToRead(path, want)
+    local RC = self:readCollection()
+    if not RC or type(path) ~= "string" or path == "" then return false end
+    local name = Core.WANT_TO_READ
+    want = want and true or false
+    if want then
+        if type(RC.coll) == "table" and RC.coll[name] == nil and type(RC.addCollection) == "function" then
+            pcall(RC.addCollection, RC, name)
+        end
+        if type(RC.addItem) == "function" then
+            return pcall(RC.addItem, RC, path, name) and true or false
+        end
+    elseif type(RC.removeItem) == "function" then
+        return pcall(RC.removeItem, RC, path, name) and true or false
+    end
+    if type(RC.coll) == "table" then
+        Core.setCollectionMembership(RC.coll, path, name, want)
+        if type(RC.write) == "function" then pcall(RC.write, RC) end
+        return true
+    end
+    return false
+end
+
+--- Flip Want to Read and redraw the library. Returns the new membership,
+-- or nil when the collections API could not take the change.
+function Library:toggleWantToRead(book, view)
+    if not book or type(book.path) ~= "string" then return nil end
+    local want = not self:inWantToRead(book.path)
+    if not self:setWantToRead(book.path, want) then return nil end
+    if view and view.refreshData then pcall(view.refreshData, view) end
+    return want
 end
 
 function Library:collectionNames(path)
@@ -988,6 +1078,7 @@ function Library:showBookDetails(book, view, opts)
         collections = {},
         time_left = time_left,
         description = self:loadDescription(book),
+        facts = Core.bookFacts(book),
     }
     -- A name whose shelf would hold only this book is plain text, not a link.
     local all = (view and view.all_books) or (shared.index and shared.index.books)
@@ -1030,6 +1121,11 @@ function Library:showBookDetails(book, view, opts)
         on_more = function()
             UIManager:close(card)
             UIManager:nextTick(function() self:showBookDialog(book, view) end)
+        end,
+        want_in = self:inWantToRead(book.path),
+        on_want = function()
+            local now = self:toggleWantToRead(book, view)
+            if now ~= nil and card.setWantLabel then card:setWantLabel(now) end
         end,
         on_shelf = function(kind, name)
             UIManager:close(card)

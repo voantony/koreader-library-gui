@@ -15,7 +15,9 @@ Reading state (status, percent read, page count and the Library's own
 chapter marks) comes from the sidecar and is only re-read when the
 sidecar's mtime changed. A book KOReader calls "reading" but that is still
 before the start of its text is kept as "new" (see Core.readingStage). The last-opened time comes from
-KOReader's reading history.
+KOReader's reading history. A book with no sidecar and no history entry
+is never opened. Time left is worked out once from that same sidecar
+(or one cached stats lookup) and stored on the book; tiles only read it.
 
 Cache key per book: path + size + mtime (+ the calibre file's mtime).
 
@@ -171,10 +173,13 @@ function Index:refreshState(book)
     local data = sidecar and self:readSidecar(sidecar)
     if not data then
         book.status, book.percent, book.pages = "new", nil, nil
+        book.opened, book.doc_status, book.time_left = false, nil, nil
         Core.applyMarks(book, nil)
         return nil
     end
     local summary = type(data.summary) == "table" and data.summary or {}
+    book.doc_status = type(summary.status) == "string" and summary.status or nil
+    book.opened = true
     book.status = Core.isKnownStatus(summary.status) and summary.status or "reading"
     book.percent = tonumber(data.percent_finished)
     book.pages = tonumber(data.doc_pages)
@@ -184,7 +189,49 @@ function Index:refreshState(book)
     if book.status == "reading" and Core.readingStage(book) == "unread" then
         book.status = "new"
     end
+    if book.status == "reading" then
+        book.time_left = self:timeLeftFor(book, data)
+    else
+        book.time_left = nil
+    end
     return data
+end
+
+--- History means the book was opened, even when the sidecar is gone.
+-- With neither, it stays never opened.
+function Index:applyOpened(book)
+    if book.last_opened and book.last_opened > 0 then
+        book.opened = true
+    elseif not book.sc_mtime then
+        book.opened = false
+    end
+end
+
+--- Seconds left, from the sidecar stats already in hand. A stats provider
+-- is asked at most once per path, and only when those stats have no speed
+-- and no stored duration. The answer is kept on `self.stats_cache`.
+function Index:timeLeftFor(book, data)
+    if type(book) ~= "table" or book.status ~= "reading" then return nil end
+    local stats = type(data) == "table" and type(data.stats) == "table" and data.stats or nil
+    local est = Core.estimateTimeLeft(book, stats)
+    if est then return est end
+    local stored = Core.knownTimeLeft(nil, data)
+    if stored then return stored end
+    return Core.estimateTimeLeft(book, self:lookupStats(book.path))
+end
+
+function Index:lookupStats(path)
+    self.stats_cache = self.stats_cache or {}
+    local hit = self.stats_cache[path]
+    if hit ~= nil then return hit or nil end
+    local stats
+    local fn = self.opts.stats_for
+    if type(fn) == "function" then
+        local ok, s = pcall(fn, path)
+        if ok and type(s) == "table" then stats = s end
+    end
+    self.stats_cache[path] = stats or false
+    return stats
 end
 
 function Index:historyTimes()
@@ -248,6 +295,7 @@ function Index:build(force)
     local times = self:historyTimes()
     for _, book in ipairs(scanned) do
         book.last_opened = times[book.path]
+        self:applyOpened(book)
         -- (reused from memory: same title, authors, series and file name)
         if not book.search_key then Core.buildSearchKey(book, o.lower) end
     end
@@ -295,6 +343,7 @@ function Index:refreshBook(path)
     self:refreshState(book)
     local times = self:historyTimes()
     book.last_opened = times[path] or book.last_opened
+    self:applyOpened(book)
     return book
 end
 
@@ -312,6 +361,7 @@ function Index:recordFor(path)
     local data = self:refreshState(book)
     self:fillMeta(book, {}, nil, data)
     book.last_opened = self:historyTimes()[path]
+    self:applyOpened(book)
     Core.buildSearchKey(book, self.opts.lower)
     return book
 end

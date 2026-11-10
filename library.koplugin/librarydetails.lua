@@ -295,6 +295,8 @@ local Details = InputContainer:extend{
     on_close = nil,
     on_more = nil,
     on_shelf = nil,
+    on_want = nil,
+    want_in = false,
     covers_fullscreen = true,
 }
 
@@ -373,6 +375,18 @@ end
 function Details:setProgress()
     if self.progress_widget and self.progress_widget.setText then
         self.progress_widget:setText(progressText(self:progressBook()))
+        UIManager:setDirty(self, function() return "ui", self.dimen end)
+    end
+end
+
+function Details:wantText()
+    return _(Core.wantToReadLabel(self.want_in))
+end
+
+function Details:setWantLabel(in_collection)
+    self.want_in = in_collection and true or false
+    if self.want_button and self.want_button.setText then
+        self.want_button:setText(self:wantText(), self.want_button.width)
         UIManager:setDirty(self, function() return "ui", self.dimen end)
     end
 end
@@ -607,6 +621,38 @@ function Details:buildHeader(max_w)
         table.insert(col, vgap(Size.padding.small))
         table.insert(col, series)
     end
+    local facts = self:buildFacts(max_w)
+    if facts then
+        table.insert(col, vgap(Size.padding.default))
+        table.insert(col, facts)
+    end
+    return col
+end
+
+local FACT_SKIP = { title = true, author = true, series = true, progress = true }
+
+--- Pages, last read, file size and path. Title, author, series and the
+-- progress line are already on the card. Read-only: nothing here is edited.
+function Details:buildFacts(max_w)
+    local facts = self.info.facts
+    if type(facts) ~= "table" or #facts == 0 then return nil end
+    local col = VerticalGroup:new{ align = "left" }
+    local f = face("cfont", 15)
+    for _, fact in ipairs(facts) do
+        if type(fact) == "table" and not FACT_SKIP[fact.id]
+                and type(fact.label) == "string" and type(fact.value) == "string" and fact.value ~= "" then
+            local value = fact.value
+            if fact.id == "last_read" and value == "Never" then value = _("Never") end
+            if #col > 0 then table.insert(col, vgap(Size.padding.small)) end
+            table.insert(col, TextWidget:new{
+                text = _(fact.label) .. "  " .. value,
+                face = f,
+                fgcolor = BLACK,
+                max_width = math.max(1, max_w),
+            })
+        end
+    end
+    if #col == 0 then return nil end
     return col
 end
 
@@ -728,7 +774,23 @@ function Details:buildBottom(width)
         text_font_size = 16,
         text_font_bold = false,
     }
-    return HorizontalGroup:new{ align = "center", status, hgap(gap), more, hgap(gap), close }
+    local row = HorizontalGroup:new{ align = "center", status, hgap(gap), more, hgap(gap), close }
+    if not self.on_want then return row end
+    local want = Button:new{
+        text = self:wantText(),
+        width = math.max(1, width),
+        callback = function()
+            if self.on_want then self.on_want() end
+        end,
+        margin = 0,
+        bordersize = Size.border.thin,
+        padding = Size.padding.default,
+        text_font_face = "cfont",
+        text_font_size = 16,
+        text_font_bold = false,
+    }
+    self.want_button = want
+    return VerticalGroup:new{ align = "left", want, vgap(gap), row }
 end
 
 function Details:onTapCard(_, ges)
