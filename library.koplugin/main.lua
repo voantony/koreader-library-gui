@@ -728,21 +728,30 @@ end
 --- Rotate 90° clockwise and bring the Library back where it was: it is laid
 -- out for one screen size, so it is rebuilt.
 function Library:rotateLibrary()
+    return self:rotateForEvent(Event:new("IterateRotation"))
+end
+
+--- Apply a file-browser rotation (a two-finger swipe bound to rotate, or
+-- the Controls button) and rebuild the Library for the new screen size.
+-- In a book the Library is not on screen, so the event is only forwarded.
+function Library:rotateForEvent(event)
     if self.ui and self.ui.document then
-        -- in a book (Controls opened from the simple reader menu): just turn
-        -- the page; the Library is not on screen
-        self:sendUIEvent(Event:new("IterateRotation"))
-        return
+        self:sendUIEvent(event)
+        return true
     end
     local view = shared.view
-    local state = view and view:placeState()
+    local state = view and view.placeState and view:placeState()
     if view then UIManager:close(view) end
-    self:sendUIEvent(Event:new("IterateRotation"))
+    self:sendUIEvent(event)
     UIManager:nextTick(function()
         local lib = currentLibrary(self)
+        if not (lib and lib.onShowLibrary) then return end
         lib:onShowLibrary()
-        if state and shared.view then shared.view:restorePlace(state) end
+        if state and shared.view and shared.view.restorePlace then
+            shared.view:restorePlace(state)
+        end
     end)
+    return true
 end
 
 function Library:controlsMenu()

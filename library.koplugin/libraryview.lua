@@ -2609,7 +2609,27 @@ end
 -- Hold and double-tap in the bottom-left corner belong to the file
 -- browser's corner gestures, not to the menu button that sits there.
 -- A tap is not in this set: a tap on the button opens the menu (#1).
+-- A downward swipe from the top edge is the file browser's top menu
+-- (issue #9). It is offered before the grid, the search bar and the A–Z
+-- strip, which would otherwise keep it. The Controls panel still wins
+-- in its own corner when that panel is switched on.
 local CORNER_GESTURE = { hold = true, hold_release = true, double_tap = true }
+
+-- What the letter strip actually handles. A two-finger swipe or a
+-- multiswipe that happens to start on the strip is not one of these, so
+-- it is still offered to the file browser (issue #9).
+local STRIP_GESTURE = {
+    tap = true, touch = true, swipe = true,
+    pan = true, pan_release = true,
+    hold = true, hold_pan = true, hold_release = true,
+}
+
+local ROTATION_EVENT = {
+    onIterateRotation = true,
+    onSwapRotation = true,
+    onInvertRotation = true,
+    onSetRotationMode = true,
+}
 
 function LibraryView:cornerGestureFirst(ev)
     if not (ev and CORNER_GESTURE[ev.ges] and ev.pos and self.dimen) then return false end
@@ -2619,16 +2639,38 @@ function LibraryView:cornerGestureFirst(ev)
     return Zones.tryLiveZones(ev) and true or false
 end
 
+--- The strip keeps a tap, a one-finger swipe or a drag that started on it.
+-- Anything else (a two-finger swipe, a multiswipe) is not the strip's.
+function LibraryView:scrubberKeeps(ev)
+    return ev and STRIP_GESTURE[ev.ges] and self:gestureOnScrubber(ev) and true or false
+end
+
+--- Downward swipe from the top edge: the file browser's top menu, unless
+-- the Controls panel is on and the swipe started in its corner.
+function LibraryView:topMenuSwipeFirst(ev)
+    if not (ev and ev.ges == "swipe" and ev.direction == "south") then return false end
+    if self:tryOpenControls(ev) then return true end
+    if not Zones.tryMenuSwipe then return false end
+    return Zones.tryMenuSwipe(ev) and true or false
+end
+
 function LibraryView:handleEvent(event)
     if event.handler == "onGesture" then
         if Device.screen_saver_lock then return false end
         local ev = event.args and event.args[1]
         if ev and self:cornerGestureFirst(ev) then return true end
+        if ev and self:topMenuSwipeFirst(ev) then return true end
         if InputContainer.handleEvent(self, event) then return true end
-        -- A gesture that started on the A–Z strip is never offered to
-        -- LiveLight. The strip picks the letter, including a vertical swipe.
-        if ev and not self:gestureOnScrubber(ev) and Zones.tryLiveZones(ev) then return true end
+        -- A one-finger gesture that started on the A–Z strip is never
+        -- offered to LiveLight. The strip picks the letter.
+        if ev and not self:scrubberKeeps(ev) and Zones.tryLiveZones(ev) then return true end
         return false
+    end
+    -- Rotation has to rebuild this view: the file browser turns the screen
+    -- and lays itself out again, and leaves the Library at the old size
+    -- (issue #9).
+    if ROTATION_EVENT[event.handler] and self.plugin and self.plugin.rotateForEvent then
+        return self.plugin:rotateForEvent(event) and true or false
     end
     -- A Dispatcher action the view does not handle (a Gestures-plugin
     -- binding fired by the zone walk above, issue #9) goes to the file

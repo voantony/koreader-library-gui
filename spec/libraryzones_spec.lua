@@ -196,6 +196,53 @@ describe("Library zones user-first", function()
         eq(Zones.tryUserFirst({ ges = "tap" }, fm), false)
         eq(Zones.tryUserFirst({ ges = "swipe" }, nil), false)
     end)
+
+    it("fires a configured two-finger swipe", function()
+        local seen
+        local fm = fakeFM({ fakeZone("two_finger_swipe_east",
+            function(ev) return ev.ges == "two_finger_swipe" and ev.direction == "east" end,
+            function(ev) seen = ev; return true end) },
+            { user_gestures = { two_finger_swipe_east = "iterate_rotation" } })
+        local ev = { ges = "two_finger_swipe", direction = "east", pos = { x = 400, y = 700 } }
+        eq(Zones.tryFMZones(ev, fm), true)
+        eq(seen, ev)
+    end)
+end)
+
+describe("Library zones top menu swipe", function()
+    it("opens the menu and does not let the fullscreen file swipe take it", function()
+        local fired = {}
+        local menu = { _ordered_touch_zones = { fakeZone("filemanager_swipe",
+            function(ev) return ev.direction == "south" end,
+            function() fired[#fired + 1] = "menu"; return true end) } }
+        local fm = fakeFM({ fakeZone("filemanager_swipe",
+            function() return true end,
+            function() fired[#fired + 1] = "host"; return true end) },
+            { children = { menu } })
+        package.loaded["apps/filemanager/filemanager"] = { instance = fm }
+        local ev = { ges = "swipe", direction = "south", pos = { x = 200, y = 12 } }
+        eq(Zones.tryMenuSwipe(ev), true)
+        same(fired, { "menu" })
+        package.loaded["apps/filemanager/filemanager"] = nil
+    end)
+
+    it("does not fire when the menu zone misses or the swipe is not downward", function()
+        local fired = {}
+        local menu = { _ordered_touch_zones = { fakeZone("filemanager_swipe",
+            function() return false end,
+            function() fired[#fired + 1] = "menu"; return true end) } }
+        local fm = fakeFM({ fakeZone("filemanager_swipe",
+            function() return true end,
+            function() fired[#fired + 1] = "host"; return true end) },
+            { children = { menu } })
+        package.loaded["apps/filemanager/filemanager"] = { instance = fm }
+        eq(Zones.tryMenuSwipe({ ges = "swipe", direction = "south", pos = { x = 10, y = 800 } }), false)
+        eq(Zones.tryMenuSwipe({ ges = "swipe", direction = "west", pos = { x = 10, y = 10 } }), false)
+        eq(Zones.tryMenuSwipe({ ges = "two_finger_swipe", direction = "south" }), false)
+        eq(#fired, 0, "the fullscreen swipe did not run")
+        package.loaded["apps/filemanager/filemanager"] = nil
+        eq(Zones.tryMenuSwipe({ ges = "swipe", direction = "south" }), false)
+    end)
 end)
 
 describe("Library zones action forwarding", function()

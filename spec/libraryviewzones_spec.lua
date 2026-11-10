@@ -33,6 +33,7 @@ end
 local live_calls, live_result
 local userfirst_calls, userfirst_result
 local forward_calls, forward_result
+local menu_calls, menu_result
 local base_calls, base_handled
 local device_stub
 
@@ -40,6 +41,7 @@ local function loadView()
     live_calls, live_result = {}, true
     userfirst_calls, userfirst_result = {}, false
     forward_calls, forward_result = {}, true
+    menu_calls, menu_result = {}, false
     base_calls, base_handled = {}, false
     local InputContainerStub = cls()
     function InputContainerStub.handleEvent(self, event)
@@ -74,6 +76,7 @@ local function loadView()
         libraryzones = {
             tryLiveZones = function(ev) live_calls[#live_calls + 1] = ev; return live_result end,
             tryUserFirst = function(ev, fm) userfirst_calls[#userfirst_calls + 1] = ev; return userfirst_result end,
+            tryMenuSwipe = function(ev) menu_calls[#menu_calls + 1] = ev; return menu_result end,
             liveHost = function() return {} end,
             forwardToLive = function(event, widget) forward_calls[#forward_calls + 1] = event; return forward_result end,
         },
@@ -315,6 +318,98 @@ describe("Library view zone forwarding", function()
         eq(v:onSwipe(nil, ges("south", 1200, 500)), true)
         eq(#scrubbed, 1, "the strip jumped to a letter")
         eq(#live_calls, 0, "warmth did not take the strip's swipe")
+    end)
+
+    it("offers a downward swipe from the top edge to the file browser menu", function()
+        local View = loadView()
+        menu_result = true
+        local v = swipeView(View, { plugin = { openControls = function() return false end } })
+        local ev = { ges = "swipe", direction = "south", pos = { x = 400, y = 20 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(menu_calls[1], ev, "the top-edge swipe was offered to the menu")
+        eq(#base_calls, 0, "the grid, the search bar and the strip did not see it")
+        eq(#live_calls, 0)
+        eq(v._shelf_expanded, nil)
+    end)
+
+    it("still opens Controls from the top right when that panel is on", function()
+        local View = loadView()
+        menu_result = true
+        local opened = 0
+        local v = swipeView(View, { plugin = {
+            openControls = function() opened = opened + 1; return true end,
+        } })
+        local ev = { ges = "swipe", direction = "south", pos = { x = 1000, y = 40 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(opened, 1)
+        eq(#menu_calls, 0, "Controls took the corner; the file browser menu did not")
+    end)
+
+    it("offers the top-right swipe to the menu when Controls are off", function()
+        local View = loadView()
+        menu_result = true
+        local opened = 0
+        local v = swipeView(View, { plugin = {
+            openControls = function() opened = opened + 1; return false end,
+        } })
+        local ev = { ges = "swipe", direction = "south", pos = { x = 1200, y = 30 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(opened, 1, "Controls was asked, and declined")
+        eq(menu_calls[1], ev)
+        eq(#base_calls, 0, "the A–Z strip did not take the top-edge swipe")
+    end)
+
+    it("lets the library keep a downward swipe the menu does not take", function()
+        local View = loadView()
+        local v = swipeView(View, { continue_books = { {} } })
+        local ev = { ges = "swipe", direction = "south", pos = { x = 400, y = 800 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(#menu_calls, 1, "asked")
+        eq(menu_result, false)
+        eq(#base_calls, 1, "the grid still sees a swipe the menu left alone")
+    end)
+
+    it("forwards a two-finger swipe that starts on the A–Z strip", function()
+        local View = loadView()
+        local v = swipeView(View, { scrubber = {
+            dimen = { x = 1214, y = 200, w = 50, h = 1200 },
+            hitRect = function(self)
+                return { x = self.dimen.x - 20, y = self.dimen.y, w = self.dimen.w + 40, h = self.dimen.h }
+            end,
+            onSwipeScrubber = function() return true end,
+        } })
+        local ev = { ges = "two_finger_swipe", direction = "east", pos = { x = 1230, y = 500 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(live_calls[1], ev, "the strip does not keep a two-finger swipe")
+        eq(#base_calls, 1, "the view looked, and did not keep it")
+    end)
+
+    it("forwards a two-finger swipe from the middle of the screen", function()
+        local View = loadView()
+        local v = swipeView(View, {})
+        local ev = { ges = "two_finger_swipe", direction = "west", pos = { x = 500, y = 800 } }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(live_calls[1], ev)
+        eq(v.turned, nil, "a two-finger swipe is not a page turn")
+    end)
+
+    it("rebuilds through the plugin on a rotation event instead of forwarding it raw", function()
+        local View = loadView()
+        local got
+        local v = swipeView(View, { plugin = {
+            rotateForEvent = function(_, event) got = event; return true end,
+        } })
+        local event = { handler = "onIterateRotation", args = {} }
+        eq(v:handleEvent(event), true)
+        eq(got, event)
+        eq(#forward_calls, 0, "the file browser must not rotate while the old layout is still up")
+        forward_calls = {}
+        local swap = { handler = "onSwapRotation", args = {} }
+        eq(v:handleEvent(swap), true)
+        eq(got, swap)
+        local setmode = { handler = "onSetRotationMode", args = { 1 } }
+        eq(v:handleEvent(setmode), true)
+        eq(got, setmode)
     end)
 
     it("keeps the Controls corner swipe when it starts in the corner", function()

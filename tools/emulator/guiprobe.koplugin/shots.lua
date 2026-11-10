@@ -883,6 +883,287 @@ jobs.gallery = function(done)
     end)
 end
 
+--- File-browser gestures on the library home (#9). The top-edge downward
+-- swipe is KOReader's own file-browser menu zone (there is no "top edge
+-- down" entry in the gesture manager). The two-finger swipe is bound in
+-- the file-browser gesture profile to "Rotate by 90° CW". The plugin's
+-- Controls panel is off, which is how this was reported.
+local function gesturesScenario()
+    whenLibrary(function()
+        local Geom = require("ui/geometry")
+        local Event = require("ui/event")
+        local time = require("ui/time")
+
+        local function send(ev)
+            UIManager:sendEvent(Event:new("Gesture", ev))
+        end
+        local function point(x, y)
+            return Geom:new{ x = x, y = y, w = 0, h = 0 }
+        end
+        local function swipe(dir, x, y, dx, dy)
+            send{
+                ges = "swipe", direction = dir,
+                pos = point(x, y), start_pos = point(x, y),
+                end_pos = point(x + (dx or 0), y + (dy or 0)),
+                time = time.now(),
+            }
+        end
+        local function twoFinger(dir, x, y)
+            local dx = dir == "east" and 180 or dir == "west" and -180 or 0
+            local dy = dir == "south" and 180 or dir == "north" and -180 or 0
+            send{
+                ges = "two_finger_swipe", direction = dir,
+                pos = point(x, y),
+                end_pos = point(x + dx, y + dy),
+                time = time.now(),
+            }
+        end
+        local function menuOpen()
+            local fm = FM()
+            return fm and fm.menu and fm.menu.menu_container ~= nil
+        end
+        local function closeMenu()
+            local fm = FM()
+            if fm and fm.menu and fm.menu.onCloseFileManagerMenu then
+                fm.menu:onCloseFileManagerMenu()
+            end
+        end
+        local function controlsOpen()
+            local l = lib()
+            return l and l.shared and l.shared.controls ~= nil
+        end
+        local function layout(tag)
+            local view = V()
+            local sw, sh = Screen:getWidth(), Screen:getHeight()
+            local d = view and view.dimen
+            local sc = view and view.scrubber
+            local sd = sc and (sc.hitRect and sc:hitRect() or sc.dimen)
+            P("LAYOUT", tag,
+                "screen", sw .. "x" .. sh,
+                "view", d and (d.w .. "x" .. d.h) or "nil",
+                "page", view and view.page, "pages", view and view.pages,
+                "sort", view and view.sort,
+                "strip", sd and (sd.x .. "," .. sd.y .. " " .. sd.w .. "x" .. sd.h) or "no",
+                "shelf", view and view._shelf_expanded and "expanded" or "normal",
+                "menu", menuOpen() and "open" or "closed",
+                "controls", controlsOpen() and "open" or "closed")
+            return view, sw, sh, d
+        end
+        local function expectMenu(tag)
+            if menuOpen() and not controlsOpen() then
+                P("PASS", tag, "file browser menu")
+                return true
+            end
+            state.ok = false
+            P("FAIL", tag, "menu", menuOpen() and "open" or "closed",
+                "controls", controlsOpen() and "open" or "closed", "stack", stackLine())
+            return false
+        end
+        local portrait_w, portrait_h
+        local function expectLayout(tag, want_w, want_h)
+            local view, sw, sh, d = layout(tag)
+            if not (view and d and sw == want_w and sh == want_h and d.w == sw and d.h == sh) then
+                state.ok = false
+                P("FAIL", tag, "layout", "wanted", want_w .. "x" .. want_h)
+            else
+                P("PASS", tag, "layout", sw .. "x" .. sh)
+            end
+            if view and view.sort == "title" and (view.pages or 0) > 1 and not view.scrubber then
+                state.ok = false
+                P("FAIL", tag, "A-Z strip missing")
+            end
+            return view
+        end
+
+        q(0.3, function()
+            dismissNotices()
+            local l = lib()
+            l.settings.controls_panel = false
+            if l.saveSettings then l:saveSettings() end
+            local fm = FM()
+            fm.menu.activation_menu = "swipe_tap"
+            local g = fm.gestures and fm.gestures.gestures
+            if not g then
+                state.ok = false
+                P("FAIL no file browser gesture profile")
+                return
+            end
+            -- Gesture manager, file browser profile: two-finger swipe rotates.
+            for _, id in ipairs({
+                "two_finger_swipe_east", "two_finger_swipe_west",
+                "two_finger_swipe_north", "two_finger_swipe_south",
+            }) do
+                g[id] = { iterate_rotation = true }
+            end
+            local view = V()
+            view:resort("title")
+            local sw, sh = Screen:getWidth(), Screen:getHeight()
+            portrait_w, portrait_h = sw, sh
+            P("configured", "controls_panel off", "activate_menu", fm.menu.activation_menu,
+                "screen", sw .. "x" .. sh, "dpi", Screen:getDPI(),
+                "two_finger", "iterate_rotation")
+            if sw == 1072 and sh == 1448 then
+                P("screen", "Paperwhite 4")
+            end
+            layout("portrait")
+        end)
+        q(0.4, function()
+            dismissNotices()
+            shot("01-portrait")
+        end)
+        q(0.2, function()
+            local sw, sh = Screen:getWidth(), Screen:getHeight()
+            local y = math.max(8, math.floor(sh / 16))
+            P("swipe", "top center", "south", math.floor(sw / 2), y, "band", math.floor(sh / 8))
+            swipe("south", math.floor(sw / 2), y, 0, 160)
+        end)
+        q(0.5, function()
+            expectMenu("top center")
+            shot("02-top-swipe-center")
+            closeMenu()
+        end)
+        q(0.3, function()
+            local view = V()
+            local sw, sh = Screen:getWidth(), Screen:getHeight()
+            local band = math.floor(sh / 8)
+            local x, y = sw - 16, math.max(8, math.floor(sh / 16))
+            local sc = view.scrubber
+            if sc and sc.hitRect then
+                local r = sc:hitRect()
+                P("strip hit", r.x, r.y, r.w, r.h, "band", band)
+                if r.y < band then
+                    x = math.floor(r.x + r.w / 2)
+                    y = math.min(band - 2, math.max(r.y + 2, 4))
+                end
+            end
+            P("swipe", "top right", "south", x, y)
+            swipe("south", x, y, 0, 160)
+        end)
+        q(0.5, function()
+            expectMenu("top right")
+            shot("03-top-swipe-corner")
+            closeMenu()
+        end)
+        q(0.3, function()
+            local view = V()
+            local sw, sh = Screen:getWidth(), Screen:getHeight()
+            -- Left edge, below the menu band: brightness, not the top menu.
+            local edge_y = math.floor(sh * 0.55)
+            swipe("south", 16, edge_y, 0, 140)
+            if menuOpen() then
+                state.ok = false
+                P("FAIL left-edge swipe opened the menu")
+                closeMenu()
+            else
+                P("PASS left edge stayed out of the menu")
+            end
+            -- The seeded library hides Continue reading. Turn it on so the
+            -- shelf gesture has a strip to hide, then swipe up below it.
+            view:setShowContinue(true)
+            view = V()
+            local n = view.continue_books and #view.continue_books or 0
+            local y = math.max((view.body_y or 0) + 40, math.floor(sh * 0.72))
+            P("shelf before", "page", view.page, "continue", n, "body_y", view.body_y, "y", y)
+            swipe("north", math.floor(sw / 2), y, 0, -220)
+            P("shelf", V()._shelf_expanded and "expanded" or "normal",
+                "continue", V().continue_books and #V().continue_books or 0)
+            if not V()._shelf_expanded then
+                state.ok = false
+                P("FAIL shelf did not expand")
+            else
+                P("PASS shelf expand")
+            end
+        end)
+        q(0.4, function()
+            dismissNotices()
+            shot("04-shelf-expanded")
+            local sw, sh = Screen:getWidth(), Screen:getHeight()
+            swipe("south", math.floor(sw / 2), math.floor(sh * 0.72), 0, 200)
+            if menuOpen() then
+                state.ok = false
+                P("FAIL a mid-screen downward swipe opened the menu")
+                closeMenu()
+            end
+            if V()._shelf_expanded then
+                state.ok = false
+                P("FAIL shelf did not restore")
+            else
+                P("PASS shelf restore")
+            end
+            local view = V()
+            local before = view.page
+            swipe("west", math.floor(sw / 2), math.floor(sh / 2), -200, 0)
+            P("page turn", before, "->", V().page)
+            if V().page ~= before + 1 then
+                state.ok = false
+                P("FAIL page turn")
+            else
+                P("PASS page turn")
+            end
+            swipe("east", math.floor(sw / 2), math.floor(sh / 2), 200, 0)
+            if V().page ~= before then
+                state.ok = false
+                P("FAIL page turn back", V().page)
+            end
+            -- A letter-strip swipe below the menu band stays a letter jump.
+            local sc = V().scrubber
+            if sc and sc.hitRect then
+                local r = sc:hitRect()
+                local y = math.floor(r.y + r.h * 0.7)
+                local page = V().page
+                swipe("south", math.floor(r.x + r.w / 2), y, 0, 80)
+                if menuOpen() then
+                    state.ok = false
+                    P("FAIL strip swipe opened the menu")
+                    closeMenu()
+                else
+                    P("PASS strip kept its swipe", "page", page, "->", V().page)
+                end
+            end
+        end)
+        q(0.3, function()
+            local view = V()
+            local sw, sh = Screen:getWidth(), Screen:getHeight()
+            local x, y = math.floor(sw / 2), math.floor(sh / 2)
+            local sc = view.scrubber
+            if sc and sc.hitRect then
+                local r = sc:hitRect()
+                x = math.floor(r.x + r.w / 2)
+                y = math.floor(r.y + r.h / 2)
+            end
+            P("two-finger", "east", "on strip", x, y, "page", view.page)
+            twoFinger("east", x, y)
+        end)
+        q(0.8, function()
+            local sw, sh = Screen:getWidth(), Screen:getHeight()
+            P("after two-finger", "screen", sw .. "x" .. sh)
+            local view = expectLayout("landscape", portrait_h, portrait_w)
+            shot("05-after-rotate")
+            if view and sw == portrait_h and sh == portrait_w then
+                local before = view.page
+                swipe("west", math.floor(sw / 2), math.floor(sh / 2), -160, 0)
+                local now = V()
+                P("landscape page", before, "->", now and now.page)
+                if not (now and now.page == before + 1) then
+                    state.ok = false
+                    P("FAIL landscape page turn")
+                else
+                    P("PASS landscape page turn")
+                end
+            end
+        end)
+        q(0.3, function()
+            local sw, sh = Screen:getWidth(), Screen:getHeight()
+            P("two-finger", "east", "back", math.floor(sw / 2), math.floor(sh / 2))
+            twoFinger("east", math.floor(sw / 2), math.floor(sh / 2))
+        end)
+        q(0.8, function()
+            expectLayout("portrait again", portrait_w, portrait_h)
+            shot("06-portrait-again")
+        end)
+    end)
+end
+
 local ORDER = {
     "widgets", "accordion", "recently", "shelf", "bubble", "menu",
     "filters", "brightness", "startwith", "gallery",
@@ -920,5 +1201,6 @@ local scenarios = { readme = function()
 end }
 for _, name in ipairs(ORDER) do scenarios[name] = solo(name) end
 scenarios.controls = solo("controls")
+scenarios.gestures = gesturesScenario
 return scenarios
 end
