@@ -1,7 +1,7 @@
 # KOReader's own LuaJIT works too, e.g. LUA=/path/to/koreader/luajit
 LUA ?= luajit
 PLUGIN := library.koplugin
-VERSION ?= 0.7.7
+VERSION ?= 0.7.8
 # Optional. A KOReader tag (v2025.04) or dev revision (v2025.04-42).
 # `make zip` writes it as `Requires KOReader:` in dist/release-notes.txt,
 # next to the zip's SHA256 line. Paste both into the GitLab release notes.
