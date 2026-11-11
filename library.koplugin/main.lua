@@ -75,6 +75,8 @@ local DEFAULTS = {
     -- footer_page_total_prev: the status bar view from before we switched it
     flash_ghosting = "setting", -- e-ink: flash every N Library page turns (libraryrefresh.lua)
     -- update_mode: nil or "notify" (default) | "off" | "install". See libraryupdate.mode.
+    -- update_need_pending: quiet install skipped a release this KOReader is too old for.
+    -- update_need_library / update_need_koreader: the versions that note names.
     -- footer_cycle: { [view] = false } views turned off in the tap cycle
     -- view_memory: { [key] = { view =, sort =, filter =, t = } }, see Core.viewKey
     -- sleep_cover_prev: KOReader's sleep screen settings from before
@@ -190,21 +192,30 @@ function Library:setUpdateMode(mode)
     self:saveSettings()
 end
 
+--- Quiet install saved a KOReader-too-old note. Show it once, over Updates.
+function Library:showPendingUpdateNotice()
+    local Update = require("libraryupdate")
+    local pending, changed = Update.takePendingBlock(self.settings)
+    if changed and self.saveSettings then self:saveSettings() end
+    if not pending then return end
+    Update.presentBlock(self, pending.library, pending.required)
+end
+
 --- ☰ → Library → Updates, and the Library ☰ menu. Off is the only switch
 -- that stops background checks. Check for updates now still works.
-function Library:updatesMenu()
+function Library:updatesMenuItems()
     local items = {
         {
             text = _("Check for updates now"),
-            help_text = _("Look up the latest release. If it is newer, it shows the version and a short changelog. Update downloads it, checks the published SHA256, and replaces this plugin. Settings stay in koreader/settings."),
+            help_text = _("Look up the latest release. If it is newer, it shows the version and a short changelog. Update downloads it, checks the published SHA256, and replaces this plugin. Settings stay in koreader/settings. If the release needs a newer KOReader, nothing is downloaded: update KOReader from its own updater (Tools or the menu > Update)."),
             callback = function() require("libraryupdate").prompt(self) end,
             separator = true,
         },
     }
     local help = {
         off = _("Turn off update checks. Nothing is looked up in the background. Check for updates now still works."),
-        notify = _("About once a week, when Wi-Fi is already on, show a short notice if a newer release exists. Nothing is installed, and Wi-Fi is not turned on."),
-        install = _("About once a week, when Wi-Fi is already on, download a newer release, check its SHA256, and install it. KOReader is not restarted, and Wi-Fi is not turned on. An open book is left alone until the Library is showing again. If the install fails, the previous copy is put back and nothing is said."),
+        notify = _("About once a week, when Wi-Fi is already on, show a short notice if a newer release exists. Nothing is installed, and Wi-Fi is not turned on. If that release needs a newer KOReader, the notice says so instead."),
+        install = _("About once a week, when Wi-Fi is already on, download a newer release, check its SHA256, and install it. KOReader is not restarted, and Wi-Fi is not turned on. An open book is left alone until the Library is showing again. If the install fails, the previous copy is put back and nothing is said. If the release needs a newer KOReader, it is not downloaded, and the note waits until Updates is opened."),
     }
     local Update = require("libraryupdate")
     for i = 1, #Update.MODE_ORDER do
@@ -217,10 +228,29 @@ function Library:updatesMenu()
             callback = function() self:setUpdateMode(id) end,
         }
     end
+    return items
+end
+
+--- Menu search indexes every sub_item_table_func. That walk is not the user
+-- opening Updates, so it must not show the note or use it up.
+function Library:updatesMenuOpened()
+    local names = {}
+    for level = 2, 12 do
+        local info = debug.getinfo(level, "n")
+        if not info then break end
+        names[#names + 1] = info.name
+    end
+    return require("libraryupdate").updatesOpenedFrom(names)
+end
+
+function Library:updatesMenu()
     return {
         text = _("Updates"),
-        help_text = _("Check for updates now always works. Automatic updates run about once a week, and only when Wi-Fi is already on."),
-        sub_item_table = items,
+        help_text = _("Check for updates now always works. Automatic updates run about once a week, and only when Wi-Fi is already on. A release that needs a newer KOReader is not installed, and KOReader itself is not updated."),
+        sub_item_table_func = function()
+            if self:updatesMenuOpened() then self:showPendingUpdateNotice() end
+            return self:updatesMenuItems()
+        end,
         separator = true,
     }
 end
@@ -257,6 +287,7 @@ function Library:showUpdatesMenu(view)
         },
     }
     self:showOverLibrary(dialog, view)
+    self:showPendingUpdateNotice()
 end
 
 function Library:statusStyleMenu()

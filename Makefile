@@ -2,6 +2,13 @@
 LUA ?= luajit
 PLUGIN := library.koplugin
 VERSION ?= 0.7.5
+# Optional. A KOReader tag (v2025.04) or dev revision (v2025.04-42).
+# `make zip` writes it as `Requires KOReader:` in dist/release-notes.txt,
+# next to the zip's SHA256 line. Paste both into the GitLab release notes.
+# The in-plugin updater reads that line before downloading and will not
+# install when the installed KOReader is older. It never updates KOReader.
+# Leave this empty to keep today's behaviour (no minimum).
+KOREADER_REQUIRES ?=
 FILES := _meta.lua main.lua librarycore.lua librarystatus.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua libraryfooter.lua libraryrefresh.lua libraryreturn.lua libraryreadability.lua librarysuggest.lua librarytiming.lua libraryscrubber.lua libraryzones.lua librarygestures.lua librarywidgets.lua libraryupdate.lua
 
 .PHONY: test zip stage clean
@@ -18,6 +25,14 @@ stage: clean
 
 zip: stage
 	cd dist && zip -rX library.koplugin-v$(VERSION).zip $(PLUGIN) && (shasum -a 256 library.koplugin-v$(VERSION).zip 2>/dev/null || sha256sum library.koplugin-v$(VERSION).zip) >> SHA256SUMS
+	@hash=$$( (shasum -a 256 "dist/library.koplugin-v$(VERSION).zip" 2>/dev/null || sha256sum "dist/library.koplugin-v$(VERSION).zip") | awk '{print $$1}' ); \
+	printf 'SHA256: %s\n' "$$hash" > dist/release-notes.txt; \
+	if [ -n "$(KOREADER_REQUIRES)" ]; then \
+	  REQ='$(KOREADER_REQUIRES)' $(LUA) -e 'local u=dofile("library.koplugin/libraryupdate.lua"); local r=os.getenv("REQ"); if not u.normalizeKoreaderVersion(r) then error("KOREADER_REQUIRES is not a KOReader version ("..tostring(r).."). Use vYYYY.MM or vYYYY.MM-N.") end' || exit 1; \
+	  printf 'Requires KOReader: %s\n' "$(KOREADER_REQUIRES)" >> dist/release-notes.txt; \
+	fi; \
+	echo "Paste dist/release-notes.txt into the GitLab release notes."; \
+	cat dist/release-notes.txt
 
 clean:
 	rm -rf dist

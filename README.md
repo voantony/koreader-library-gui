@@ -133,6 +133,8 @@ In KOReader, open ☰ → **Updates** (on the Library screen, and under ☰ → 
 
 **Automatic updates** start on **Notify me**. **Off** turns background checks off; checking by hand still works. **Notify me** looks about once a week, only when Wi-Fi is already on, and only tells you. **Install quietly** installs that newer release in the background and leaves a short note. It does not turn Wi-Fi on and does not restart KOReader. An open book is left alone until you are back in the Library.
 
+The updater only replaces this plugin. It never updates KOReader. If a release says it needs a newer KOReader, **Check for updates now** and **Notify me** say so and do not download it. Update KOReader from KOReader's own updater (Tools or the menu > Update). **Install quietly** skips that download and shows the same note the next time you open Updates.
+
 From a Mac, the same install runs if a Kindle is mounted (including through [Mount Kindle](https://gitlab.com/antonyvo/kindle-mtp-mount)), or with `kpush` when that is on your PATH:
 
 ```sh

@@ -101,5 +101,33 @@ Match the Lua already in `library.koplugin/`.
 ## Building the release zip
 
 ```sh
-make zip VERSION=0.7.0    # dist/library.koplugin-v0.7.0.zip and dist/SHA256SUMS
+make zip VERSION=0.7.0
+# dist/library.koplugin-v0.7.0.zip, dist/SHA256SUMS, and dist/release-notes.txt
 ```
+
+`dist/release-notes.txt` starts with the line the updater already checks:
+
+```
+SHA256: <hex of the zip>
+```
+
+Paste that into the GitLab release description. v0.7.1's form, `` SHA256 `<hex>` ``, is still accepted.
+
+### Minimum KOReader version
+
+To require a KOReader version, pass it when building the zip. `make zip` checks the shape and adds the line under the hash:
+
+```sh
+make zip VERSION=0.8.0 KOREADER_REQUIRES=v2025.04
+```
+
+```
+SHA256: <hex of the zip>
+Requires KOReader: v2025.04
+```
+
+Use a KOReader tag (`v2024.11`, `v2025.04`) or a dev revision (`v2025.04-42`, the commits-after-tag form from KOReader's `git-rev`, optionally with `-g<hash>`). The in-plugin updater reads the line from the release notes before it downloads the zip. It compares that with `require("version"):getCurrentRevision()` / `getNormalizedCurrentVersion()`, using the same weights as KOReader's `getNormalizedVersion`. A dev build `v2025.04-42` is newer than the `v2025.04` tag and older than `v2025.05`.
+
+If the installed KOReader is older, the zip is not downloaded and KOReader itself is not updated. **Notify me** and **Check for updates now** say that this Library release needs that KOReader or newer, and point at KOReader's own updater (Tools or the menu > Update). **Install quietly** skips the download and shows the same note the next time Updates is opened.
+
+Leave `KOREADER_REQUIRES` empty when the release runs on the same KOReader as before. A missing line, or a version that cannot be parsed, does not block the update.
