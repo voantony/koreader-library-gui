@@ -1871,10 +1871,11 @@ function LibraryView:buildBody()
     local grid_h = math.max(self.label_h + 20, self.dimen.h - fixed - keyboard_h)
 
     -- Continue reading / Recently opened: shown only on page 1 of the Books
-    -- tab (no search, no filter, no group). Later pages use the full body
-    -- so more books fit. Compact and two-column Compact never show the
-    -- strip. Books already in the strip stay out of the paged rows on
-    -- every page so a title never appears twice.
+    -- tab (no search, no open group). A filter does not hide the widgets
+    -- or expand the shelf (#11). Later pages use the full body so more
+    -- books fit. Compact and two-column Compact never show the strip.
+    -- Books already in the strip stay out of the paged rows on every page
+    -- so a title never appears twice.
     local strip
     self.continue_tiles = nil
     self.continue_books = nil

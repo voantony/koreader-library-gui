@@ -173,18 +173,18 @@ describe("Variable per-page capacity", function()
     end)
 
     describe("filters and the Continue reading setting", function()
-        it("a filter that hides the strip switches to uniform full-page capacity", function()
+        it("a filter keeps the strip, so page 1 stays the short page", function()
             local shown = Core.showContinue{
                 enabled = true, tab = "books", group = nil, query = "", filter = "all", keyboard = false,
             }
-            local hidden = Core.showContinue{
+            local filtered = Core.showContinue{
                 enabled = true, tab = "books", group = nil, query = "", filter = "unread", keyboard = false,
             }
             eq(shown, true)
-            eq(hidden, false)
+            eq(filtered, true, "filtering does not hide the strip")
             -- All + strip: 197 remaining books, page 1 has 5 slots, later 10
             eq(Core.pageCount(197, 5, 10), 21)
-            -- Unread hides the strip and uses the full body (10 per page)
+            -- The full-body capacity is what an expanded shelf uses (10 per page)
             local unread = seq(50)
             local items, page, pages = Core.page(unread, 10, 21)
             eq(pages, 5)

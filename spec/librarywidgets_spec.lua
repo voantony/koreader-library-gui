@@ -42,7 +42,7 @@ describe("home widgets", function()
         local slots = { { kind = "favorites" } }
         eq(W.areaVisible(slots, { tab = "books" }), true)
         eq(W.areaVisible(slots, { tab = "books", query = "emma" }), false)
-        eq(W.areaVisible(slots, { tab = "books", filter = "unread" }), false)
+        eq(W.areaVisible(slots, { tab = "books", filter = "unread" }), true, "a filter leaves the widgets up")
         eq(W.areaVisible(slots, { tab = "authors" }), false)
         eq(W.areaVisible(slots, { tab = "books", group = {} }), false)
         eq(W.areaVisible(slots, { tab = "books", keyboard = true }), false)

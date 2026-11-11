@@ -1854,12 +1854,14 @@ function Core.topRowBooks(mode, books, n, exists)
 end
 
 --- Whether the Continue reading strip belongs on screen now.
+-- A filter does not hide it: filtering and expanding the shelf are
+-- separate (#11). Search, another tab, an open group and the keyboard
+-- still do.
 -- @tparam table state `{ enabled, tab, group, query, filter, keyboard }`
 function Core.showContinue(state)
     if not state.enabled then return false end
     if state.tab ~= "books" or state.group then return false end
     if state.query and state.query:match("%S") then return false end
-    if state.filter and state.filter ~= "all" then return false end
     if state.keyboard then return false end
     return true
 end
