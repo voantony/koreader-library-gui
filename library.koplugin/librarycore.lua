@@ -3667,6 +3667,38 @@ function Core.scrubberSplit(letters, height, min_slot)
     return left, right
 end
 
+--- "one" (always the right-hand column), "auto" (split when the column
+-- is short), or "split" (always both edges). Absent is "one", the
+-- v0.7.7 strip.
+function Core.azLayout(settings)
+    local mode = type(settings) == "table" and settings.az_layout
+    if mode == "auto" or mode == "split" or mode == "one" then return mode end
+    return "one"
+end
+
+--- True only when the reader asked a letter tap to leave an expanded
+-- shelf expanded. Off by default: a letter tap collapses it, as a page
+-- turn does. The swipe that expands the shelf still works afterwards.
+function Core.letterKeepsShelf(settings)
+    return type(settings) == "table" and settings.letter_keeps_shelf == true
+end
+
+--- The two halves to paint, or nil for a single right-hand column.
+function Core.azHalves(mode, letters, height, min_slot)
+    if mode == "split" then
+        letters = letters or Core.SCRUBBER_LETTERS
+        local n = #letters
+        if n < 2 then return nil end
+        local mid = math.ceil(n / 2)
+        local left, right = {}, {}
+        for i = 1, mid do left[#left + 1] = letters[i] end
+        for i = mid + 1, n do right[#right + 1] = letters[i] end
+        return left, right
+    end
+    if mode == "auto" then return Core.scrubberSplit(letters, height, min_slot) end
+    return nil
+end
+
 --- A vertical swipe that starts in a LiveLight edge (the outer eighth).
 -- Taps and drags stay on the A–Z strip; this flick is the one that
 -- overlaps the warmth or brightness slide.

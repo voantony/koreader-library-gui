@@ -518,6 +518,21 @@ describe("settings kept from v0.7.7", function()
         eq(W.coverMode(saved), "compact")
         eq(Core.viewPrefs(saved, "series:Oz").view, "compact")
     end)
+
+    it("keeps the single strip and a collapsing letter tap, and does not rewrite views", function()
+        local saved = {
+            view = "compact", columns = 4, sort = "title", show_scrubber = true,
+            view_memory = { ["tab:authors"] = { view = "list", sort = "author", filter = "all", t = 1 } },
+        }
+        Core.migrateSettings(saved)
+        eq(saved.view, "compact")
+        eq(saved.columns, 4)
+        eq(saved.az_layout, nil)
+        eq(saved.letter_keeps_shelf, nil)
+        eq(Core.azLayout(saved), "one")
+        eq(Core.letterKeepsShelf(saved), false)
+        eq(Core.viewPrefs(saved, "tab:authors").view, "list")
+    end)
 end)
 
 describe("edge strips", function()

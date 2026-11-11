@@ -99,6 +99,8 @@ local LibraryView = InputContainer:extend{
     show_continue = true,   -- the Continue reading strip on the Books tab
     filter_expands = true, -- a filter hides the widgets unless this is off (#11)
     widget_covers = "compact", -- "compact" (120px cap) | "fill" (#12)
+    az_layout = "one",      -- "one" | "auto" | "split" (#14)
+    letter_keeps_shelf = false, -- a letter tap collapses an expanded shelf unless this is on (#15)
     top_row = "continue",   -- what that strip shows: "continue" | "recent" (Recently opened)
     continue_slots = 5,
     barely_threshold = 0.10, -- "Barely started" when chapters are unknown: below this fraction
@@ -1945,8 +1947,8 @@ function LibraryView:buildBody()
         local short = full_h - continue_layout.height
         if short < az_h then az_h = math.max(1, short) end
     end
-    local split_left, split_right = Core.scrubberSplit(
-        Core.SCRUBBER_LETTERS, az_h, Core.scrubberMinSlot(self:screenDpi()))
+    local split_left, split_right = Core.azHalves(
+        self.az_layout, Core.SCRUBBER_LETTERS, az_h, Core.scrubberMinSlot(self:screenDpi()))
     local function widthsFor(mode)
         if not mode then return self.width, 0 end
         local strip_w = Core.scrubberWidth(self:screenDpi())
@@ -2740,7 +2742,7 @@ function LibraryView:jumpToLetter(letter)
     if not page or not first then return false end
     local anchor = self._jump_anchor
     if page == self.page and anchor and anchor.index == first and anchor.letter == letter then return false end
-    self:goToPage(page, { index = first, letter = letter }, { keep_shelf = true })
+    self:goToPage(page, { index = first, letter = letter }, { keep_shelf = self.letter_keeps_shelf == true })
     return true
 end
 
@@ -3713,6 +3715,15 @@ end
 function LibraryView:setWidgetCovers(mode)
     self.widget_covers = mode == "fill" and "fill" or "compact"
     self:refreshBody(true)
+end
+
+function LibraryView:setAzLayout(mode)
+    self.az_layout = Core.azLayout({ az_layout = mode })
+    self:refreshBody(true)
+end
+
+function LibraryView:setLetterKeepsShelf(on)
+    self.letter_keeps_shelf = on == true
 end
 
 function LibraryView:setShowContinue(on)
