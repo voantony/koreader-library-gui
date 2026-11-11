@@ -3725,6 +3725,14 @@ function Core.showScrubber(settings)
     return not (settings and settings.show_scrubber == false)
 end
 
+--- Where the Books / Collections / Authors / Series row sits.
+-- "top" (the default, under the search bar) or "bottom" (under the footer,
+-- for one-handed reach). Anything else is the top.
+function Core.tabRow(v)
+    if v == "bottom" then return "bottom" end
+    return "top"
+end
+
 -- "#" then A–Z. Digits and symbols sort before letters, so "#" is the top slot.
 Core.SCRUBBER_LETTERS = {
     "#", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
