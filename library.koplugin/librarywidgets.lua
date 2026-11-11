@@ -80,6 +80,21 @@ function Widgets.areaVisible(slots, state)
     return true
 end
 
+--- Cover height for one tile in a home widget. The cover fills the band
+-- under the title, and stays 2:3 inside its slot. A fixed 120px cap left
+-- the covers floating in the widget (#12).
+function Widgets.coverHeight(slot_w, body_h, label_h)
+    slot_w = math.max(1, math.floor(tonumber(slot_w) or 1))
+    body_h = math.max(0, math.floor(tonumber(body_h) or 0))
+    label_h = math.max(0, math.floor(tonumber(label_h) or 0))
+    local room = body_h - label_h
+    if room < 48 then room = 48 end
+    local by_ratio = math.floor(slot_w * 3 / 2)
+    if by_ratio < 1 then by_ratio = 1 end
+    if room < by_ratio then return room end
+    return by_ratio
+end
+
 function Widgets.label(spec)
     if type(spec) ~= "table" then return "" end
     if spec.kind == "continue" then return "Continue Reading" end

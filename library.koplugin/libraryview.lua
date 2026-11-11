@@ -1658,8 +1658,8 @@ function LibraryView:buildOneWidget(spec, index, col_w, header_h, body_h, Widget
     local per = col_w > 800 and 5 or 3
     local slot_w = math.max(48, math.floor((col_w - gap * (per + 1)) / per))
     local label_h = 36
-    -- Stay inside the band. A tile that paints past it covers the book grid.
-    local cover_h = math.min(120, math.floor(slot_w * 1.5), math.max(48, body_h - label_h))
+    -- Fill the band. A 120px cap left a gap under covers that had room (#12).
+    local cover_h = Widgets.coverHeight(slot_w, body_h, label_h)
     local pages = math.max(1, math.ceil(math.max(#books, 1) / per))
     if #books == 0 then pages = 1 end
     local page = Widgets.storedPage(self:widgetPages(), spec) or 1

@@ -5,6 +5,18 @@ local function book(path, title)
     return { path = path, title = title or path }
 end
 
+describe("widget cover size", function()
+    it("fills the band and keeps a 2:3 cover", function()
+        -- 180px slot in a 300px body: the old cap was 120, the band allows 264.
+        eq(W.coverHeight(180, 300, 36), 264)
+        eq(W.coverHeight(180, 300, 36) > 120, true)
+        -- A narrow slot stops at 2:3 instead of stretching.
+        eq(W.coverHeight(80, 400, 36), 120)
+        -- A short band still leaves a tappable cover.
+        eq(W.coverHeight(200, 60, 36), 48)
+    end)
+end)
+
 describe("home widgets", function()
     it("defaults to one Continue Reading widget", function()
         local slots = W.slots({})
