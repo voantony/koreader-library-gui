@@ -533,6 +533,20 @@ describe("settings kept from v0.7.7", function()
         eq(Core.letterKeepsShelf(saved), false)
         eq(Core.viewPrefs(saved, "tab:authors").view, "list")
     end)
+
+    it("keeps the tab row at the top and does not rewrite the saved view", function()
+        local saved = {
+            view = "list", columns = 3, sort = "title",
+            view_memory = { ["tab:series"] = { view = "grid", sort = "series", filter = "finished", t = 4 } },
+        }
+        Core.migrateSettings(saved)
+        eq(saved.view, "list")
+        eq(saved.columns, 3)
+        eq(saved.tab_row, nil)
+        eq(Core.tabRow(saved.tab_row), "top")
+        eq(Core.viewPrefs(saved, "tab:series").view, "grid")
+        eq(Core.viewPrefs(saved, "tab:series").filter, "finished")
+    end)
 end)
 
 describe("tab row", function()
