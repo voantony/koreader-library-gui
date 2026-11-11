@@ -101,6 +101,7 @@ local LibraryView = InputContainer:extend{
     widget_covers = "compact", -- "compact" (120px cap) | "fill" (#12)
     az_layout = "one",      -- "one" | "auto" | "split" (#14)
     letter_keeps_shelf = false, -- a letter tap collapses an expanded shelf unless this is on (#15)
+    tab_row = "top",        -- "top" under the search bar, or "bottom" under the footer (#17)
     top_row = "continue",   -- what that strip shows: "continue" | "recent" (Recently opened)
     continue_slots = 5,
     barely_threshold = 0.10, -- "Barely started" when chapters are unknown: below this fraction
@@ -2065,7 +2066,11 @@ function LibraryView:buildBody()
     for _, p in ipairs(continue_missing) do table.insert(self.missing_covers, p) end
     local footer = self:buildFooter(page, pages, #data.items, data.kind)
 
-    self.body = VerticalGroup:new{ align = "left", tabs }
+    -- Tabs stay under the search bar unless the reader moves them under
+    -- the footer (#17). Filters stay with the shelf either way.
+    local tabs_bottom = Core.tabRow(self.tab_row) == "bottom"
+    self.body = VerticalGroup:new{ align = "left" }
+    if not tabs_bottom then table.insert(self.body, tabs) end
     if chips then table.insert(self.body, chips) end
     table.insert(self.body, sep)
     if strip_widget then
@@ -2073,6 +2078,7 @@ function LibraryView:buildBody()
     end
     table.insert(self.body, grid)
     table.insert(self.body, footer)
+    if tabs_bottom then table.insert(self.body, tabs) end
     if suggest_row then table.insert(self.body, suggest_row) end
 
     -- While the shelf is expanded by a swipe, a hairline under the search
@@ -3724,6 +3730,11 @@ end
 
 function LibraryView:setLetterKeepsShelf(on)
     self.letter_keeps_shelf = on == true
+end
+
+function LibraryView:setTabRow(pos)
+    self.tab_row = Core.tabRow(pos)
+    self:refreshBody(true)
 end
 
 function LibraryView:setShowContinue(on)

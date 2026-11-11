@@ -212,6 +212,19 @@ local function swipeDown(v)
 end
 
 describe("Swipe to expand the bookshelf", function()
+    it("keeps the tab row under the search bar unless it is asked to sit at the bottom", function()
+        local tabs = { id = "tabs", getSize = function() return { w = 100, h = 40 } end }
+        local v = body({})
+        v.buildTabs = function() return tabs end
+        v.tab_row = "top"
+        v:buildBody()
+        eq(v.body[1], tabs, "default: tabs first, under the search bar")
+        v.tab_row = "bottom"
+        v:buildBody()
+        eq(v.body[1] ~= tabs, true)
+        eq(v.body[#v.body], tabs, "tabs are the last row, under the footer")
+    end)
+
     it("shows the strip normally, with no hairline", function()
         local v = body({})
         eq(built_strip ~= nil, true, "strip built on page 1")

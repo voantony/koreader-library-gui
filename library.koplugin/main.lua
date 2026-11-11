@@ -883,6 +883,7 @@ function Library:newView()
         filter_expands = Core.filterExpands(self.settings),
         az_layout = Core.azLayout(self.settings),
         letter_keeps_shelf = Core.letterKeepsShelf(self.settings),
+        tab_row = Core.tabRow(self.settings.tab_row),
         fuzzy_search = Core.fuzzySearch(self.settings),
         search_suggestions = self.settings.search_suggestions ~= false,
         timing = self:timer(),
@@ -1984,6 +1985,18 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = (Core.tabRow(self.settings.tab_row) == "bottom" and "✓ " or "") .. _("Tabs along the bottom"),
+            callback = function()
+                close()
+                local next_pos = Core.tabRow(self.settings.tab_row) == "bottom" and "top" or "bottom"
+                self.settings.tab_row = next_pos
+                self:saveSettings()
+                if view.setTabRow then view:setTabRow(next_pos) end
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = _("A–Z: ") .. AZ_LAYOUT_LABEL[Core.azLayout(self.settings)],
             callback = function()
                 close()
@@ -2997,6 +3010,17 @@ function Library:addToMainMenu(menu_items)
                     if shared.view and shared.view.setLetterKeepsShelf then
                         shared.view:setLetterKeepsShelf(Core.letterKeepsShelf(self.settings))
                     end
+                end,
+            },
+            {
+                text = _("Tabs along the bottom"),
+                help_text = _("Move Books, Collections, Authors and Series under the footer, where a thumb can reach them. Off, they stay under the search bar. The filters and the widgets stay where they are."),
+                checked_func = function() return Core.tabRow(self.settings.tab_row) == "bottom" end,
+                callback = function()
+                    local next_pos = Core.tabRow(self.settings.tab_row) == "bottom" and "top" or "bottom"
+                    self.settings.tab_row = next_pos
+                    self:saveSettings()
+                    if shared.view and shared.view.setTabRow then shared.view:setTabRow(next_pos) end
                 end,
             },
             {

@@ -7,6 +7,7 @@
 - **Widget covers.** In the Library's ☰ menu, and under ☰ → Library → **Widget covers**. **Compact** (the default) is the original 120-pixel cap, so an update looks the same as v0.7.7. **Fill** grows the covers to the space under the widget title, still at the cover's usual shape. A saved settings table with no `widget_covers` key stays Compact, and its view and per-shelf memory are left as they were. Thanks to @drkhn1234 (#12).
 - **A–Z when short.** In the Library's ☰ menu, and under ☰ → Library. **One side** (the default, the v0.7.7 column on the right), **Auto** (split #–M and N–Z only when one column is too short), or **Always split**. The minimum letter size still does not change how tall the shelf is. A saved settings table with no `az_layout` key stays One side, and its view memory is left alone. Thanks to @drkhn1234 (#14).
 - **Letter tap keeps shelf expanded.** Off by default: tapping a letter collapses an expanded shelf, as turning the page does. On, the shelf stays expanded. Swipe up to expand works after a letter tap either way. That stuck gesture was a bug. Thanks to @drkhn1234 (#15).
+- **Tabs along the bottom.** Books, Collections, Authors and Series can sit under the footer, where a thumb reaches them on a Kindle. The choice is in the Library menu and in ☰ → Library. It is off by default: the row stays under the search bar, next to the filters, and the bottom row stays the page controls. The widgets and the filters do not move with it. Thanks to @drkhn1234 (#17).
 
 ## 0.7.7 (2026-11-11)
 
