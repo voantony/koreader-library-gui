@@ -5,6 +5,24 @@ local function book(path, title)
     return { path = path, title = title or path }
 end
 
+describe("widget cover size", function()
+    it("keeps the 120px cap unless Fill is chosen", function()
+        eq(W.coverMode(nil), "compact")
+        eq(W.coverMode({}), "compact")
+        eq(W.coverMode({ widget_covers = "fill" }), "fill")
+        eq(W.coverMode({ widget_covers = "nope" }), "compact")
+        -- 180px slot in a 300px body: compact stays at the old cap, fill uses 264.
+        eq(W.coverHeight(180, 300, 36), 120)
+        eq(W.coverHeight(180, 300, 36, "compact"), 120)
+        eq(W.coverHeight(180, 300, 36, "fill"), 264)
+        -- A narrow slot stops at 2:3 either way.
+        eq(W.coverHeight(80, 400, 36, "fill"), 120)
+        -- A short band still leaves a tappable cover.
+        eq(W.coverHeight(200, 60, 36, "compact"), 48)
+        eq(W.coverHeight(200, 60, 36, "fill"), 48)
+    end)
+end)
+
 describe("home widgets", function()
     it("defaults to one Continue Reading widget", function()
         local slots = W.slots({})

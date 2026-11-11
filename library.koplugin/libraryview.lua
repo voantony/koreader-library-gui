@@ -98,6 +98,7 @@ local LibraryView = InputContainer:extend{
     view_mode = "grid",     -- "grid" | "list" | "compact" | "compact2"
     show_continue = true,   -- the Continue reading strip on the Books tab
     filter_expands = true, -- a filter hides the widgets unless this is off (#11)
+    widget_covers = "compact", -- "compact" (120px cap) | "fill" (#12)
     top_row = "continue",   -- what that strip shows: "continue" | "recent" (Recently opened)
     continue_slots = 5,
     barely_threshold = 0.10, -- "Barely started" when chapters are unknown: below this fraction
@@ -1658,8 +1659,8 @@ function LibraryView:buildOneWidget(spec, index, col_w, header_h, body_h, Widget
     local per = col_w > 800 and 5 or 3
     local slot_w = math.max(48, math.floor((col_w - gap * (per + 1)) / per))
     local label_h = 36
-    -- Stay inside the band. A tile that paints past it covers the book grid.
-    local cover_h = math.min(120, math.floor(slot_w * 1.5), math.max(48, body_h - label_h))
+    -- Fill the band. A 120px cap left a gap under covers that had room (#12).
+    local cover_h = Widgets.coverHeight(slot_w, body_h, label_h, self.widget_covers)
     local pages = math.max(1, math.ceil(math.max(#books, 1) / per))
     if #books == 0 then pages = 1 end
     local page = Widgets.storedPage(self:widgetPages(), spec) or 1
@@ -3661,6 +3662,11 @@ end
 
 function LibraryView:setFilterExpands(on)
     self.filter_expands = on ~= false
+    self:refreshBody(true)
+end
+
+function LibraryView:setWidgetCovers(mode)
+    self.widget_covers = mode == "fill" and "fill" or "compact"
     self:refreshBody(true)
 end
 
