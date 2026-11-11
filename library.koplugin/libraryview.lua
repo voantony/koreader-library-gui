@@ -95,7 +95,7 @@ local LibraryView = InputContainer:extend{
     sort = "recent",
     tab = "books",
     filter = "all",
-    view_mode = "grid",     -- "grid" | "list" | "compact" | "compact2"
+    view_mode = "grid",     -- "grid" | "list" | "list2" | "compact" | "compact2" | "covers"
     show_continue = true,   -- the Continue reading strip on the Books tab
     filter_expands = true, -- a filter hides the widgets unless this is off (#11)
     widget_covers = "compact", -- "compact" (120px cap) | "fill" (#12)
@@ -1921,7 +1921,7 @@ function LibraryView:buildBody()
         end
     elseif strip_possible and not self._shelf_expanded then
         local cbooks = Core.topRowBooks(self.top_row, self.all_books, self.continue_slots, fileExists)
-        local min_rest = self.view_mode == "list" and 3 * self.list_row_h or (self.label_h + 100)
+        local min_rest = (self.view_mode == "list" or self.view_mode == "list2") and 3 * self.list_row_h or (self.label_h + 100)
         local cl = Core.continueLayout(self.width, full_h, #cbooks, self.continue_label_h,
             self:continueHeaderHeight(), self.gap, { slots = self.continue_slots, min_rest = min_rest, frac = 0.3 })
         if cl then
@@ -1971,8 +1971,12 @@ function LibraryView:buildBody()
         elseif Core.textRows(self.view_mode, data.kind, self.tab) then
             -- Authors: one line per row; Series: the name over its authors.
             return Core.listLayout(h, Tiles.textRowHeight(self.tab == "series" and 2 or 1), 0, { max_rows = 24 })
-        elseif self.view_mode == "list" then
-            return Core.listLayout(h, self.list_row_h, Size.padding.small, { max_rows = 10 })
+        elseif self.view_mode == "list" or self.view_mode == "list2" then
+            local layout = Core.listLayout(h, self.list_row_h, Size.padding.small, { max_rows = 10 })
+            local ncols = Core.listColumns(self.view_mode)
+            layout.cols = ncols
+            layout.per_page = layout.rows * ncols
+            return layout
         else
             -- Cover only keeps the progress row and drops the title, so more
             -- covers fit. Shelves still need their names, so they keep the
@@ -2033,7 +2037,7 @@ function LibraryView:buildBody()
     end
     local continue_missing = self.missing_covers
     local grid
-    if self.view_mode == "list" or Core.isCompact(self.view_mode) then
+    if self.view_mode == "list" or self.view_mode == "list2" or Core.isCompact(self.view_mode) then
         grid = self:buildList(page_items, data.kind, layout, grid_h, grid_w)
     else
         grid = self:buildGrid(page_items, data.kind, layout, grid_h, grid_w)
@@ -3689,26 +3693,22 @@ function LibraryView:setViewMode(mode)
     self:refreshBody(true)
 end
 
---- Footer size control (issue #5): tap steps the cover size Small ->
--- Medium -> Large, switching to the grid form; hold opens the sort and
--- view picker. The columns setting is saved, like the picker does.
+--- Footer size control: one step smaller, then wrap from small back to
+-- large. The layout stays whatever it was (#13). Hold opens the picker.
 function LibraryView:cycleCoverSize()
     local cols = Core.nextColumns(self.cols)
     if self.plugin and self.plugin.settings then
         self.plugin.settings.columns = cols
         if self.plugin.saveSettings then self.plugin:saveSettings() end
     end
-    -- One rebuild: setColumns and setViewMode each refresh on their own.
     self.cols = cols
     if self.cover_cache and self.cover_cache.clear then self.cover_cache:clear() end
-    self.view_mode = Core.viewMode("grid")
-    self:rememberPref("view", self.view_mode)
     self.page = 1
     self:refreshBody(true)
 end
 
---- Footer view control (issue #5): tap steps the form factor Grid ->
--- List -> Compact -> Compact 2 columns; hold opens the picker.
+--- Footer layout control: cover grid, list, two-column list. The cover
+-- size is left alone (#13). Hold opens the picker.
 function LibraryView:cycleViewMode()
     self:setViewMode(Core.nextViewMode(self.view_mode))
 end

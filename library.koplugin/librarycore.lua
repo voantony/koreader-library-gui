@@ -1685,7 +1685,7 @@ Core.VIEWS = { "grid", "list", "compact", "compact2", "covers" }
 
 --- A saved view mode, falling back to "grid".
 function Core.viewMode(v)
-    if v == "list" or v == "compact" or v == "compact2" or v == "covers" then return v end
+    if v == "list" or v == "list2" or v == "compact" or v == "compact2" or v == "covers" then return v end
     return "grid"
 end
 
@@ -1696,6 +1696,7 @@ Core.VIEW_PICKER = {
     { id = "medium", view = "grid", columns = 4 },
     { id = "large", view = "grid", columns = 3 },
     { id = "list", view = "list" },
+    { id = "list2", view = "list2" },
     { id = "compact", view = "compact" },
     { id = "compact2", view = "compact2" },
     { id = "covers", view = "covers" },
@@ -1713,7 +1714,9 @@ end
 
 --- Columns of rows: 2 for "compact2", else 1.
 function Core.listColumns(view_mode)
-    return view_mode == "compact2" and 2 or 1
+    local mode = Core.viewMode(view_mode)
+    if mode == "compact2" or mode == "list2" then return 2 end
+    return 1
 end
 
 --- Split a page into `cols` columns of up to `rows`, filled column by
@@ -1744,41 +1747,59 @@ end
 --- Cover sizes, in picker order: Small (5 columns), Medium (4), Large (3).
 Core.COVER_COLUMNS = { 5, 4, 3 }
 
---- Next cover size after `cols`, wrapping Large back to Small.
--- The footer size control (issue #5) steps through these.
+--- Footer size button: one step at a time, large covers first.
+-- 3 columns, then 4, then 5, then back to 3. The previous order wrapped
+-- from large straight to small, so a tap went 3 covers, then 10, then 8 (#13).
+Core.SIZE_COLUMNS = { 3, 4, 5 }
+
+--- Next cover size after `cols`. Unknown counts land on Medium (4).
+-- The footer size control steps through SIZE_COLUMNS and does not change layout.
 function Core.nextColumns(cols)
-    for i, c in ipairs(Core.COVER_COLUMNS) do
-        if c == cols then return Core.COVER_COLUMNS[i % #Core.COVER_COLUMNS + 1] end
+    cols = tonumber(cols)
+    for i, c in ipairs(Core.SIZE_COLUMNS) do
+        if c == cols then return Core.SIZE_COLUMNS[i % #Core.SIZE_COLUMNS + 1] end
     end
-    return 4 -- unknown count: Medium
+    return 4
 end
 
---- View forms in picker order.
-Core.VIEW_FORMS = { "grid", "list", "compact", "compact2" }
+--- Footer layout button: cover grid, one-column list, two-column list.
+-- Compact and Cover only stay in the menu. They are not extra taps on
+-- this button, so the button no longer has two list states that differ
+-- only in size (#13).
+Core.VIEW_FORMS = { "grid", "list", "list2" }
 
---- Next view form after `mode`, wrapping back to the grid.
--- The footer view control (issue #5) steps through these.
-function Core.nextViewMode(mode)
+--- The layout-button form for a saved mode. Compact is the one-column
+-- list, two-column Compact is the two-column list, Cover only is the grid.
+function Core.cycleForm(mode)
     mode = Core.viewMode(mode)
-    for i, m in ipairs(Core.VIEW_FORMS) do
-        if m == mode then return Core.VIEW_FORMS[i % #Core.VIEW_FORMS + 1] end
-    end
+    if mode == "compact" then return "list" end
+    if mode == "compact2" or mode == "list2" then return "list2" end
+    if mode == "list" then return "list" end
     return "grid"
 end
 
---- Footer view button icon for the current form: the form's columnar
--- shape (grid: three columns of lines; two-column compact: two; the
--- one-column forms: one).
+--- Next layout after `mode`, wrapping back to the cover grid.
+function Core.nextViewMode(mode)
+    local form = Core.cycleForm(mode)
+    for i, m in ipairs(Core.VIEW_FORMS) do
+        if m == form then return Core.VIEW_FORMS[i % #Core.VIEW_FORMS + 1] end
+    end
+    return "list"
+end
+
+--- Footer view button icon: three columns for the cover grid, two for a
+-- two-column list, one for a single column.
 function Core.viewFormIcon(mode)
     mode = Core.viewMode(mode)
-    if mode == "compact2" then return "column.two" end
+    if mode == "compact2" or mode == "list2" then return "column.two" end
     if mode == "grid" then return "column.three" end
     return "column.one"
 end
 
 --- List rows of shelves are text only (no cover art) on Authors and Series.
 function Core.textRows(view_mode, kind, tab)
-    return Core.viewMode(view_mode) == "list" and kind == "groups" and (tab == "authors" or tab == "series")
+    local mode = Core.viewMode(view_mode)
+    return (mode == "list" or mode == "list2") and kind == "groups" and (tab == "authors" or tab == "series")
 end
 
 ----------------------------------------------------------------------------

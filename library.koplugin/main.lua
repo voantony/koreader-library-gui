@@ -99,6 +99,7 @@ local VIEW_NAMES = {
     medium = _("Medium covers"),
     large = _("Large covers"),
     list = _("List"),
+    list2 = _("List · 2 columns"),
     compact = _("Compact"),
     compact2 = _("Compact · 2 columns"),
     covers = _("Cover only"),
