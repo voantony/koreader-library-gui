@@ -129,7 +129,9 @@ SHA256: `a4eec1aeb9bd6b3339b7706591acd721fb9f1bb89f490526afcbf5b2fb604928`
 
 ### Updating
 
-In KOReader, open ☰ → **Updates** (on the Library screen, and under ☰ → Library). **Check for updates now** shows the version and a short changelog when a newer release exists. **Update** downloads it, checks the published SHA256, replaces the plugin, and offers to restart KOReader. Your settings stay in `koreader/settings`. The previous plugin folder is kept as `library.koplugin.bak`.
+In KOReader, open ☰ → **Updates** (on the Library screen, and under ☰ → Library). **Check for updates now** shows the version and a short changelog when a newer release exists. **Update** downloads it, checks the published SHA256, writes a backup of the Library settings, replaces the plugin, and offers to restart KOReader. Your settings stay in `koreader/settings` under `library_plugin`. The previous plugin folder is kept as `library.koplugin.bak`.
+
+☰ → Library → **Settings backup** has **Back up now**, **Restore from backup** (pick one of the last three, then confirm), and **Reset to defaults** (confirm; a backup is written first). The updater also writes a backup before it installs, and keeps the last three as `library_plugin_settings.backup.YYYYMMDD-HHMMSS.lua` in KOReader's settings folder. Restore checks that the file is a settings table and runs the usual settings migrations. The plugin does not edit `settings.reader.lua` itself. It saves through KOReader's settings and flushes them.
 
 **Automatic updates** start on **Notify me**. **Off** turns background checks off; checking by hand still works. **Notify me** looks about once a week, only when Wi-Fi is already on, and only tells you. **Install quietly** installs that newer release in the background and leaves a short note. It does not turn Wi-Fi on and does not restart KOReader. An open book is left alone until you are back in the Library.
 
