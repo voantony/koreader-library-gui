@@ -35,7 +35,10 @@ Status.SYMBOL = {
 -- Unscaled font sizes. KOReader scales them with the screen.
 Status.FACE = {
     icon    = { font = "cfont",    size = 22, bold = true },
-    compact = { font = "infofont", size = 16, bold = false },
+    -- Status bar used to be 16 and not bold, so the clock and the
+    -- percentage sat small beside the search field (#16). Match the
+    -- battery-icon clock.
+    compact = { font = "infofont", size = 22, bold = true },
     plain   = { font = "cfont",    size = 20, bold = true },
 }
 
