@@ -667,6 +667,133 @@ function Library:saveSettings()
     G_reader_settings:saveSetting(SETTINGS_KEY, self.settings)
 end
 
+--- Replace library_plugin through G_reader_settings. Does not open
+-- settings.reader.lua. Runs the same migrations as startup.
+function Library:replaceSettings(settings)
+    local Settings = require("librarysettings")
+    local copy = Settings.deepCopy(settings)
+    local ok, err = Settings.validate(copy)
+    if not ok then return nil, err end
+    require("libraryreadermenu").migrateTopTap(copy)
+    if Core.migrateSettings then Core.migrateSettings(copy) end
+    self.settings = copy
+    self:migrateReturnSetting()
+    self:migrateStartupSetting()
+    for k, v in pairs(DEFAULTS) do
+        if self.settings[k] == nil then self.settings[k] = v end
+    end
+    G_reader_settings:saveSetting(SETTINGS_KEY, self.settings)
+    if G_reader_settings.flush then G_reader_settings:flush() end
+    return true
+end
+
+function Library:settingsFolder()
+    local DataStorage = require("datastorage")
+    return DataStorage:getSettingsDir()
+end
+
+function Library:writeSettingsBackup()
+    local Settings = require("librarysettings")
+    return Settings.writeBackup(Settings.ioFS(), self:settingsFolder(), self.settings, os.time())
+end
+
+function Library:backupSettingsNow(tell)
+    local path, err = self:writeSettingsBackup()
+    if tell then
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new{
+            text = path and _("Settings backed up.") or _("Could not back up settings."),
+        })
+    end
+    return path, err
+end
+
+function Library:showRestoreBackup()
+    local Settings = require("librarysettings")
+    local fs = Settings.ioFS()
+    local dir = self:settingsFolder()
+    local names = Settings.sorted(fs.list(dir) or {})
+    local InfoMessage = require("ui/widget/infomessage")
+    if #names == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No settings backups yet.") })
+        return
+    end
+    local rows, dialog = {}, nil
+    for _, name in ipairs(names) do
+        local stamp = name:match("(%d%d%d%d%d%d%d%d%-%d%d%d%d%d%d)") or name
+        rows[#rows + 1] = {{
+            text = stamp,
+            callback = function()
+                UIManager:close(dialog)
+                self:confirmRestoreBackup(dir .. "/" .. name)
+            end,
+        }}
+    end
+    local ButtonDialog = require("ui/widget/buttondialog")
+    dialog = ButtonDialog:new{
+        title = _("Restore from backup"),
+        title_align = "center",
+        buttons = rows,
+    }
+    UIManager:show(dialog)
+end
+
+function Library:confirmRestoreBackup(path)
+    local ConfirmBox = require("ui/widget/confirmbox")
+    UIManager:show(ConfirmBox:new{
+        text = _("Replace the current Library settings with this backup?"),
+        ok_text = _("Restore"),
+        ok_callback = function()
+            local Settings = require("librarysettings")
+            local data = Settings.readBackup(Settings.ioFS(), path)
+            local InfoMessage = require("ui/widget/infomessage")
+            if not data or not self:replaceSettings(data) then
+                UIManager:show(InfoMessage:new{ text = _("That backup could not be read.") })
+                return
+            end
+            UIManager:show(InfoMessage:new{ text = _("Settings restored. Reopen the Library to see them.") })
+        end,
+    })
+end
+
+function Library:confirmResetSettings()
+    local ConfirmBox = require("ui/widget/confirmbox")
+    UIManager:show(ConfirmBox:new{
+        text = _("Reset Library settings to the defaults? A backup of the current settings is saved first."),
+        ok_text = _("Reset"),
+        ok_callback = function()
+            self:writeSettingsBackup()
+            local fresh = {}
+            for k, v in pairs(DEFAULTS) do fresh[k] = v end
+            self:replaceSettings(fresh)
+            local InfoMessage = require("ui/widget/infomessage")
+            UIManager:show(InfoMessage:new{ text = _("Library settings reset. Reopen the Library to see them.") })
+        end,
+    })
+end
+
+function Library:settingsBackupMenu()
+    return {
+        text = _("Settings backup"),
+        help_text = _("A copy of this plugin's settings, in KOReader's settings folder. The updater writes one before it installs a new version and keeps the last three. Back up now writes another. Restore asks you to pick a copy and confirm. Reset to defaults asks first and writes a backup before it clears the Library settings. Nothing here edits settings.reader.lua by hand."),
+        sub_item_table = {
+            {
+                text = _("Back up now"),
+                keep_menu_open = true,
+                callback = function() self:backupSettingsNow(true) end,
+            },
+            {
+                text = _("Restore from backup"),
+                callback = function() self:showRestoreBackup() end,
+            },
+            {
+                text = _("Reset to defaults"),
+                callback = function() self:confirmResetSettings() end,
+            },
+        },
+    }
+end
+
 function Library:getRoot()
     local root = self.settings.root
     if root and lfs.attributes(root, "mode") == "directory" then
@@ -3110,6 +3237,7 @@ function Library:addToMainMenu(menu_items)
             self:rememberViewsMenu(),
             self:controlsMenu(),
             self:gestureSettingsMenu(),
+            self:settingsBackupMenu(),
             {
                 text = _("Timing log (for testing)"),
                 help_text = T(_("Write how long the Library takes to open, turn a page, switch a filter and show search results to %1, one line each. Off by default; nothing is timed while it is off."), self:timingLogPath()),

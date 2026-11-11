@@ -1242,6 +1242,21 @@ local function stamp(plugin, key)
     if plugin.saveSettings then plugin:saveSettings() end
 end
 
+--- Copy plugin.settings into KOReader's settings directory.
+-- `fs` and `dir` are for tests. Without them, the real settings folder
+-- and filesystem are used. Returns true when there is nothing to copy.
+function M.saveSettingsBackup(plugin, fs, dir, now)
+    local Settings = require("librarysettings")
+    if type(plugin) ~= "table" or type(plugin.settings) ~= "table" then return true end
+    if not fs or not dir then
+        local DataStorage = require("datastorage")
+        dir = dir or (DataStorage.getSettingsDir and DataStorage:getSettingsDir())
+        fs = fs or Settings.ioFS()
+    end
+    if type(dir) ~= "string" or dir == "" then return nil, "could not find KOReader's settings folder" end
+    return Settings.writeBackup(fs, dir, plugin.settings, now or os.time())
+end
+
 function M.installedVersion(plugin_dir, fs)
     fs = fs or M.realFS()
     local text = fs.read(plugin_dir .. "/_meta.lua")
@@ -1275,6 +1290,11 @@ function M.applyRelease(plugin, info)
     end
     local extracted, eerr = M.extractZipFile(zip_path, stage)
     if not extracted then cleanup(); return nil, eerr end
+    -- The plugin folder is about to be replaced. Copy library_plugin out
+    -- first. A failed backup stops the install. settings.reader.lua is
+    -- not opened here.
+    local backed, berr = M.saveSettingsBackup(plugin)
+    if not backed then cleanup(); return nil, berr or "could not back up settings" end
     local installed, ierr = M.installReplacing(fs, plugin_dir, stage .. "/" .. M.PLUGIN_DIRNAME)
     cleanup()
     if not installed then return nil, ierr end
