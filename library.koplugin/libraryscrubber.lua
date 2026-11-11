@@ -87,7 +87,12 @@ function Scrubber:hitRect()
     if x < 0 then x = 0 end
     local right = x0 + w
     local edge = math.floor(tonumber(self.screen_w) or 0)
-    if edge > 0 and x0 > edge * 0.5 and right < edge then
+    if self.side == "left" then
+        -- The left half reaches the screen edge, and a gutter into the covers.
+        x = 0
+        right = x0 + w + extra
+        if edge > 0 and right > edge then right = edge end
+    elseif edge > 0 and x0 > edge * 0.5 and right < edge then
         right = edge
     end
     return Core.gestureRect{
@@ -144,16 +149,19 @@ function Scrubber:paintStrip(bb, x, y)
     -- Hairline where the covers stop. The letters sit just to its right.
     -- The wider hit area is not painted; it overlaps the gutter and the edge.
     local line = math.max(1, math.floor((tonumber(self.dpi) or 300) / 167))
+    -- The hairline is the edge the covers stop at: the left of a right-hand
+    -- strip, the right of a left-hand strip.
+    local line_x = self.side == "left" and (x + w - line) or x
     if bb.paintRect then
-        bb:paintRect(x, y, line, h, C.COLOR_GRAY_B)
+        bb:paintRect(line_x, y, line, h, C.COLOR_GRAY_B)
     end
     local marks = Core.scrubberMarks(self.letters, h, Core.scrubberMinSlot(self.dpi))
     local n = #marks
     if n < 1 or h < 1 then return end
     local inset = math.max(line + 1, 2)
-    local right_pad = math.max(1, math.floor(w * 0.08))
-    local glyph_w = math.max(1, w - inset - right_pad)
-    local glyph_x = x + inset
+    local edge_pad = math.max(1, math.floor(w * 0.08))
+    local glyph_w = math.max(1, w - inset - edge_pad)
+    local glyph_x = self.side == "left" and (x + edge_pad) or (x + inset)
     local face_px = self:nominalSize(math.max(14, math.floor(h / n) - 2), 16, 26)
     local face = Font:getFace("cfont", face_px)
     local dot_face = Font:getFace("cfont", self:nominalSize(10, 10, 14))

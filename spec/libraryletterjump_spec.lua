@@ -114,6 +114,23 @@ describe("letter jump (issue #7)", function()
         eq(refreshed, after_first)
     end)
 
+    it("a letter jump keeps an expanded shelf, and the swipe still toggles it", function()
+        local v = harness()
+        v._shelf_expanded = true
+        v._strip_possible = true
+        v.body_y = 80
+        eq(v:jumpToLetter("D"), true)
+        eq(v.page, 2)
+        eq(v._shelf_expanded, true, "the jump does not collapse the shelf")
+        eq(v._jump_anchor ~= nil, true)
+        local down = { pos = { x = 40, y = 500 }, end_pos = { x = 40, y = 800 } }
+        local up = { pos = { x = 40, y = 500 }, end_pos = { x = 40, y = 200 } }
+        eq(v:toggleShelfExpand(false, down), true)
+        eq(v._shelf_expanded, nil)
+        eq(v:toggleShelfExpand(true, up), true, "swipe up still expands after the jump")
+        eq(v._shelf_expanded, true)
+    end)
+
     it("an inactive letter jumps nowhere", function()
         local v = harness()
         eq(v:jumpToLetter("Q"), false)
