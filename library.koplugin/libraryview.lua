@@ -102,6 +102,7 @@ local LibraryView = InputContainer:extend{
     az_layout = "one",      -- "one" | "auto" | "split" (#14)
     letter_keeps_shelf = false, -- a letter tap collapses an expanded shelf unless this is on (#15)
     tab_row = "top",        -- "top" under the search bar, or "bottom" under the footer (#17)
+    layout_button = "classic", -- "classic" four-step cycle | "layouts" grid/list/list2 (#13)
     top_row = "continue",   -- what that strip shows: "continue" | "recent" (Recently opened)
     continue_slots = 5,
     barely_threshold = 0.10, -- "Barely started" when chapters are unknown: below this fraction
@@ -3710,7 +3711,15 @@ end
 --- Footer layout control: cover grid, list, two-column list. The cover
 -- size is left alone (#13). Hold opens the picker.
 function LibraryView:cycleViewMode()
-    self:setViewMode(Core.nextViewMode(self.view_mode))
+    local settings = self.plugin and self.plugin.settings
+    self:setViewMode(Core.nextViewMode(self.view_mode, Core.layoutButton(settings)))
+end
+
+function LibraryView:setLayoutButton(mode)
+    self.layout_button = Core.layoutButton({ layout_button = mode })
+    if self.plugin and self.plugin.settings then
+        self.plugin.settings.layout_button = self.layout_button
+    end
 end
 
 function LibraryView:setFilterExpands(on)

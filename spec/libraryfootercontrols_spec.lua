@@ -212,23 +212,37 @@ describe("Footer size and view controls", function()
         eq(v.view_mode, "list")
     end)
 
-    it("tapping view steps Grid -> List -> two-column list -> Grid", function()
+    it("tapping view steps the classic four forms and leaves the size", function()
         local v = footer({ view_mode = "grid" })
         local view = findButton("column.three")
         view.callback()
         eq(v.view_mode, "list")
         eq(v.cols, 4, "the layout step does not change the cover size")
-        -- the button is rebuilt with the new form's icon on refresh
         buttons, groups = {}, {}
         v:buildFooter(1, 1, 40, "books")
-        eq(findButton("column.one") ~= nil, true, "list form icon after the step")
         findButton("column.one").callback()
-        eq(v.view_mode, "list2")
+        eq(v.view_mode, "compact")
         buttons, groups = {}, {}
         v:buildFooter(1, 1, 40, "books")
-        eq(findButton("column.two") ~= nil, true, "two-column icon after the step")
+        findButton("column.one").callback()
+        eq(v.view_mode, "compact2")
+        buttons, groups = {}, {}
+        v:buildFooter(1, 1, 40, "books")
         findButton("column.two").callback()
         eq(v.view_mode, "grid")
+        eq(v.cols, 4)
+    end)
+
+    it("layouts only steps Grid -> List -> two-column list", function()
+        local v = footer({ view_mode = "grid" })
+        v.plugin.settings.layout_button = "layouts"
+        findButton("column.three").callback()
+        eq(v.view_mode, "list")
+        buttons, groups = {}, {}
+        v:buildFooter(1, 1, 40, "books")
+        findButton("column.one").callback()
+        eq(v.view_mode, "list2")
+        eq(v.cols, 4)
     end)
 
     it("a long-press on either opens the sort and view picker", function()

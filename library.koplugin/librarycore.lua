@@ -1762,14 +1762,21 @@ function Core.nextColumns(cols)
     return 4
 end
 
---- Footer layout button: cover grid, one-column list, two-column list.
--- Compact and Cover only stay in the menu. They are not extra taps on
--- this button, so the button no longer has two list states that differ
--- only in size (#13).
-Core.VIEW_FORMS = { "grid", "list", "list2" }
+--- Footer layout button. "classic" is the v0.7.7 cycle: grid, list,
+-- compact, compact · 2 columns. "layouts" is cover grid, list, and a
+-- two-column list, without a second list that only changes row size (#13).
+-- Absent means classic, so a v0.7.7 settings table keeps the old button.
+function Core.layoutButton(settings)
+    if type(settings) == "table" and settings.layout_button == "layouts" then return "layouts" end
+    return "classic"
+end
 
---- The layout-button form for a saved mode. Compact is the one-column
--- list, two-column Compact is the two-column list, Cover only is the grid.
+Core.CLASSIC_FORMS = { "grid", "list", "compact", "compact2" }
+Core.LAYOUT_FORMS = { "grid", "list", "list2" }
+Core.VIEW_FORMS = Core.LAYOUT_FORMS
+
+--- The layouts-only form for a saved mode. Compact counts as the
+-- one-column list, two-column Compact as the two-column list.
 function Core.cycleForm(mode)
     mode = Core.viewMode(mode)
     if mode == "compact" then return "list" end
@@ -1778,13 +1785,66 @@ function Core.cycleForm(mode)
     return "grid"
 end
 
---- Next layout after `mode`, wrapping back to the cover grid.
-function Core.nextViewMode(mode)
-    local form = Core.cycleForm(mode)
-    for i, m in ipairs(Core.VIEW_FORMS) do
-        if m == form then return Core.VIEW_FORMS[i % #Core.VIEW_FORMS + 1] end
+--- Next layout after `mode`. `button` nil or "classic" is the four-state
+-- cycle. "layouts" is the three-layout cycle. Either way the cover size
+-- is a separate step.
+function Core.nextViewMode(mode, button)
+    if button == "layouts" then
+        local form = Core.cycleForm(mode)
+        local forms = Core.LAYOUT_FORMS
+        for i, m in ipairs(forms) do
+            if m == form then return forms[i % #forms + 1] end
+        end
+        return "list"
     end
-    return "list"
+    mode = Core.viewMode(mode)
+    local forms = Core.CLASSIC_FORMS
+    for i, m in ipairs(forms) do
+        if m == mode then return forms[i % #forms + 1] end
+    end
+    return "grid"
+end
+
+--- A saved view v0.7.7 understood. Unknown names become the cover grid,
+-- which is what the view picker falls back to. Compact and Compact · 2
+-- columns stay themselves: they are still real layouts.
+function Core.migrateView(v)
+    if v == nil then return nil end
+    if Core.viewMode(v) == v then return v end
+    return "grid"
+end
+
+--- 3, 4 and 5 columns are the three cover sizes. Anything else moves to
+-- the nearest of those, so a saved size is not dropped to the default.
+function Core.closestColumns(n)
+    n = tonumber(n)
+    if not n then return nil end
+    if n == 3 or n == 4 or n == 5 then return n end
+    local best, dist = 4, math.huge
+    for _, c in ipairs(Core.SIZE_COLUMNS) do
+        local d = math.abs(n - c)
+        if d < dist then best, dist = c, d end
+    end
+    return best
+end
+
+--- Rewrite only values the new build would otherwise forget. A v0.7.7
+-- table's compact, list, grid, covers and column counts 3, 4 and 5 stay.
+function Core.migrateSettings(settings)
+    if type(settings) ~= "table" then return settings end
+    if settings.view ~= nil then settings.view = Core.migrateView(settings.view) end
+    if settings.columns ~= nil then
+        local cols = Core.closestColumns(settings.columns)
+        if cols then settings.columns = cols end
+    end
+    if type(settings.view_memory) == "table" then
+        for _, entry in pairs(settings.view_memory) do
+            if type(entry) == "table" and entry.view ~= nil then
+                entry.view = Core.migrateView(entry.view)
+            end
+        end
+    end
+    return settings
 end
 
 --- Footer view button icon: three columns for the cover grid, two for a
@@ -1894,14 +1954,6 @@ function Core.showContinue(state)
     if state.keyboard then return false end
     if state.filter_expands ~= false and state.filter and state.filter ~= "all" then return false end
     return true
-end
-
---- Keep a saved settings table. New keys are left unset so the defaults
--- stand in for them. View, columns, sort, filter and per-shelf memory
--- are not rewritten.
-function Core.migrateSettings(settings)
-    if type(settings) ~= "table" then return settings end
-    return settings
 end
 
 --- Size the Continue reading strip.
