@@ -9,7 +9,7 @@ VERSION ?= 0.7.6
 # install when the installed KOReader is older. It never updates KOReader.
 # Leave this empty to keep today's behaviour (no minimum).
 KOREADER_REQUIRES ?=
-FILES := _meta.lua main.lua librarycore.lua librarystatus.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua libraryfooter.lua libraryrefresh.lua libraryreturn.lua libraryreadability.lua librarysuggest.lua librarytiming.lua libraryscrubber.lua libraryzones.lua librarygestures.lua librarywidgets.lua libraryupdate.lua
+FILES := _meta.lua main.lua librarycore.lua librarystatus.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua libraryfooter.lua libraryrefresh.lua libraryreturn.lua libraryreadability.lua librarysuggest.lua librarytiming.lua libraryscrubber.lua libraryzones.lua librarygestures.lua librarywidgets.lua libraryupdate.lua libraryyear.lua
 
 .PHONY: test zip stage clean
 

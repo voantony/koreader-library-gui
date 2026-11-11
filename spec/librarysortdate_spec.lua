@@ -64,6 +64,7 @@ describe("The date a sort shows", function()
     end)
     it("is nothing for other sorts and for never-opened books in Last read", function()
         for _, s in ipairs({ "author", "title", "series" }) do eq(Core.sortDate(book, s, now), nil) end
+        eq(Core.sortDate(book, "author_year", now), nil, "no publication year on this book")
         eq(Core.sortDate({ modification = at(2026, 10, 12) }, "recent", now), nil)
     end)
 end)

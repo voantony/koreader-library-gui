@@ -11,6 +11,11 @@ Metadata comes from, in order:
 3. the book's sidecar (`doc_props` saved by KOReader once the book was opened);
 4. the file name.
 
+The publication year is Calibre's pubdate when that is a real date, then a
+date on the metadata above, then (EPUB only) `dc:date` in the OPF. It is
+cached with the book. `false` means the file was checked and has no year,
+so the next open does not read it again.
+
 Reading state (status, percent read, page count and the Library's own
 chapter marks) comes from the sidecar and is only re-read when the
 sidecar's mtime changed. A book KOReader calls "reading" but that is still
@@ -196,8 +201,37 @@ function Index:readSidecar(sidecar)
     return settings.data
 end
 
+--- Publication year when the cache does not have one yet.
+-- Calibre, then KOReader's book info and the sidecar, then an EPUB's OPF.
+-- `false` is stored once a file has been checked and has no year.
+function Index:lookupYear(book, calibre_map, info, doc_props)
+    local y = Core.yearFromProps(self:calibreFor(calibre_map, book.path))
+    if y then return y end
+    if info == nil and self.opts.bim and self.opts.bim.getBookInfo then
+        local ok, got = pcall(self.opts.bim.getBookInfo, self.opts.bim, book.path, false)
+        if ok and type(got) == "table" then info = got end
+    end
+    y = Core.yearFromProps(info)
+    if y then return y end
+    if doc_props == nil then
+        local data = self:readSidecar(self:sidecarFile(book.path, book.alt_paths))
+        if type(data) == "table" then doc_props = data.doc_props end
+    end
+    y = Core.yearFromProps(doc_props)
+    if y then return y end
+    if book.ext == "epub" then return Core.epubPublicationYear(book.path) end
+    return nil
+end
+
+function Index:ensureYear(book, calibre_map)
+    if Core.publicationYear(book.year) or book.year == false then return end
+    local ok, y = pcall(self.lookupYear, self, book, calibre_map, nil, nil)
+    book.year = (ok and y) or false
+end
+
 --- Fill metadata for a book whose cache entry is missing or stale.
 function Index:fillMeta(book, calibre_map, calibre_stamp, sidecar_data)
+    local cached_year = book.year
     local calibre = self:calibreFor(calibre_map, book.path)
     local info
     if self.opts.bim then
@@ -217,6 +251,16 @@ function Index:fillMeta(book, calibre_map, calibre_stamp, sidecar_data)
     end
     book.src = src
     book.cal = calibre_stamp
+    if Core.publicationYear(book.year) then return end
+    -- Same file bytes as a year we already stored: do not open the EPUB again.
+    if Core.publicationYear(cached_year) then book.year = cached_year; return end
+    if cached_year == false then book.year = false; return end
+    local y
+    if src ~= "calibre" then y = Core.yearFromProps(calibre) end
+    if not y and src ~= "bim" then y = Core.yearFromProps(info) end
+    if not y and src ~= "sidecar" then y = Core.yearFromProps(doc_props) end
+    if not y and book.ext == "epub" then y = Core.epubPublicationYear(book.path) end
+    book.year = y or false
 end
 
 --- Refresh status/percent if the sidecar changed. Returns the sidecar data if it was read.
@@ -365,8 +409,12 @@ function Index:build(force)
     self.calibre_files = calibre_files
 
     local reused, stale = Core.reconcile(scanned, cache and cache.entries, calibre_stamp)
+    local need_year = false
+    for _, book in ipairs(reused) do
+        if book.year == nil then need_year = true; break end
+    end
     local calibre_map = {}
-    if #stale > 0 and #calibre_files > 0 then
+    if (#stale > 0 or need_year) and #calibre_files > 0 then
         calibre_map = self:loadCalibre(calibre_files)
     end
     local t_cal = self:clock()
@@ -379,6 +427,15 @@ function Index:build(force)
         local data = self:refreshState(book)
         if data then sidecar_reads = sidecar_reads + 1 end
         self:fillMeta(book, calibre_map, calibre_stamp, data)
+    end
+    local years_filled = 0
+    if need_year then
+        for _, book in ipairs(reused) do
+            if book.year == nil then
+                self:ensureYear(book, calibre_map)
+                years_filled = years_filled + 1
+            end
+        end
     end
 
     local exact, by_key = self:historyTimes()
@@ -431,7 +488,7 @@ function Index:build(force)
     end
     self._files_n = #scanned
     local dirty = force or not cache or #stale > 0 or sidecar_reads > 0
-        or cached_n ~= #scanned
+        or cached_n ~= #scanned or years_filled > 0
     if dirty then self:writeCache() end
     local t_end = self:clock()
 

@@ -1,7 +1,7 @@
 -- The search bar searches what the tab shows: books on Books (and inside a
 -- shelf), author names on Authors, series names or their authors on Series,
 -- collection names on Collections. Typos are forgiven everywhere. Also the
--- sort menu's order (Author, Title, Date added, Last read, then Series).
+-- sort menu's order (Author, Author then year, Title, Date added, Last read, then Series).
 local Core = require("librarycore")
 
 local function stub()
@@ -192,8 +192,8 @@ describe("LibraryView search scope", function()
 end)
 
 describe("sort menu", function()
-    it("is Author, Title, Date added, Last read, then Series", function()
-        same(Core.SORT_MENU, { "author", "title", "added", "recent", "series" })
+    it("is Author, Author then year, Title, Date added, Last read, then Series", function()
+        same(Core.SORT_MENU, { "author", "author_year", "title", "added", "recent", "series" })
     end)
     it("Last read: most recently opened first; Date added: newest first", function()
         local a = { path = "a", title = "A", last_opened = 100, modification = 5 }
