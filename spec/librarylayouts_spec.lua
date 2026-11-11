@@ -93,7 +93,7 @@ describe("View picker", function()
     end)
     it("keeps the sort row in the asked order", function()
         local dialog = menuFor({ view = { sort = "added" } })
-        same(texts(dialog.buttons[1]), { "Author", "Title", "\u{2713} Date added", "Last read", "Series" })
+        same(texts(dialog.buttons[1]), { "Author", "Author, then year", "Title", "\u{2713} Date added", "Last read", "Series" })
     end)
 end)
 

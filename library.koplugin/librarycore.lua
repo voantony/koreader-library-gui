@@ -6,9 +6,17 @@ plain LuaJIT interpreter. Everything that touches the device (file system,
 metadata, reading status) is passed in as a function.
 ]]
 
+local Year = require("libraryyear")
+
 local Core = {}
 
 Core.UNKNOWN = "\u{FFFF}" -- sorts after every real name
+
+--- A 4-digit publication year, or nil. See libraryyear.lua.
+Core.publicationYear = Year.fromValue
+Core.yearFromProps = Year.fromProps
+Core.yearFromOpf = Year.fromOpf
+Core.epubPublicationYear = Year.fromEpub
 
 Core.GROUPINGS = { "author", "series", "status", "format", "folder" }
 
@@ -737,6 +745,7 @@ function Core.applyProps(book, props)
         book.uuid = nil
     end
     book.isbn = Core.normalizeIsbn(props.isbn)
+    book.year = Core.yearFromProps(props)
     return book
 end
 
@@ -772,9 +781,10 @@ local function firstAuthor(book)
     return book.authors and book.authors[1] or Core.UNKNOWN
 end
 
--- The ☰ menu's sort order: Author, Title, Date added, Last read, then Series.
-Core.SORT_MENU = { "author", "title", "added", "recent", "series" }
-Core.SORTS = { "author", "title", "added", "recent", "series", "size" }
+-- The ☰ menu's sort order: Author, Author then year, Title, Date added,
+-- Last read, then Series.
+Core.SORT_MENU = { "author", "author_year", "title", "added", "recent", "series" }
+Core.SORTS = { "author", "author_year", "title", "added", "recent", "series", "size" }
 
 --- Return a comparator for `mode`.
 -- @tparam[opt] function collate locale-aware `a < b` for strings
@@ -793,8 +803,28 @@ function Core.comparator(mode, collate)
         end
         return byTitle(a, b)
     end
+    -- Same author order as byAuthor, then publication year (oldest first).
+    -- No year sorts after that author's dated books. Ties use the title, then the path.
+    local function byAuthorYear(a, b)
+        local aa, ba = firstAuthor(a), firstAuthor(b)
+        if aa ~= ba then
+            if aa == Core.UNKNOWN then return false end
+            if ba == Core.UNKNOWN then return true end
+            return cmpText(aa, ba, collate)
+        end
+        local ay = Core.publicationYear(a and a.year)
+        local by = Core.publicationYear(b and b.year)
+        if ay ~= by then
+            if not ay then return false end
+            if not by then return true end
+            return ay < by
+        end
+        return byTitle(a, b)
+    end
     if mode == "author" then
         return byAuthor
+    elseif mode == "author_year" then
+        return byAuthorYear
     elseif mode == "series" then
         return function(a, b)
             local as, bs = a.series or Core.UNKNOWN, b.series or Core.UNKNOWN
@@ -1906,11 +1936,16 @@ function Core.shortDate(ts, now)
 end
 
 --- The date a row shows for its sort: when it was last opened (Last read)
--- or added (Date added); nil for other sorts and never-opened books.
+-- or added (Date added), or the publication year (Author, then year).
+-- nil for other sorts, never-opened books, and books with no year.
 function Core.sortDate(book, sort, now)
     if not book then return nil end
     if sort == "recent" then return Core.shortDate(book.last_opened, now) end
     if sort == "added" then return Core.shortDate(book.modification, now) end
+    if sort == "author_year" then
+        local y = Core.publicationYear(book.year)
+        if y then return tostring(y) end
+    end
     return nil
 end
 
@@ -2038,6 +2073,7 @@ function Core.calibreIndex(entries, base_dir)
                 keywords = type(e.tags) == "table" and table.concat(e.tags, "\n") or nil,
                 uuid = type(uuid) == "string" and uuid or nil,
                 isbn = isbnFromEntry(e),
+                year = Core.publicationYear(plain(e.pubdate)),
             }
         end
     end
@@ -2092,13 +2128,22 @@ function Core.reconcile(scanned, cache_entries, calibre_stamp)
             f.title, f.authors, f.series, f.series_index = c.title, c.authors, c.series, c.series_index
             f.keywords, f.src, f.cal = c.keywords, c.src, c.cal
             f.uuid, f.isbn = c.uuid, c.isbn
+            -- false means "looked, no year". nil means a cache from before years.
+            f.year = c.year
             -- (only books held in memory carry these; the disk cache does not)
             f.search_key, f.search_norm, f.search_tokens = c.search_key, c.search_norm, c.search_tokens
             Core.copyState(f, c)
             table.insert(reused, f)
         else
-            -- keep reading state; only metadata is stale
-            if c then Core.copyState(f, c) end
+            -- keep reading state; only metadata is stale.
+            -- A year already read for this exact file is kept, so a book
+            -- whose only metadata is its name is not opened again.
+            if c then
+                Core.copyState(f, c)
+                if c.size == f.size and c.modification == f.modification and c.year ~= nil then
+                    f.year = c.year
+                end
+            end
             table.insert(stale, f)
         end
     end
@@ -2107,7 +2152,7 @@ end
 
 local CACHED_FIELDS = {
     "size", "modification", "title", "authors", "series", "series_index",
-    "keywords", "src", "cal", "uuid", "isbn",
+    "keywords", "src", "cal", "uuid", "isbn", "year",
     "sc_mtime", "status", "percent", "pages", "m_start", "m_chap",
     "opened", "doc_status", "time_left", "open_path",
 }
@@ -3694,9 +3739,10 @@ end
 
 --- Which strip to show, or nil when this list should not have one.
 -- Book lists use the strip only while they are already sorted by title,
--- author or series. Date added, Last read and Size stay hidden, and this
--- never changes `state.sort`. Inside one series the books stay in reading
--- order, so the strip stays off there too.
+-- author, author then year, or series. Author, then year uses the author
+-- letter, the same as Author. Date added, Last read and Size stay hidden,
+-- and this never changes `state.sort`. Inside one series the books stay in
+-- reading order, so the strip stays off there too.
 -- Authors, Collections and Genres are name lists. The Series list is too,
 -- but only once it runs past a single page (`pages` >= 2). Omit `pages`
 -- when the count is not known yet.
@@ -3721,8 +3767,10 @@ function Core.scrubberMode(state)
         return nil
     end
     if state.kind ~= nil and state.kind ~= "books" then return nil end
-    if state.sort == "title" or state.sort == "author" or state.sort == "series" then
-        return state.sort
+    local sort = state.sort
+    if sort == "author_year" then sort = "author" end
+    if sort == "title" or sort == "author" or sort == "series" then
+        return sort
     end
     return nil
 end

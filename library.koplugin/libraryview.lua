@@ -9,7 +9,7 @@ Layout, top to bottom:
     status chips     All | Unread | Reading | Barely started | Finished
     continue reading (Books tab, no search or filter:
                      the books in progress, with percent and last-read time)
-    cover grid or list   an A–Z strip on the right when sorted by title, author or series
+    cover grid or list   an A–Z strip on the right when sorted by title, author, author then year, or series
     footer           menu, page x of y, sort, current-book cover
                      (in a series: "2 of 5 read")
 
@@ -1503,7 +1503,7 @@ function LibraryView:buildList(items, kind, layout, height, width)
                 book = kind == "books" and item or nil,
                 group = kind == "groups" and item or nil,
                 series_number = kind == "books" and self:inSeries(),
-                author_first = kind == "books" and self.sort == "author",
+                author_first = kind == "books" and (self.sort == "author" or self.sort == "author_year"),
                 text_only = text_only,
                 date_text = kind == "books" and not self:inSeries() and Core.sortDate(item, self.sort, now) or nil,
                 covers = self.covers,
@@ -3595,7 +3595,7 @@ function LibraryView:refreshData()
     self:refreshBody(true)
 end
 
---- The footer's sort label was tapped: Author, Title, Date added, Last read, Series.
+--- The footer's sort label was tapped: Author, Author then year, Title, Date added, Last read, Series.
 function LibraryView:showSortPicker()
     self:keyboardGuard()
     self.plugin:showSortPicker(self)

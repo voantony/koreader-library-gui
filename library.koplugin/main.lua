@@ -87,6 +87,7 @@ local SORT_NAMES = {
     recent = _("Last read"),
     title  = _("Title"),
     author = _("Author"),
+    author_year = _("Author, then year"),
     series = _("Series"),
     added  = _("Date added"),
     size   = _("Size"),
@@ -2791,7 +2792,7 @@ function Library:addToMainMenu(menu_items)
             self:statusStyleMenu(),
             {
                 text = _("A–Z strip"),
-                help_text = _("A letter strip down the right edge. Tap or drag a letter to jump to the first page that starts with it. Shown when books are already sorted by title, author or series (a cover grid or single-column Compact included), and on the Authors, Collections and Genres lists. The Series list shows it when that list runs past one page. Hidden for Date added, Last read and Size, inside one series, on Compact · 2 columns, and when a search fits on one page. Showing the strip does not change the sort."),
+                help_text = _("A letter strip down the right edge. Tap or drag a letter to jump to the first page that starts with it. Shown when books are already sorted by title, author, author then year, or series (a cover grid or single-column Compact included), and on the Authors, Collections and Genres lists. The Series list shows it when that list runs past one page. Hidden for Date added, Last read and Size, inside one series, on Compact · 2 columns, and when a search fits on one page. Showing the strip does not change the sort."),
                 checked_func = function() return Core.showScrubber(self.settings) end,
                 callback = function()
                     self.settings.show_scrubber = not Core.showScrubber(self.settings)
