@@ -99,6 +99,7 @@ local VIEW_NAMES = {
     medium = _("Medium covers"),
     large = _("Large covers"),
     list = _("List"),
+    list2 = _("List · 2 columns"),
     compact = _("Compact"),
     compact2 = _("Compact · 2 columns"),
     covers = _("Cover only"),
@@ -865,6 +866,7 @@ function Library:newView()
         plugin = self,
         cols = self.settings.columns,
         view_mode = Core.viewMode(self.settings.view),
+        layout_button = Core.layoutButton(self.settings),
         filter = prefs and prefs.filter or "all",
         show_continue = self.settings.show_continue ~= false,
         home_widgets = self.settings.home_widgets,
@@ -1940,7 +1942,28 @@ function Library:showLibraryMenu(view)
             end,
         },
     }
-    local buttons = { sort_row, view_row, text_row, col_row, cover_row, barely_row }
+    local button_mode = Core.layoutButton(self.settings)
+    local layout_row = {
+        {
+            text = (button_mode == "classic" and "✓ " or "") .. _("Layout button: classic"),
+            callback = function()
+                close()
+                self.settings.layout_button = "classic"
+                self:saveSettings()
+                if view.setLayoutButton then view:setLayoutButton("classic") end
+            end,
+        },
+        {
+            text = (button_mode == "layouts" and "✓ " or "") .. _("Layout button: layouts only"),
+            callback = function()
+                close()
+                self.settings.layout_button = "layouts"
+                self:saveSettings()
+                if view.setLayoutButton then view:setLayoutButton("layouts") end
+            end,
+        },
+    }
+    local buttons = { sort_row, view_row, text_row, layout_row, col_row, cover_row, barely_row }
     -- Each shelf remembers its own layout, sort and filter: offer to forget them.
     local remember = Core.rememberViews(self.settings)
     if remember then
@@ -2938,6 +2961,35 @@ function Library:addToMainMenu(menu_items)
                             self.settings.status_bar_size = "match"
                             self:saveSettings()
                             if shared.view and shared.view.setStatusBarSize then shared.view:setStatusBarSize("match") end
+                        end,
+                    },
+                },
+            },
+            {
+                text_func = function()
+                    local mode = Core.layoutButton(self.settings)
+                    return T(_("Layout button: %1"), mode == "layouts" and _("Layouts only") or _("Classic"))
+                end,
+                help_text = _("What the footer layout button cycles. Classic is the original four steps: cover grid, list, compact, and compact in two columns. Layouts only is cover grid, list, and a two-column list, and it does not change how big the rows are. Compact, Cover only, and List · 2 columns stay in the view menu either way. The size button always steps large, medium, small, and does not change the layout."),
+                sub_item_table = {
+                    {
+                        text = _("Classic"),
+                        radio = true,
+                        checked_func = function() return Core.layoutButton(self.settings) == "classic" end,
+                        callback = function()
+                            self.settings.layout_button = "classic"
+                            self:saveSettings()
+                            if shared.view and shared.view.setLayoutButton then shared.view:setLayoutButton("classic") end
+                        end,
+                    },
+                    {
+                        text = _("Layouts only"),
+                        radio = true,
+                        checked_func = function() return Core.layoutButton(self.settings) == "layouts" end,
+                        callback = function()
+                            self.settings.layout_button = "layouts"
+                            self:saveSettings()
+                            if shared.view and shared.view.setLayoutButton then shared.view:setLayoutButton("layouts") end
                         end,
                     },
                 },

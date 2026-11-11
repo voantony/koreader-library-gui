@@ -1685,7 +1685,7 @@ Core.VIEWS = { "grid", "list", "compact", "compact2", "covers" }
 
 --- A saved view mode, falling back to "grid".
 function Core.viewMode(v)
-    if v == "list" or v == "compact" or v == "compact2" or v == "covers" then return v end
+    if v == "list" or v == "list2" or v == "compact" or v == "compact2" or v == "covers" then return v end
     return "grid"
 end
 
@@ -1696,6 +1696,7 @@ Core.VIEW_PICKER = {
     { id = "medium", view = "grid", columns = 4 },
     { id = "large", view = "grid", columns = 3 },
     { id = "list", view = "list" },
+    { id = "list2", view = "list2" },
     { id = "compact", view = "compact" },
     { id = "compact2", view = "compact2" },
     { id = "covers", view = "covers" },
@@ -1713,7 +1714,9 @@ end
 
 --- Columns of rows: 2 for "compact2", else 1.
 function Core.listColumns(view_mode)
-    return view_mode == "compact2" and 2 or 1
+    local mode = Core.viewMode(view_mode)
+    if mode == "compact2" or mode == "list2" then return 2 end
+    return 1
 end
 
 --- Split a page into `cols` columns of up to `rows`, filled column by
@@ -1744,41 +1747,119 @@ end
 --- Cover sizes, in picker order: Small (5 columns), Medium (4), Large (3).
 Core.COVER_COLUMNS = { 5, 4, 3 }
 
---- Next cover size after `cols`, wrapping Large back to Small.
--- The footer size control (issue #5) steps through these.
+--- Footer size button: one step at a time, large covers first.
+-- 3 columns, then 4, then 5, then back to 3. The previous order wrapped
+-- from large straight to small, so a tap went 3 covers, then 10, then 8 (#13).
+Core.SIZE_COLUMNS = { 3, 4, 5 }
+
+--- Next cover size after `cols`. Unknown counts land on Medium (4).
+-- The footer size control steps through SIZE_COLUMNS and does not change layout.
 function Core.nextColumns(cols)
-    for i, c in ipairs(Core.COVER_COLUMNS) do
-        if c == cols then return Core.COVER_COLUMNS[i % #Core.COVER_COLUMNS + 1] end
+    cols = tonumber(cols)
+    for i, c in ipairs(Core.SIZE_COLUMNS) do
+        if c == cols then return Core.SIZE_COLUMNS[i % #Core.SIZE_COLUMNS + 1] end
     end
-    return 4 -- unknown count: Medium
+    return 4
 end
 
---- View forms in picker order.
-Core.VIEW_FORMS = { "grid", "list", "compact", "compact2" }
+--- Footer layout button. "classic" is the v0.7.7 cycle: grid, list,
+-- compact, compact · 2 columns. "layouts" is cover grid, list, and a
+-- two-column list, without a second list that only changes row size (#13).
+-- Absent means classic, so a v0.7.7 settings table keeps the old button.
+function Core.layoutButton(settings)
+    if type(settings) == "table" and settings.layout_button == "layouts" then return "layouts" end
+    return "classic"
+end
 
---- Next view form after `mode`, wrapping back to the grid.
--- The footer view control (issue #5) steps through these.
-function Core.nextViewMode(mode)
+Core.CLASSIC_FORMS = { "grid", "list", "compact", "compact2" }
+Core.LAYOUT_FORMS = { "grid", "list", "list2" }
+Core.VIEW_FORMS = Core.LAYOUT_FORMS
+
+--- The layouts-only form for a saved mode. Compact counts as the
+-- one-column list, two-column Compact as the two-column list.
+function Core.cycleForm(mode)
     mode = Core.viewMode(mode)
-    for i, m in ipairs(Core.VIEW_FORMS) do
-        if m == mode then return Core.VIEW_FORMS[i % #Core.VIEW_FORMS + 1] end
+    if mode == "compact" then return "list" end
+    if mode == "compact2" or mode == "list2" then return "list2" end
+    if mode == "list" then return "list" end
+    return "grid"
+end
+
+--- Next layout after `mode`. `button` nil or "classic" is the four-state
+-- cycle. "layouts" is the three-layout cycle. Either way the cover size
+-- is a separate step.
+function Core.nextViewMode(mode, button)
+    if button == "layouts" then
+        local form = Core.cycleForm(mode)
+        local forms = Core.LAYOUT_FORMS
+        for i, m in ipairs(forms) do
+            if m == form then return forms[i % #forms + 1] end
+        end
+        return "list"
+    end
+    mode = Core.viewMode(mode)
+    local forms = Core.CLASSIC_FORMS
+    for i, m in ipairs(forms) do
+        if m == mode then return forms[i % #forms + 1] end
     end
     return "grid"
 end
 
---- Footer view button icon for the current form: the form's columnar
--- shape (grid: three columns of lines; two-column compact: two; the
--- one-column forms: one).
+--- A saved view v0.7.7 understood. Unknown names become the cover grid,
+-- which is what the view picker falls back to. Compact and Compact · 2
+-- columns stay themselves: they are still real layouts.
+function Core.migrateView(v)
+    if v == nil then return nil end
+    if Core.viewMode(v) == v then return v end
+    return "grid"
+end
+
+--- 3, 4 and 5 columns are the three cover sizes. Anything else moves to
+-- the nearest of those, so a saved size is not dropped to the default.
+function Core.closestColumns(n)
+    n = tonumber(n)
+    if not n then return nil end
+    if n == 3 or n == 4 or n == 5 then return n end
+    local best, dist = 4, math.huge
+    for _, c in ipairs(Core.SIZE_COLUMNS) do
+        local d = math.abs(n - c)
+        if d < dist then best, dist = c, d end
+    end
+    return best
+end
+
+--- Rewrite only values the new build would otherwise forget. A v0.7.7
+-- table's compact, list, grid, covers and column counts 3, 4 and 5 stay.
+function Core.migrateSettings(settings)
+    if type(settings) ~= "table" then return settings end
+    if settings.view ~= nil then settings.view = Core.migrateView(settings.view) end
+    if settings.columns ~= nil then
+        local cols = Core.closestColumns(settings.columns)
+        if cols then settings.columns = cols end
+    end
+    if type(settings.view_memory) == "table" then
+        for _, entry in pairs(settings.view_memory) do
+            if type(entry) == "table" and entry.view ~= nil then
+                entry.view = Core.migrateView(entry.view)
+            end
+        end
+    end
+    return settings
+end
+
+--- Footer view button icon: three columns for the cover grid, two for a
+-- two-column list, one for a single column.
 function Core.viewFormIcon(mode)
     mode = Core.viewMode(mode)
-    if mode == "compact2" then return "column.two" end
+    if mode == "compact2" or mode == "list2" then return "column.two" end
     if mode == "grid" then return "column.three" end
     return "column.one"
 end
 
 --- List rows of shelves are text only (no cover art) on Authors and Series.
 function Core.textRows(view_mode, kind, tab)
-    return Core.viewMode(view_mode) == "list" and kind == "groups" and (tab == "authors" or tab == "series")
+    local mode = Core.viewMode(view_mode)
+    return (mode == "list" or mode == "list2") and kind == "groups" and (tab == "authors" or tab == "series")
 end
 
 ----------------------------------------------------------------------------
@@ -1873,14 +1954,6 @@ function Core.showContinue(state)
     if state.keyboard then return false end
     if state.filter_expands ~= false and state.filter and state.filter ~= "all" then return false end
     return true
-end
-
---- Keep a saved settings table. New keys are left unset so the defaults
--- stand in for them. View, columns, sort, filter and per-shelf memory
--- are not rewritten.
-function Core.migrateSettings(settings)
-    if type(settings) ~= "table" then return settings end
-    return settings
 end
 
 --- Size the Continue reading strip.

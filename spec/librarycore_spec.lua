@@ -443,26 +443,39 @@ describe("grid under the Continue reading strip", function()
 end)
 
 describe("footer size and view cycling", function()
-    it("steps cover sizes Small -> Medium -> Large and wraps", function()
-        eq(Core.nextColumns(5), 4)
-        eq(Core.nextColumns(4), 3)
-        eq(Core.nextColumns(3), 5)
+    it("steps cover sizes Large -> Medium -> Small, one column at a time", function()
+        eq(Core.nextColumns(3), 4)
+        eq(Core.nextColumns(4), 5)
+        eq(Core.nextColumns(5), 3)
         eq(Core.nextColumns(6), 4, "unknown count: Medium")
         eq(Core.nextColumns(nil), 4)
     end)
 
-    it("steps view forms Grid -> List -> Compact -> Compact 2 and wraps", function()
+    it("steps the classic four forms by default", function()
+        eq(Core.layoutButton(nil), "classic")
+        eq(Core.layoutButton({}), "classic")
+        eq(Core.layoutButton({ layout_button = "layouts" }), "layouts")
         eq(Core.nextViewMode("grid"), "list")
         eq(Core.nextViewMode("list"), "compact")
         eq(Core.nextViewMode("compact"), "compact2")
         eq(Core.nextViewMode("compact2"), "grid")
+        eq(Core.nextViewMode("list2"), "grid", "list · 2 columns is not in the classic cycle")
         eq(Core.nextViewMode("bogus"), "list", "unknown normalises to grid, then steps on")
         eq(Core.nextViewMode(nil), "list")
+    end)
+
+    it("steps Grid -> List -> two-column list when the button is layouts only", function()
+        eq(Core.nextViewMode("grid", "layouts"), "list")
+        eq(Core.nextViewMode("list", "layouts"), "list2")
+        eq(Core.nextViewMode("list2", "layouts"), "grid")
+        eq(Core.nextViewMode("compact", "layouts"), "list2")
+        eq(Core.nextViewMode("compact2", "layouts"), "grid")
     end)
 
     it("shows the form's columnar shape as the view button icon", function()
         eq(Core.viewFormIcon("grid"), "column.three")
         eq(Core.viewFormIcon("list"), "column.one")
+        eq(Core.viewFormIcon("list2"), "column.two")
         eq(Core.viewFormIcon("compact"), "column.one")
         eq(Core.viewFormIcon("compact2"), "column.two")
         eq(Core.viewFormIcon("bogus"), "column.three")
@@ -555,6 +568,40 @@ describe("tab row", function()
         eq(Core.tabRow("top"), "top")
         eq(Core.tabRow("bottom"), "bottom")
         eq(Core.tabRow("nope"), "top")
+    end)
+end)
+
+describe("settings kept from v0.7.7", function()
+    it("keeps compact layouts and maps only an unknown view or size", function()
+        local saved = {
+            view = "compact2",
+            columns = 5,
+            sort = "author",
+            view_memory = {
+                ["tab:authors"] = { view = "compact", sort = "author", filter = "unread", t = 1 },
+                ["series:Oz"] = { view = "list", sort = "series", filter = "all", t = 2 },
+                ["tab:series"] = { view = "tiles", sort = "title", filter = "reading", t = 3 },
+            },
+        }
+        Core.migrateSettings(saved)
+        eq(saved.view, "compact2")
+        eq(saved.columns, 5)
+        eq(saved.sort, "author")
+        eq(saved.view_memory["tab:authors"].view, "compact")
+        eq(saved.view_memory["series:Oz"].view, "list")
+        eq(saved.view_memory["tab:series"].view, "grid", "an unknown view becomes the cover grid")
+        eq(Core.viewPrefs(saved, "tab:authors").view, "compact")
+        eq(Core.viewPrefs(saved, "series:Oz").filter, "all")
+        eq(Core.layoutButton(saved), "classic")
+        local odd = { view = "covers", columns = 6 }
+        Core.migrateSettings(odd)
+        eq(odd.view, "covers")
+        eq(odd.columns, 5, "6 columns is nearer to small than to medium")
+        local tiny = { columns = 2 }
+        Core.migrateSettings(tiny)
+        eq(tiny.columns, 3)
+        eq(Core.closestColumns(4), 4)
+        eq(Core.closestColumns(3), 3)
     end)
 end)
 
