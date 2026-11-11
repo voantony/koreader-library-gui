@@ -15,6 +15,16 @@ the `SHA256: <hex>` line in the release notes. v0.7.1 published that
 hash as `SHA256 `<hex>``; both forms are accepted. A missing or
 mismatched hash aborts before the plugin folder is changed.
 
+A release that needs a newer KOReader says so on the next line,
+`Requires KOReader: v2025.04`. A dev revision (`v2025.04-42`, the
+commits-after-tag form from KOReader's git-rev) is allowed. The line is
+read from the release notes before the zip is downloaded. The installed
+revision comes from KOReader's version module (`getCurrentRevision` /
+`getNormalizedCurrentVersion`) and is compared with the same weights
+that module uses. Older than the line: the zip is not downloaded, and
+KOReader itself is not updated. No line, or a version that cannot be
+parsed, leaves the update alone.
+
 On KOReader v2025.08 and newer the zip is unpacked with ffi/archiver
 (the same libarchive the Archive viewer uses). v2025.04 Kindle packages
 have no libarchive and no unzip binary, so the fallback is zlib's raw
@@ -81,6 +91,99 @@ function M.offerState(latest, installed)
     return "unknown"
 end
 
+--- KOReader revisions are vYYYY.MM, an optional point (vYYYY.MM.P), and the
+-- commits since that tag (vYYYY.MM-N), plus an optional `-g<hash>`.
+-- The 12-digit weight is Version:getNormalizedVersion's:
+-- ((year * 100 + month) * 1000000) + (point * 10000) + commits.
+-- v2015.11-982-g704d4238 is 201511000982. A dev build is newer than the tag
+-- it follows and older than the next month. Nil when `rev` is not that
+-- shape, so a parse failure never blocks an update.
+function M.normalizeKoreaderVersion(rev)
+    if type(rev) ~= "string" then return nil end
+    rev = trim(rev)
+    if rev == "" then return nil end
+    if rev:sub(1, 1) ~= "v" and rev:sub(1, 1) ~= "V" then
+        rev = "v" .. rev
+    else
+        rev = "v" .. rev:sub(2)
+    end
+    local year, month, point, commits = rev:match("^v(%d%d%d%d)%.(%d%d)%.?(%d?%d?)-?(%d*)")
+    if not year or not month then return nil end
+    year, month = tonumber(year), tonumber(month)
+    if not year or not month then return nil end
+    point = tonumber(point) or 0
+    commits = tonumber(commits) or 0
+    return ((year * 100 + month) * 1000000) + (point * 10000) + commits
+end
+
+--- -1 when a is older, 0 when equal, 1 when a is newer. Nil if either
+-- revision cannot be parsed.
+function M.compareKoreader(a, b)
+    local na, nb = M.normalizeKoreaderVersion(a), M.normalizeKoreaderVersion(b)
+    if not na or not nb then return nil end
+    if na < nb then return -1 end
+    if na > nb then return 1 end
+    return 0
+end
+
+--- The number KOReader compares. `version_mod` is its version module when
+-- the caller has one: getNormalizedVersion wins, and 0 means "not a
+-- revision" (that is what the module returns instead of nil).
+function M.koreaderVersionNumber(rev, version_mod)
+    if type(rev) == "number" then
+        if rev > 0 then return rev end
+        return nil
+    end
+    if type(rev) ~= "string" or trim(rev) == "" then return nil end
+    if type(version_mod) == "table" and type(version_mod.getNormalizedVersion) == "function" then
+        local ok, num = pcall(version_mod.getNormalizedVersion, version_mod, rev)
+        if ok and type(num) == "number" and num > 0 then return num end
+    end
+    return M.normalizeKoreaderVersion(rev)
+end
+
+--- Installed KOReader revision, from require("version") unless a module is passed.
+-- Returns the normalized number and the git-rev string. Either may be nil.
+-- getCurrentRevision is the git-rev; getNormalizedCurrentVersion is the number
+-- KOReader itself compares. A missing module or a failed call is nil, not an error.
+function M.installedKoreaderNumber(version_mod)
+    local Version = version_mod
+    if Version == nil then
+        local ok, loaded = pcall(require, "version")
+        if not ok or type(loaded) ~= "table" then return nil, nil end
+        Version = loaded
+    end
+    if type(Version) ~= "table" then return nil, nil end
+    local rev
+    if type(Version.getCurrentRevision) == "function" then
+        local ok, value = pcall(Version.getCurrentRevision, Version)
+        if ok and type(value) == "string" then
+            value = trim(value)
+            if value ~= "" then rev = value end
+        end
+    end
+    local num
+    if type(Version.getNormalizedCurrentVersion) == "function" then
+        local ok, value = pcall(Version.getNormalizedCurrentVersion, Version)
+        if ok and type(value) == "number" and value > 0 then num = value end
+    end
+    if not num and rev then
+        num = M.koreaderVersionNumber(rev, Version)
+    end
+    return num, rev
+end
+
+--- True only when both sides parse and the installed revision is older than
+-- the release's minimum. No minimum, or either side unparsable, is false:
+-- the update is not blocked.
+function M.koreaderTooOld(installed, required, version_mod)
+    local need = M.koreaderVersionNumber(required, version_mod)
+    if not need then return false end
+    local have = M.koreaderVersionNumber(installed, version_mod)
+    if not have then return false end
+    return have < need
+end
+
 -- Automatic updates. An unset value means Notify me: a saved choice is
 -- only "off", "notify", or "install".
 M.MODE_ORDER = { "off", "notify", "install" }
@@ -128,6 +231,24 @@ function M.parseSha256(text)
     return nil
 end
 
+--- `Requires KOReader: v2025.04` from the release notes. Nil when the line
+-- is absent or the version is not a KOReader revision. One line is enough;
+-- a later line is not consulted when the first one does not parse, so a
+-- broken declaration cannot block the update.
+function M.parseRequiresKoreader(text)
+    if type(text) ~= "string" or text == "" then return nil end
+    for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+        local cleaned = line:gsub("%*%*", ""):gsub("`", "")
+        local token = cleaned:match("[Rr]equires%s+[Kk][Oo][Rr]eader%s*:?%s*(%S+)")
+        if token then
+            token = token:gsub("[,;%.%)]+$", "")
+            if M.normalizeKoreaderVersion(token) then return token end
+            return nil
+        end
+    end
+    return nil
+end
+
 --- Release notes for the dialog: checksum and install lines removed, and
 -- the light markup GitLab releases use turned into plain text.
 function M.shortNotes(description)
@@ -138,6 +259,7 @@ function M.shortNotes(description)
         cleaned = cleaned:gsub("%[([^%]]+)%]%([^%)]+%)", "%1")
         cleaned = cleaned:gsub("`", "")
         local skip = cleaned:find("SHA256", 1, true)
+            or cleaned:lower():find("requires koreader", 1, true)
             or cleaned:find("library.koplugin-v", 1, true)
             or cleaned:match("^%s*Unzip into")
         if not skip then kept[#kept + 1] = cleaned end
@@ -1210,6 +1332,176 @@ local function offer(plugin, info, installed)
     end, plugin)
 end
 
+-- Shown when a release needs a newer KOReader. %1 is the Library version,
+-- %2 is the KOReader version. This plugin never updates KOReader.
+M.BLOCK_TEMPLATE = "Library GUI %1 needs KOReader %2 or newer. Update KOReader with its own updater (Tools or the menu > Update)."
+
+function M.displayVersion(v)
+    if type(v) ~= "string" then return "?" end
+    v = trim(v)
+    if v == "" then return "?" end
+    if v:sub(1, 1) == "v" or v:sub(1, 1) == "V" then return v end
+    return "v" .. v
+end
+
+--- Drop the `-g<hash>` tail so the sentence shows v2025.04-42, not the commit.
+function M.displayKoreader(v)
+    return (M.displayVersion(v):gsub("-[gG][0-9a-fA-F].*$", ""))
+end
+
+function M.blockText(library_version, required)
+    return (M.BLOCK_TEMPLATE
+        :gsub("%%1", M.displayVersion(library_version))
+        :gsub("%%2", M.displayKoreader(required)))
+end
+
+function M.presentBlock(plugin, library_version, required)
+    local _, T = tr()
+    tell(T(_(M.BLOCK_TEMPLATE), M.displayVersion(library_version), M.displayKoreader(required)), nil, plugin)
+end
+
+--- Quiet install remembers why it skipped. Updates shows the note once.
+function M.rememberBlock(settings, library_version, required)
+    if type(settings) ~= "table" then return false end
+    if type(library_version) ~= "string" or library_version == "" then return false end
+    if type(required) ~= "string" or required == "" then return false end
+    settings.update_need_library = library_version
+    settings.update_need_koreader = required
+    settings.update_need_pending = true
+    return true
+end
+
+function M.clearBlock(settings)
+    if type(settings) ~= "table" then return false end
+    if settings.update_need_pending == nil
+            and settings.update_need_library == nil
+            and settings.update_need_koreader == nil then
+        return false
+    end
+    settings.update_need_pending = nil
+    settings.update_need_library = nil
+    settings.update_need_koreader = nil
+    return true
+end
+
+--- KOReader's menu search calls sub_item_table_func while indexing. That is
+-- not the user opening Updates. `names` is the debug frame names above the call.
+function M.updatesOpenedFrom(names)
+    if type(names) ~= "table" then return false end
+    local opened = false
+    for i = 1, #names do
+        if names[i] == "search" then return false end
+        if names[i] == "onMenuSelect" then opened = true end
+    end
+    return opened
+end
+
+--- The notice quiet install saved, then clears it. Nil when there is nothing
+-- to say: no pending note, or the installed KOReader now meets it.
+-- An unreadable installed revision still returns the note. `koreader_rev`
+-- nil reads require("version"); a string is used as given (specs).
+function M.takePendingBlock(settings, koreader_rev, version_mod)
+    if type(settings) ~= "table" or settings.update_need_pending ~= true then
+        return nil, false
+    end
+    local library_version = settings.update_need_library
+    local required = settings.update_need_koreader
+    settings.update_need_pending = nil
+    settings.update_need_library = nil
+    settings.update_need_koreader = nil
+    if type(library_version) ~= "string" or type(required) ~= "string" then
+        return nil, true
+    end
+    local Version = version_mod
+    if Version == nil and type(koreader_rev) ~= "string" and type(koreader_rev) ~= "number" then
+        local ok, loaded = pcall(require, "version")
+        if ok and type(loaded) == "table" then Version = loaded end
+    end
+    local have
+    if type(koreader_rev) == "string" or type(koreader_rev) == "number" then
+        have = M.koreaderVersionNumber(koreader_rev, Version)
+    else
+        have = M.installedKoreaderNumber(Version)
+    end
+    local need = M.koreaderVersionNumber(required, Version)
+    if have and need and have >= need then return nil, true end
+    if not need then return nil, true end
+    return { library = library_version, required = required }, true
+end
+
+local function saveIf(plugin, changed)
+    if changed and type(plugin) == "table" and type(plugin.saveSettings) == "function" then
+        plugin:saveSettings()
+    end
+end
+
+--- What to do with a fetched release. `mode` is "manual", "notify", or "install".
+-- `koreader_rev` nil reads KOReader's version module. A string skips that
+-- require so specs stay hermetic.
+-- action:
+--   "current"    up to date
+--   "skip"       quiet path, nothing to say (not a newer version)
+--   "blocked"    KOReader is too old; do not download
+--   "no-asset"   newer, but no plugin zip
+--   "no-sha"     newer, but no SHA256 line
+--   "notify"     short "available" notice
+--   "install"    download and install now
+--   "offer"      manual check: ask before downloading
+-- download_now is true only for "install". Blocked never sets it.
+function M.planRelease(mode, release, plugin_version, koreader_rev, version_mod)
+    mode = mode or "manual"
+    release = type(release) == "table" and release or {}
+    local description = type(release.description) == "string" and release.description or ""
+    local version = M.tagVersion(release.tag_name)
+    local sha = M.parseSha256(description)
+    local asset = version and M.pickAsset(release, version) or nil
+    local state = version and M.offerState(version, plugin_version) or "unknown"
+    local required = M.parseRequiresKoreader(description)
+    local Version = version_mod
+    if Version == nil and type(koreader_rev) ~= "string" and type(koreader_rev) ~= "number" then
+        local ok, loaded = pcall(require, "version")
+        if ok and type(loaded) == "table" then Version = loaded end
+    end
+    local have
+    if type(koreader_rev) == "string" or type(koreader_rev) == "number" then
+        have = M.koreaderVersionNumber(koreader_rev, Version)
+    else
+        have = M.installedKoreaderNumber(Version)
+    end
+    local need = M.koreaderVersionNumber(required, Version)
+    local too_old = have ~= nil and need ~= nil and have < need
+    local action
+    if state == "current" then
+        action = "current"
+    elseif state ~= "newer" and mode ~= "manual" then
+        -- A weekly check stays quiet when the installed plugin version cannot
+        -- be compared. A manual check still considers the zip.
+        action = "skip"
+    elseif too_old then
+        action = "blocked"
+    elseif not asset then
+        action = "no-asset"
+    elseif not sha then
+        action = "no-sha"
+    elseif mode == "notify" then
+        action = "notify"
+    elseif mode == "install" then
+        action = "install"
+    else
+        action = "offer"
+    end
+    return {
+        action = action,
+        download_now = action == "install",
+        version = version,
+        sha = sha,
+        url = asset and asset.url or nil,
+        state = state,
+        required = required,
+        notes = M.shortNotes(description),
+    }
+end
+
 --- Query GitLab. allow_install shows Update. silent_current skips "up to date".
 function M.check(plugin, opts)
     opts = opts or {}
@@ -1252,41 +1544,44 @@ function M.check(plugin, opts)
         return
     end
     stamp(plugin, "update_checked_at")
-    local version = M.tagVersion(release.tag_name)
-    local sha = M.parseSha256(release.description or "")
-    local asset = version and M.pickAsset(release, version) or nil
     local installed = M.installedVersion(plugin_dir)
-    local state = version and M.offerState(version, installed) or "unknown"
-    if state == "current" then
+    local plan = M.planRelease(opts.notify_only and "notify" or "manual", release, installed)
+    if plan.action == "current" then
+        saveIf(plugin, M.clearBlock(plugin.settings))
         if not opts.quiet then
             tell(T(_("Library GUI is up to date (%1)."), installed), nil, plugin)
         end
         return
     end
-    -- A release from before this field existed has no version. A weekly
-    -- check stays quiet; a manual check still offers the latest zip.
-    if state == "unknown" and opts.quiet then return end
-    if not asset then
+    if plan.action == "skip" then return end
+    if plan.action == "blocked" then
+        -- Check now and Notify me say why. The zip is not downloaded.
+        saveIf(plugin, M.clearBlock(plugin.settings))
+        M.presentBlock(plugin, plan.version, plan.required)
+        return
+    end
+    if plan.action == "no-asset" then
         if not opts.quiet then
             tell(_("The release has no library.koplugin zip, so nothing was changed."), nil, plugin)
         end
         return
     end
-    if not sha then
+    if plan.action == "no-sha" then
         if not opts.quiet then
             tell(_("This release has no SHA256 line, so nothing was installed."), nil, plugin)
         end
         return
     end
+    saveIf(plugin, M.clearBlock(plugin.settings))
     local found = {
-        version = version,
-        url = asset.url,
-        sha = sha,
-        notes = M.shortNotes(release.description or ""),
+        version = plan.version,
+        url = plan.url,
+        sha = plan.sha,
+        notes = plan.notes,
     }
     -- Notify me: a short notice only. Install quietly is a different path.
-    if opts.notify_only then
-        tell(T(_("Library GUI %1 is available."), version), 4, plugin)
+    if plan.action == "notify" then
+        tell(T(_("Library GUI %1 is available."), plan.version), 4, plugin)
         return
     end
     offer(plugin, found, installed)
@@ -1318,36 +1613,43 @@ function M.quietInstall(plugin)
     if bookOpen(plugin) or not wifiAlreadyOn() then return end
     M._busy = true
     local _, T = tr()
-    local release, rerr = M.fetchRelease()
+    local release = M.fetchRelease()
     if not release then
         M._busy = false
         stamp(plugin, "update_check_failed_at")
         return
     end
-    local version = M.tagVersion(release.tag_name)
-    local sha = M.parseSha256(release.description or "")
-    local asset = version and M.pickAsset(release, version) or nil
     local installed = M.installedVersion(M.pluginDir(plugin))
-    local state = version and M.offerState(version, installed) or "unknown"
-    if state ~= "newer" or not asset or not sha then
+    local plan = M.planRelease("install", release, installed)
+    if not plan.download_now then
         M._busy = false
+        if plan.action == "blocked" then
+            -- No dialog. The same sentence waits until Updates is opened.
+            saveIf(plugin, M.rememberBlock(plugin.settings, plan.version, plan.required))
+            stamp(plugin, "update_checked_at")
+            return
+        end
         -- A real answer, even "nothing newer", counts as this week's check.
         -- An incomplete release does not, so a later one can still install.
-        if state == "current" or state == "unknown" then
+        if plan.action == "current" or plan.action == "skip" then
+            if plan.action == "current" then
+                saveIf(plugin, M.clearBlock(plugin.settings))
+            end
             stamp(plugin, "update_checked_at")
         else
             stamp(plugin, "update_check_failed_at")
         end
         return
     end
-    local ok = M.applyRelease(plugin, { version = version, url = asset.url, sha = sha })
+    saveIf(plugin, M.clearBlock(plugin.settings))
+    local ok = M.applyRelease(plugin, { version = plan.version, url = plan.url, sha = plan.sha })
     M._busy = false
     if not ok then
         stamp(plugin, "update_check_failed_at")
         return
     end
     stamp(plugin, "update_checked_at")
-    tell(T(_("Library updated to v%1 — takes effect next restart"), version), 4, plugin)
+    tell(T(_("Library updated to v%1 — takes effect next restart"), plan.version), 4, plugin)
 end
 
 --- Background check. Off does nothing. Notify me only posts a notice.

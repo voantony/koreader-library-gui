@@ -1,4 +1,4 @@
--- Version comparison, the SHA256 line in release notes, and backup/restore.
+-- Version comparison, the SHA256 and Requires KOReader lines, and backup/restore.
 local Update = require("libraryupdate")
 
 local HASH = "17c1174b2ae2128ed545cd2d23c11dd4ec7755689e03aaad15c4f8887153a17a"
@@ -378,6 +378,275 @@ describe("backup and restore", function()
         eq(merr:find("unsafe", 1, true) ~= nil, true)
         eq(fs.exists("/outside.txt"), false)
         eq(fs.exists("/stage/outside.txt"), false)
+    end)
+end)
+
+describe("KOReader version", function()
+    it("uses KOReader's 12-digit weights, including a zero-padded month", function()
+        -- The example in Version:getNormalizedVersion.
+        eq(Update.normalizeKoreaderVersion("v2015.11-982-g704d4238"), 201511000982)
+        eq(Update.normalizeKoreaderVersion("v2024.11"), 202411000000)
+        eq(Update.normalizeKoreaderVersion("v2025.04"), 202504000000)
+        eq(Update.normalizeKoreaderVersion("V2025.04"), 202504000000)
+        eq(Update.normalizeKoreaderVersion("2025.04"), 202504000000)
+        eq(Update.normalizeKoreaderVersion("v2025.04.1"), 202504010000)
+    end)
+
+    it("treats a v2025.04-N dev build as newer than the v2025.04 tag", function()
+        eq(Update.compareKoreader("v2024.11", "v2025.04"), -1)
+        eq(Update.compareKoreader("v2025.04", "v2024.11"), 1)
+        eq(Update.compareKoreader("v2025.04", "v2025.04"), 0)
+        eq(Update.compareKoreader("v2025.04", "v2025.04-42"), -1)
+        eq(Update.compareKoreader("v2025.04-42", "v2025.04-42-g704d4238"), 0)
+        eq(Update.compareKoreader("v2025.04-10", "v2025.04-42"), -1)
+        eq(Update.compareKoreader("v2024.11-999", "v2025.04"), -1)
+        eq(Update.compareKoreader("v2025.04-3-gabc123", "v2025.04"), 1)
+        -- A non-numeric tail is not a commit count, same as KOReader's matcher.
+        eq(Update.normalizeKoreaderVersion("v2025.04-xx"), 202504000000)
+        eq(Update.compareKoreader("v2025.04-xx", "v2025.04"), 0)
+    end)
+
+    it("does not parse a revision that is not vYYYY.MM", function()
+        eq(Update.normalizeKoreaderVersion("devel"), nil)
+        eq(Update.normalizeKoreaderVersion("unknown"), nil)
+        eq(Update.normalizeKoreaderVersion("v2025.4"), nil)
+        eq(Update.normalizeKoreaderVersion(""), nil)
+        eq(Update.normalizeKoreaderVersion(nil), nil)
+        eq(Update.compareKoreader("devel", "v2025.04"), nil)
+        eq(Update.compareKoreader("v2024.11", "latest"), nil)
+    end)
+
+    it("blocks only when both versions parse and the installed one is older", function()
+        eq(Update.koreaderTooOld("v2024.11", "v2025.04"), true)
+        eq(Update.koreaderTooOld("v2024.11-500-gabc", "v2025.04"), true)
+        eq(Update.koreaderTooOld("v2025.04", "v2025.04"), false)
+        eq(Update.koreaderTooOld("v2025.04-1", "v2025.04"), false)
+        eq(Update.koreaderTooOld("v2025.04-3-gdeadbeef", "v2025.04"), false)
+        eq(Update.koreaderTooOld("v2026.07.1", "v2025.04"), false)
+        eq(Update.koreaderTooOld("v2025.04-3", "v2025.04-10"), true)
+        -- No minimum, or either side unreadable: do not block.
+        eq(Update.koreaderTooOld("v2024.11", nil), false)
+        eq(Update.koreaderTooOld("v2024.11", ""), false)
+        eq(Update.koreaderTooOld("v2024.11", "latest"), false)
+        eq(Update.koreaderTooOld("devel", "v2025.04"), false)
+        eq(Update.koreaderTooOld(nil, "v2025.04"), false)
+        eq(Update.koreaderTooOld("v2025.4", "v2025.04"), false)
+    end)
+
+    it("reads the installed revision through KOReader's version module", function()
+        local seen = {}
+        local stub = {
+            getCurrentRevision = function()
+                seen[#seen + 1] = "revision"
+                return "v2024.11-7-gabc123"
+            end,
+            getNormalizedCurrentVersion = function()
+                seen[#seen + 1] = "current"
+                return 202411000007
+            end,
+            getNormalizedVersion = function(_, rev)
+                seen[#seen + 1] = rev
+                if rev == "v2025.04" then return 202504000000 end
+                return 0
+            end,
+        }
+        local num, rev = Update.installedKoreaderNumber(stub)
+        eq(rev, "v2024.11-7-gabc123")
+        eq(num, 202411000007)
+        eq(seen[1], "revision")
+        eq(seen[2], "current")
+        eq(Update.koreaderVersionNumber("v2025.04", stub), 202504000000)
+        eq(Update.koreaderTooOld("v2024.11-7-gabc123", "v2025.04", stub), true)
+    end)
+
+    it("falls back when the version module cannot normalize", function()
+        local stub = {
+            getCurrentRevision = function() return "v2025.04-3-gabc" end,
+            getNormalizedCurrentVersion = function() error("no normalized version") end,
+            getNormalizedVersion = function() return 0 end,
+        }
+        local num, rev = Update.installedKoreaderNumber(stub)
+        eq(rev, "v2025.04-3-gabc")
+        eq(num, Update.normalizeKoreaderVersion("v2025.04-3-gabc"))
+        eq(Update.koreaderTooOld("devel", "v2025.04", stub), false)
+        eq(Update.installedKoreaderNumber("not-a-module"), nil)
+    end)
+end)
+
+describe("Requires KOReader line", function()
+    it("reads the line beside SHA256, including backticks and bold", function()
+        eq(Update.parseRequiresKoreader("Requires KOReader: v2024.11"), "v2024.11")
+        eq(Update.parseRequiresKoreader("Requires KOReader: `v2025.04`"), "v2025.04")
+        eq(Update.parseRequiresKoreader("**Requires KOReader:** v2025.04-42"), "v2025.04-42")
+        eq(Update.parseRequiresKoreader("requires koreader v2025.04-12-gabcdef"), "v2025.04-12-gabcdef")
+        local notes = "Fixes a crash.\n\nRequires KOReader: v2025.04\nSHA256: " .. HASH
+        eq(Update.parseRequiresKoreader(notes), "v2025.04")
+        eq(Update.parseSha256(notes), HASH)
+    end)
+
+    it("is absent or unparsable as no minimum, and stays out of the changelog", function()
+        eq(Update.parseRequiresKoreader("No requirement here."), nil)
+        eq(Update.parseRequiresKoreader(""), nil)
+        eq(Update.parseRequiresKoreader(nil), nil)
+        eq(Update.parseRequiresKoreader("Requires KOReader: latest"), nil)
+        eq(Update.parseRequiresKoreader("Requires KOReader: v2025.4"), nil)
+        local notes = "Fixes a crash.\n\nRequires KOReader: v2025.04\nSHA256: " .. HASH
+        local short = Update.shortNotes(notes)
+        eq(short:find("Fixes a crash.", 1, true) ~= nil, true)
+        eq(short:find("Requires", 1, true), nil)
+        eq(short:find("SHA256", 1, true), nil)
+        eq(short:find("v2025.04", 1, true), nil)
+    end)
+
+    it("names the Library release and the KOReader version in the notice", function()
+        local text = Update.blockText("0.8.0", "v2025.04")
+        eq(text, "Library GUI v0.8.0 needs KOReader v2025.04 or newer. Update KOReader with its own updater (Tools or the menu > Update).")
+        eq(Update.blockText("v0.8.0", "v2025.04-42-gabcdef"):find("v2025.04-42", 1, true) ~= nil, true)
+        eq(Update.blockText("v0.8.0", "v2025.04-42-gabcdef"):find("gabcdef", 1, true), nil)
+        eq(Update.BLOCK_TEMPLATE:find("%1", 1, true) ~= nil, true)
+        eq(Update.BLOCK_TEMPLATE:find("Tools or the menu > Update", 1, true) ~= nil, true)
+    end)
+end)
+
+describe("updater decision", function()
+    local function release(description, tag)
+        return {
+            tag_name = tag or "v0.8.0",
+            description = description,
+            assets = { links = {
+                {
+                    name = "library.koplugin-v0.8.0.zip",
+                    url = "https://example.test/library.koplugin-v0.8.0.zip",
+                },
+            } },
+        }
+    end
+
+    local function notes(extra)
+        return "Fixes a crash.\n\nSHA256: " .. HASH .. (extra or "")
+    end
+
+    local function withRequire(version)
+        return notes("\nRequires KOReader: " .. version)
+    end
+
+    it("downloads when no minimum is declared", function()
+        local plan = Update.planRelease("install", release(notes()), "0.7.5", "v2024.11")
+        eq(plan.action, "install")
+        eq(plan.download_now, true)
+        eq(plan.required, nil)
+        eq(Update.planRelease("notify", release(notes()), "0.7.5", "v2020.01").action, "notify")
+        eq(Update.planRelease("manual", release(notes()), "0.7.5", "devel").action, "offer")
+        eq(Update.planRelease("manual", release(notes()), "0.7.5", "devel").download_now, false)
+    end)
+
+    it("does not block when the requirement or the installed revision cannot be parsed", function()
+        local declared = release(notes("\nRequires KOReader: latest"))
+        eq(Update.planRelease("install", declared, "0.7.5", "v2024.11").action, "install")
+        eq(Update.planRelease("install", declared, "0.7.5", "v2024.11").download_now, true)
+        local real = release(withRequire("v2025.04"))
+        eq(Update.planRelease("install", real, "0.7.5", "devel").action, "install")
+        eq(Update.planRelease("install", real, "0.7.5", "v2025.4").download_now, true)
+        local unread = {
+            getCurrentRevision = function() return nil end,
+            getNormalizedCurrentVersion = function() return 0 end,
+        }
+        eq(Update.planRelease("manual", real, "0.7.5", nil, unread).action, "offer")
+        eq(Update.planRelease("manual", real, "0.7.5", nil, unread).download_now, false)
+    end)
+
+    it("does not download when the installed KOReader is too old", function()
+        local rel = release(withRequire("v2025.04"))
+        for _, mode in ipairs({ "manual", "notify", "install" }) do
+            local plan = Update.planRelease(mode, rel, "0.7.5", "v2024.11")
+            eq(plan.action, "blocked", mode)
+            eq(plan.download_now, false, mode)
+            eq(plan.required, "v2025.04")
+            eq(plan.version, "0.8.0")
+            eq(plan.url ~= nil, true)
+        end
+        -- A dev build of an older month is still too old.
+        eq(Update.planRelease("install", rel, "0.7.5", "v2024.11-400-gabc").download_now, false)
+        -- A dev build of the required month is new enough to install.
+        local dev = Update.planRelease("install", rel, "0.7.5", "v2025.04-2-gabc")
+        eq(dev.action, "install")
+        eq(dev.download_now, true)
+        eq(Update.planRelease("notify", rel, "0.7.5", "v2025.04").action, "notify")
+        eq(Update.planRelease("manual", rel, "0.7.5", "v2026.07.1").action, "offer")
+    end)
+
+    it("keeps today's answer when nothing newer would be installed", function()
+        local rel = release(withRequire("v2029.01"))
+        eq(Update.planRelease("install", rel, "0.8.0", "v2024.11").action, "current")
+        eq(Update.planRelease("notify", rel, "0.8.0", "v2024.11").download_now, false)
+        eq(Update.planRelease("install", rel, nil, "v2024.11").action, "skip")
+        eq(Update.planRelease("manual", rel, nil, "v2024.11").action, "blocked")
+        local broken = release("Fixes a crash.\n\nRequires KOReader: v2025.04")
+        eq(Update.planRelease("manual", broken, "0.7.5", "v2024.11").action, "blocked")
+        eq(Update.planRelease("manual", broken, "0.7.5", "v2026.07").action, "no-sha")
+        eq(Update.planRelease("install", release("Fixes a crash."), "0.7.5", "v2024.11").action, "no-sha")
+    end)
+
+    it("asks the version module before deciding to download", function()
+        local calls = {}
+        local stub = {
+            getCurrentRevision = function()
+                calls[#calls + 1] = "revision"
+                return "v2024.11"
+            end,
+            getNormalizedCurrentVersion = function()
+                calls[#calls + 1] = "current"
+                return 202411000000
+            end,
+            getNormalizedVersion = function(_, rev)
+                calls[#calls + 1] = rev
+                return Update.normalizeKoreaderVersion(rev)
+            end,
+        }
+        local plan = Update.planRelease("install", release(withRequire("v2025.04")), "0.7.5", nil, stub)
+        eq(plan.action, "blocked")
+        eq(plan.download_now, false)
+        eq(calls[1], "revision")
+        eq(calls[2], "current")
+        local saw_required = false
+        for i = 1, #calls do
+            if calls[i] == "v2025.04" then saw_required = true end
+        end
+        eq(saw_required, true)
+    end)
+
+    it("saves the quiet-install note and shows it once from Updates", function()
+        local settings = {}
+        eq(Update.rememberBlock(settings, "0.8.0", "v2025.04"), true)
+        eq(settings.update_need_pending, true)
+        local pending, changed = Update.takePendingBlock(settings, "v2024.11")
+        eq(changed, true)
+        eq(pending.library, "0.8.0")
+        eq(pending.required, "v2025.04")
+        eq(settings.update_need_pending, nil)
+        eq(Update.blockText(pending.library, pending.required):find("v2025.04", 1, true) ~= nil, true)
+        local again = Update.takePendingBlock(settings, "v2024.11")
+        eq(again, nil)
+        Update.rememberBlock(settings, "0.8.0", "v2025.04")
+        -- Updated KOReader: the note is stale.
+        eq(Update.takePendingBlock(settings, "v2025.04-4-gabc"), nil)
+        eq(settings.update_need_pending, nil)
+        Update.rememberBlock(settings, "0.8.0", "v2025.04")
+        -- Still unreadable: show the saved note rather than drop it.
+        local kept = Update.takePendingBlock(settings, "devel")
+        eq(kept.required, "v2025.04")
+        eq(Update.clearBlock({}), false)
+        local full = { update_need_pending = true, update_need_library = "0.8.0", update_need_koreader = "v2025.04" }
+        eq(Update.clearBlock(full), true)
+        eq(full.update_need_library, nil)
+    end)
+
+    it("shows the saved note when Updates is opened, not when the menu is searched", function()
+        eq(Update.updatesOpenedFrom({ "updatesMenu", "onMenuSelect" }), true)
+        eq(Update.updatesOpenedFrom({ "recurse", "search" }), false)
+        eq(Update.updatesOpenedFrom({ "onMenuSelect", "search" }), false)
+        eq(Update.updatesOpenedFrom({ "other" }), false)
+        eq(Update.updatesOpenedFrom(nil), false)
     end)
 end)
 

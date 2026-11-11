@@ -66,7 +66,7 @@ require("libraryrefresh_spec") -- e-ink: flash to clear cover ghosting
 require("librarysuggest_spec") -- word suggestions while typing
 require("librarytiming_spec") -- the opt-in timing log
 require("librarystatus_spec") -- clock and battery styles beside the search bar
-require("libraryupdate_spec") -- version, release SHA256, backup and restore
+require("libraryupdate_spec") -- version, KOReader minimum, release SHA256, backup and restore
 require("librarydedupe_spec") -- duplicate files, grouped copies, skipped folders and types
 require("libraryreturn_spec") -- close straight to the Library; startup choice
 
