@@ -504,6 +504,20 @@ describe("settings kept from v0.7.7", function()
         eq(prefs.sort, "author")
         eq(prefs.filter, "unread")
     end)
+
+    it("leaves view, columns and per-shelf memory, and widget covers stay compact", function()
+        local W = require("librarywidgets")
+        local saved = {
+            view = "list", columns = 3, sort = "recent",
+            view_memory = { ["series:Oz"] = { view = "compact", sort = "series", filter = "reading", t = 2 } },
+        }
+        Core.migrateSettings(saved)
+        eq(saved.view, "list")
+        eq(saved.columns, 3)
+        eq(saved.widget_covers, nil)
+        eq(W.coverMode(saved), "compact")
+        eq(Core.viewPrefs(saved, "series:Oz").view, "compact")
+    end)
 end)
 
 describe("edge strips", function()

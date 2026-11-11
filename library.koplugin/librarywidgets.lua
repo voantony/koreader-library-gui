@@ -80,19 +80,28 @@ function Widgets.areaVisible(slots, state)
     return true
 end
 
---- Cover height for one tile in a home widget. The cover fills the band
--- under the title, and stays 2:3 inside its slot. A fixed 120px cap left
--- the covers floating in the widget (#12).
-function Widgets.coverHeight(slot_w, body_h, label_h)
+--- "compact" (the shipped 120px cap) unless the reader picked "fill".
+-- A v0.7.7 settings table has no widget_covers key, so it stays compact.
+function Widgets.coverMode(settings)
+    if type(settings) == "table" and settings.widget_covers == "fill" then return "fill" end
+    return "compact"
+end
+
+--- Cover height for one tile in a home widget.
+-- "compact" (the default) is the old cap of 120 pixels, so a tile cannot
+-- paint over the grid. "fill" uses the band under the title and stays 2:3
+-- inside the slot (#12).
+function Widgets.coverHeight(slot_w, body_h, label_h, mode)
     slot_w = math.max(1, math.floor(tonumber(slot_w) or 1))
     body_h = math.max(0, math.floor(tonumber(body_h) or 0))
     label_h = math.max(0, math.floor(tonumber(label_h) or 0))
-    local room = body_h - label_h
-    if room < 48 then room = 48 end
+    local room = math.max(48, body_h - label_h)
     local by_ratio = math.floor(slot_w * 3 / 2)
     if by_ratio < 1 then by_ratio = 1 end
-    if room < by_ratio then return room end
-    return by_ratio
+    local fitted = room < by_ratio and room or by_ratio
+    if mode == "fill" then return fitted end
+    if fitted > 120 then return 120 end
+    return fitted
 end
 
 function Widgets.label(spec)

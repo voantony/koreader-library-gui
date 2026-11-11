@@ -834,6 +834,7 @@ function Library:newView()
         filter = prefs and prefs.filter or "all",
         show_continue = self.settings.show_continue ~= false,
         home_widgets = self.settings.home_widgets,
+        widget_covers = require("librarywidgets").coverMode(self.settings),
         top_row = Core.topRow(self.settings.top_row),
         sort = self.settings.sort,
         debounce_s = (self.settings.debounce_ms or 150) / 1000,
@@ -1880,7 +1881,29 @@ function Library:showLibraryMenu(view)
             end,
         })
     end
-    local buttons = { sort_row, view_row, text_row, col_row, barely_row }
+    local Widgets = require("librarywidgets")
+    local cover_mode = Widgets.coverMode(self.settings)
+    local cover_row = {
+        {
+            text = (cover_mode == "compact" and "✓ " or "") .. _("Compact widget covers"),
+            callback = function()
+                close()
+                self.settings.widget_covers = "compact"
+                self:saveSettings()
+                if view.setWidgetCovers then view:setWidgetCovers("compact") end
+            end,
+        },
+        {
+            text = (cover_mode == "fill" and "✓ " or "") .. _("Fill widget covers"),
+            callback = function()
+                close()
+                self.settings.widget_covers = "fill"
+                self:saveSettings()
+                if view.setWidgetCovers then view:setWidgetCovers("fill") end
+            end,
+        },
+    }
+    local buttons = { sort_row, view_row, text_row, col_row, cover_row, barely_row }
     -- Each shelf remembers its own layout, sort and filter: offer to forget them.
     local remember = Core.rememberViews(self.settings)
     if remember then
@@ -2850,6 +2873,35 @@ function Library:addToMainMenu(menu_items)
                             self.settings.status_bar_size = "match"
                             self:saveSettings()
                             if shared.view and shared.view.setStatusBarSize then shared.view:setStatusBarSize("match") end
+                        end,
+                    },
+                },
+            },
+            {
+                text_func = function()
+                    local mode = require("librarywidgets").coverMode(self.settings)
+                    return T(_("Widget covers: %1"), mode == "fill" and _("Fill") or _("Compact"))
+                end,
+                help_text = _("How big the covers are in Continue Reading, Recently added, and the other home widgets. Compact is the original cap of 120 pixels. Fill uses the space under the widget title. Compact is what v0.7.7 showed."),
+                sub_item_table = {
+                    {
+                        text = _("Compact"),
+                        radio = true,
+                        checked_func = function() return require("librarywidgets").coverMode(self.settings) == "compact" end,
+                        callback = function()
+                            self.settings.widget_covers = "compact"
+                            self:saveSettings()
+                            if shared.view and shared.view.setWidgetCovers then shared.view:setWidgetCovers("compact") end
+                        end,
+                    },
+                    {
+                        text = _("Fill"),
+                        radio = true,
+                        checked_func = function() return require("librarywidgets").coverMode(self.settings) == "fill" end,
+                        callback = function()
+                            self.settings.widget_covers = "fill"
+                            self:saveSettings()
+                            if shared.view and shared.view.setWidgetCovers then shared.view:setWidgetCovers("fill") end
                         end,
                     },
                 },
