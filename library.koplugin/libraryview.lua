@@ -105,6 +105,7 @@ local LibraryView = InputContainer:extend{
     show_clock = true,       -- clock beside the search bar
     show_battery = true,     -- battery beside the search bar
     status_style = nil,      -- "icon" | "compact" | "plain"; nil is the default (icon)
+    status_bar_size = "small", -- "small" | "match" for the Status bar face (#16)
     use_koreader_keyboard = false, -- stock InputDialog instead of the Library keyboard
     search_suggestions = true, -- "Word suggestions": a row of words above the keyboard
     timing = nil,            -- the "Timing log" (librarytiming.lua), from the plugin
@@ -525,7 +526,7 @@ function LibraryView:statusFace(style)
     if not Status then
         return Font:getFace("cfont", 20), true
     end
-    local spec = Status.face(style)
+    local spec = Status.face(style, self.status_bar_size)
     return Font:getFace(spec.font, spec.size), spec.bold and true or false
 end
 
@@ -862,6 +863,12 @@ function LibraryView:onTimeFormatChanged()
         return
     end
     if not self.search_field then return end
+    self:buildSearchRow()
+    self:refreshBody(true)
+end
+
+function LibraryView:setStatusBarSize(size_id)
+    self.status_bar_size = size_id == "match" and "match" or "small"
     self:buildSearchRow()
     self:refreshBody(true)
 end

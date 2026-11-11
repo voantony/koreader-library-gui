@@ -3648,6 +3648,13 @@ function Core.gridContentWidth(width, strip_w)
     return width - strip_w
 end
 
+--- Keep a saved settings table. New keys stay unset. View, columns and
+-- per-shelf memory are not rewritten.
+function Core.migrateSettings(settings)
+    if type(settings) ~= "table" then return settings end
+    return settings
+end
+
 --- The A–Z strip: on unless turned off.
 function Core.showScrubber(settings)
     return not (settings and settings.show_scrubber == false)

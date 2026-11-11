@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Status bar text.** In the Library's ☰ menu, and under ☰ → Library → **Status bar text**. **Small** (the default) is the original status-bar face. **Match clock** uses the same size and weight as the battery-icon clock. The battery symbol stays KOReader's icon. A saved settings table with no `status_bar_size` key stays Small, and the rest of that table is left as it was. Thanks to @drkhn1234 (#16).
+
 ## 0.7.7 (2026-11-11)
 
 - **Author, then year.** A sort just after Author, in the footer picker and the ☰ menu. Books are ordered by the first author (unknown authors last), then by publication year, oldest first. A book with no year follows that author's dated books. The same title, then the file path, breaks a tie. The year is Calibre's publication date when the library has one (the 0101-01-01 placeholder is ignored), otherwise a date KOReader already stored, otherwise the year in an EPUB's OPF. The A–Z strip follows the author, as it does for Author. Rows that show a sort date show that year. Thanks to Antony, who asked for this.

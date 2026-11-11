@@ -466,6 +466,24 @@ describe("footer size and view cycling", function()
     end)
 end)
 
+describe("settings kept from v0.7.7", function()
+    it("leaves the status bar small and does not rewrite the saved view", function()
+        local Status = require("librarystatus")
+        local saved = {
+            view = "grid", columns = 4, status_style = "compact", show_clock = true,
+            view_memory = { books = { filter = "reading", t = 1 } },
+        }
+        Core.migrateSettings(saved)
+        eq(saved.view, "grid")
+        eq(saved.columns, 4)
+        eq(saved.status_style, "compact")
+        eq(saved.status_bar_size, nil)
+        eq(Status.barSize(saved), "small")
+        eq(Status.face("compact").size, 16)
+        eq(Core.viewPrefs(saved, "books").filter, "reading")
+    end)
+end)
+
 describe("edge strips", function()
     it("names the outer eighths of the screen and nothing in between", function()
         eq(Core.edgeStrip(0, 1264), "left")
