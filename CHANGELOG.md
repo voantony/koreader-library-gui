@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.6 (2026-11-11)
+
 - **KOReader version check.** A release can declare the KOReader it needs with a `Requires KOReader: v2025.04` line in the release notes, next to the `SHA256:` line. The updater reads that before it downloads. If this KOReader is older, it does not download or install, and it does not update KOReader. **Check for updates now** and **Notify me** say that Library GUI vX needs that KOReader or newer, and to update KOReader from its own updater (Tools or the menu > Update). **Install quietly** skips the download and shows the same note the next time Updates is opened. A dev build such as `v2025.04-42` counts as newer than the `v2025.04` tag. A release with no such line, or a version that cannot be parsed, is installed as before.
 
 ## 0.7.5 (2026-11-10)
