@@ -97,6 +97,7 @@ local LibraryView = InputContainer:extend{
     filter = "all",
     view_mode = "grid",     -- "grid" | "list" | "compact" | "compact2"
     show_continue = true,   -- the Continue reading strip on the Books tab
+    filter_expands = true, -- a filter hides the widgets unless this is off (#11)
     top_row = "continue",   -- what that strip shows: "continue" | "recent" (Recently opened)
     continue_slots = 5,
     barely_threshold = 0.10, -- "Barely started" when chapters are unknown: below this fraction
@@ -1890,6 +1891,7 @@ function LibraryView:buildBody()
     local widget_state = {
         tab = self.tab, group = self.group, query = self.query,
         filter = self.filter, keyboard = keyboard_h > 0,
+        filter_expands = self.filter_expands ~= false,
     }
     local custom_widgets = self.home_widgets ~= nil
     local widget_slots = custom_widgets and Widgets.normalize(self.home_widgets) or nil
@@ -1897,7 +1899,8 @@ function LibraryView:buildBody()
         and data.kind == "books" and not Core.isCompact(self.view_mode)
     local strip_possible = widget_area or (data.kind == "books" and not Core.isCompact(self.view_mode) and Core.showContinue{
         enabled = self.show_continue, tab = self.tab, group = self.group,
-        query = self.query, filter = self.filter, keyboard = keyboard_h > 0 })
+        query = self.query, filter = self.filter, keyboard = keyboard_h > 0,
+        filter_expands = self.filter_expands ~= false })
     if not strip_possible then self._shelf_expanded = nil end
     self._widget_band_h = nil
     if widget_area and not self._shelf_expanded then
@@ -3654,6 +3657,11 @@ end
 -- List -> Compact -> Compact 2 columns; hold opens the picker.
 function LibraryView:cycleViewMode()
     self:setViewMode(Core.nextViewMode(self.view_mode))
+end
+
+function LibraryView:setFilterExpands(on)
+    self.filter_expands = on ~= false
+    self:refreshBody(true)
 end
 
 function LibraryView:setShowContinue(on)

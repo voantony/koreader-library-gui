@@ -3,7 +3,7 @@
 ## Unreleased
 
 - **Status bar text.** In the Library's ☰ menu, and under ☰ → Library → **Status bar text**. **Small** (the default) is the original status-bar face. **Match clock** uses the same size and weight as the battery-icon clock. The battery symbol stays KOReader's icon. A saved settings table with no `status_bar_size` key stays Small, and the rest of that table is left as it was. Thanks to @drkhn1234 (#16).
-- **Filters leave the shelf alone.** Choosing Unread, Reading, or another filter no longer hides the widgets and stretches the book grid. The shelf stays expanded only when you swiped it open, and it stays at its usual height when you did not. Thanks to @drkhn1234 (#11).
+- **Filter expands shelf.** In the Library's ☰ menu, and under ☰ → Library. On (the default, which is how v0.7.7 worked): choosing Unread, Reading, or another filter hides the widgets so the book list can use that space. Off: a filter leaves the shelf expanded or collapsed exactly as it was. A saved settings table from v0.7.7 has no such key, and keeps the old behaviour. Thanks to @drkhn1234 (#11).
 
 ## 0.7.7 (2026-11-11)
 

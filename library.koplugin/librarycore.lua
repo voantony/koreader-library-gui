@@ -1853,17 +1853,34 @@ function Core.topRowBooks(mode, books, n, exists)
     return Core.continueReading(books, n)
 end
 
+--- True unless the reader turned **Filter expands shelf** off.
+-- Absent (a v0.7.7 settings table) keeps the old behaviour: a filter
+-- hides the widgets.
+function Core.filterExpands(settings)
+    return not (type(settings) == "table" and settings.filter_expands == false)
+end
+
 --- Whether the Continue reading strip belongs on screen now.
--- A filter does not hide it: filtering and expanding the shelf are
--- separate (#11). Search, another tab, an open group and the keyboard
--- still do.
--- @tparam table state `{ enabled, tab, group, query, filter, keyboard }`
+-- With **Filter expands shelf** on (the default, and any saved table that
+-- does not mention it), a filter other than All hides the strip. Turn the
+-- setting off and a filter leaves the shelf's expansion alone (#11).
+-- Search, another tab, an open group and the keyboard still hide it.
+-- @tparam table state `{ enabled, tab, group, query, filter, keyboard, filter_expands }`
 function Core.showContinue(state)
     if not state.enabled then return false end
     if state.tab ~= "books" or state.group then return false end
     if state.query and state.query:match("%S") then return false end
     if state.keyboard then return false end
+    if state.filter_expands ~= false and state.filter and state.filter ~= "all" then return false end
     return true
+end
+
+--- Keep a saved settings table. New keys are left unset so the defaults
+-- stand in for them. View, columns, sort, filter and per-shelf memory
+-- are not rewritten.
+function Core.migrateSettings(settings)
+    if type(settings) ~= "table" then return settings end
+    return settings
 end
 
 --- Size the Continue reading strip.
@@ -3648,13 +3665,6 @@ function Core.gridContentWidth(width, strip_w)
     local min_grid = math.max(1, math.min(width, math.floor(width * 0.5)))
     if width - strip_w < min_grid then strip_w = width - min_grid end
     return width - strip_w
-end
-
---- Keep a saved settings table. New keys stay unset. View, columns and
--- per-shelf memory are not rewritten.
-function Core.migrateSettings(settings)
-    if type(settings) ~= "table" then return settings end
-    return settings
 end
 
 --- The A–Z strip: on unless turned off.

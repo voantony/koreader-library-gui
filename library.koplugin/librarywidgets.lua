@@ -68,14 +68,15 @@ function Widgets.customized(settings)
 end
 
 --- Same gates as the Continue reading strip: Books tab, no open shelf,
--- no search, keyboard down. A filter leaves the widgets where they are
--- (#11). An empty slot list is hidden.
+-- no search, keyboard down. A filter hides the widgets unless
+-- `filter_expands` is false (#11). An empty slot list is hidden.
 function Widgets.areaVisible(slots, state)
     state = state or {}
     if type(slots) ~= "table" or #slots < 1 then return false end
     if state.tab ~= "books" or state.group then return false end
     if state.query and tostring(state.query):match("%S") then return false end
     if state.keyboard then return false end
+    if state.filter_expands ~= false and state.filter and state.filter ~= "all" then return false end
     return true
 end
 

@@ -62,6 +62,7 @@ local DEFAULTS = {
     show_battery = true,        -- battery beside the search bar
     -- status_style: "icon" (default) | "compact" | "plain". A saved "bar" is read as "icon".
     show_scrubber = true,       -- A–Z strip on the right when the list is alphabetical
+    filter_expands = true,      -- a filter hides the widgets (the v0.7.7 behaviour)
     fuzzy_search = true,        -- "Typo-tolerant search": accents ignored, small typos forgiven
     search_suggestions = true,  -- "Word suggestions": words from the library above the search keyboard
     timing_log = false,         -- "Timing log": how long opening, page turns, filters and search take (librarytiming.lua)
@@ -844,6 +845,7 @@ function Library:newView()
         status_style = self:statusStyleId(),
         status_bar_size = require("librarystatus").barSize(self.settings),
         show_scrubber = Core.showScrubber(self.settings),
+        filter_expands = Core.filterExpands(self.settings),
         fuzzy_search = Core.fuzzySearch(self.settings),
         search_suggestions = self.settings.search_suggestions ~= false,
         timing = self:timer(),
@@ -1912,6 +1914,17 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = (Core.filterExpands(self.settings) and "✓ " or "") .. _("Filter expands shelf"),
+            callback = function()
+                close()
+                self.settings.filter_expands = not Core.filterExpands(self.settings)
+                self:saveSettings()
+                if view.setFilterExpands then view:setFilterExpands(Core.filterExpands(self.settings)) end
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = (Core.showScrubber(self.settings) and "✓ " or "") .. _("A–Z strip"),
             callback = function()
                 close()
@@ -2840,6 +2853,18 @@ function Library:addToMainMenu(menu_items)
                         end,
                     },
                 },
+            },
+            {
+                text = _("Filter expands shelf"),
+                help_text = _("On, choosing Unread, Reading or another filter hides the widgets so the book list uses that space. Off, a filter leaves the shelf expanded or collapsed exactly as it was. On is the behaviour this plugin shipped with."),
+                checked_func = function() return Core.filterExpands(self.settings) end,
+                callback = function()
+                    self.settings.filter_expands = not Core.filterExpands(self.settings)
+                    self:saveSettings()
+                    if shared.view and shared.view.setFilterExpands then
+                        shared.view:setFilterExpands(Core.filterExpands(self.settings))
+                    end
+                end,
             },
             {
                 text = _("A–Z strip"),

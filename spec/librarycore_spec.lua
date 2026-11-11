@@ -402,7 +402,10 @@ describe("continue reading", function()
         eq(Core.showContinue(base), true)
         eq(Core.showContinue(with("query", "   ")), true)
         eq(Core.showContinue(with("query", "oz")), false)
-        eq(Core.showContinue(with("filter", "reading")), true, "a filter leaves the strip up")
+        eq(Core.showContinue(with("filter", "reading")), false, "a filter hides the strip by default")
+        local leave = with("filter", "reading")
+        leave.filter_expands = false
+        eq(Core.showContinue(leave), true, "the setting can leave the strip up")
         eq(Core.showContinue(with("tab", "authors")), false)
         eq(Core.showContinue(with("group", { name = "x" })), false)
         eq(Core.showContinue(with("enabled", false)), false)
@@ -481,6 +484,25 @@ describe("settings kept from v0.7.7", function()
         eq(Status.barSize(saved), "small")
         eq(Status.face("compact").size, 16)
         eq(Core.viewPrefs(saved, "books").filter, "reading")
+    end)
+
+    it("leaves a saved library table alone and keeps a filter expanding the shelf", function()
+        local saved = {
+            view = "compact2", columns = 5, sort = "title", show_scrubber = true,
+            status_style = "compact", show_clock = true,
+            view_memory = { ["tab:authors"] = { view = "list", sort = "author", filter = "unread", t = 1 } },
+        }
+        local before = saved.view
+        Core.migrateSettings(saved)
+        eq(saved.view, before)
+        eq(saved.columns, 5)
+        eq(saved.view_memory["tab:authors"].view, "list")
+        eq(saved.view_memory["tab:authors"].filter, "unread")
+        eq(Core.filterExpands(saved), true, "the key is absent, so the old behaviour stands")
+        local prefs = Core.viewPrefs(saved, "tab:authors")
+        eq(prefs.view, "list")
+        eq(prefs.sort, "author")
+        eq(prefs.filter, "unread")
     end)
 end)
 
