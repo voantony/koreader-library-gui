@@ -3566,6 +3566,9 @@ end
 
 --- Smallest slot that still holds a bold letter. A full-height shelf fits
 -- every letter above this; a shelf shortened by Continue reading does not.
+-- This is a paint threshold for the strip. It does not change how tall
+-- the shelf is: the shelf height comes from the screen minus the header,
+-- tabs, filters and footer (#14).
 function Core.scrubberMinSlot(dpi)
     dpi = tonumber(dpi)
     if not dpi or dpi ~= dpi or dpi < 1 then dpi = 167 end
@@ -3644,6 +3647,56 @@ function Core.scrubberMarks(letters, height, min_slot)
         table.remove(marks, drop)
     end
     return marks
+end
+
+--- When one column cannot give every letter `min_slot`, split the alphabet
+-- across the two edges of the shelf (#14). The left half is "#" through
+-- the middle, the right half is the rest. Nil when one column fits, so a
+-- tall shelf keeps the single right-hand strip.
+function Core.scrubberSplit(letters, height, min_slot)
+    letters = letters or Core.SCRUBBER_LETTERS
+    local n = #letters
+    height = math.floor(tonumber(height) or 0)
+    min_slot = math.max(1, math.floor(tonumber(min_slot) or 1))
+    if n < 2 or height < 1 then return nil end
+    if height >= n * min_slot then return nil end
+    local mid = math.ceil(n / 2)
+    local left, right = {}, {}
+    for i = 1, mid do left[#left + 1] = letters[i] end
+    for i = mid + 1, n do right[#right + 1] = letters[i] end
+    return left, right
+end
+
+--- "one" (always the right-hand column), "auto" (split when the column
+-- is short), or "split" (always both edges). Absent is "one", the
+-- v0.7.7 strip.
+function Core.azLayout(settings)
+    local mode = type(settings) == "table" and settings.az_layout
+    if mode == "auto" or mode == "split" or mode == "one" then return mode end
+    return "one"
+end
+
+--- True only when the reader asked a letter tap to leave an expanded
+-- shelf expanded. Off by default: a letter tap collapses it, as a page
+-- turn does. The swipe that expands the shelf still works afterwards.
+function Core.letterKeepsShelf(settings)
+    return type(settings) == "table" and settings.letter_keeps_shelf == true
+end
+
+--- The two halves to paint, or nil for a single right-hand column.
+function Core.azHalves(mode, letters, height, min_slot)
+    if mode == "split" then
+        letters = letters or Core.SCRUBBER_LETTERS
+        local n = #letters
+        if n < 2 then return nil end
+        local mid = math.ceil(n / 2)
+        local left, right = {}, {}
+        for i = 1, mid do left[#left + 1] = letters[i] end
+        for i = mid + 1, n do right[#right + 1] = letters[i] end
+        return left, right
+    end
+    if mode == "auto" then return Core.scrubberSplit(letters, height, min_slot) end
+    return nil
 end
 
 --- A vertical swipe that starts in a LiveLight edge (the outer eighth).

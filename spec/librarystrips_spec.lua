@@ -124,6 +124,67 @@ describe("compact A–Z marks", function()
     end)
 end)
 
+describe("split A–Z when the column is short", function()
+    it("keeps one column when every letter fits", function()
+        local slot = Core.scrubberMinSlot(300)
+        local left, right = Core.scrubberSplit(Core.SCRUBBER_LETTERS, slot * #Core.SCRUBBER_LETTERS, slot)
+        eq(left, nil)
+        eq(right, nil)
+    end)
+
+    it("splits #–M and N–Z when the column is short, without growing the shelf", function()
+        local slot = Core.scrubberMinSlot(300)
+        -- Ten slots is shorter than 27 letters. The split is only which
+        -- letters to paint; the shelf height is not this number.
+        local left, right = Core.scrubberSplit(Core.SCRUBBER_LETTERS, slot * 10, slot)
+        eq(#left + #right, #Core.SCRUBBER_LETTERS)
+        eq(left[1], "#")
+        eq(left[#left], "M")
+        eq(right[1], "N")
+        eq(right[#right], "Z")
+        eq(#left >= #right, true)
+        eq(#left - #right <= 1, true)
+    end)
+
+    it("a left-hand strip's hit area reaches the screen edge", function()
+        local Scrubber = loadScrubber({})
+        local sc = Scrubber:new{
+            letters = { "#", "A", "B", "M" },
+            side = "left",
+            width = 44, height = 700, dpi = 300,
+            screen_w = 1072, screen_h = 1448,
+            hit_extra = 20,
+            view = { dimen = { w = 1072, h = 1448 } },
+        }
+        sc:init()
+        sc.dimen.x, sc.dimen.y = 0, 400
+        local hit = sc:hitRect()
+        eq(hit.x, 0)
+        eq(hit.w > sc.dimen.w, true, "the gutter past the letters still counts")
+    end)
+end)
+
+describe("A–Z layout setting", function()
+    it("defaults to one side, and auto splits only when the column is short", function()
+        eq(Core.azLayout(nil), "one")
+        eq(Core.azLayout({}), "one")
+        eq(Core.azLayout({ az_layout = "auto" }), "auto")
+        eq(Core.letterKeepsShelf(nil), false)
+        eq(Core.letterKeepsShelf({ letter_keeps_shelf = true }), true)
+        local slot = Core.scrubberMinSlot(300)
+        local tall = slot * #Core.SCRUBBER_LETTERS
+        local short = slot * 10
+        eq(Core.azHalves("one", nil, short, slot), nil)
+        eq(Core.azHalves("auto", nil, tall, slot), nil)
+        local left, right = Core.azHalves("auto", nil, short, slot)
+        eq(left[1], "#")
+        eq(right[#right], "Z")
+        left, right = Core.azHalves("split", nil, tall, slot)
+        eq(left[#left], "M")
+        eq(right[1], "N")
+    end)
+end)
+
 describe("LiveLight overlap with the A–Z strip", function()
     it("recognises a vertical swipe that starts in an outer eighth", function()
         eq(Core.edgeVerticalSwipe({ direction = "north", pos = { x = 1200, y = 400 } }, 1264), "right")

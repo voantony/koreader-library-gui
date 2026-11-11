@@ -156,6 +156,40 @@ function Library:applyStatusStyle(id, view)
     if target and target.setStatusStyle then target:setStatusStyle(id) end
 end
 
+local AZ_LAYOUT_LABEL = {
+    one = _("One side"),
+    auto = _("Auto"),
+    split = _("Always split"),
+}
+
+function Library:applyAzLayout(mode, view)
+    mode = Core.azLayout({ az_layout = mode })
+    self.settings.az_layout = mode
+    self:saveSettings()
+    local target = view or shared.view
+    if target and target.setAzLayout then target:setAzLayout(mode) end
+end
+
+function Library:showAzLayoutDialog(view)
+    local rows = {}
+    local dialog
+    for _, id in ipairs({ "one", "auto", "split" }) do
+        rows[#rows + 1] = {{
+            text = (Core.azLayout(self.settings) == id and "✓ " or "") .. AZ_LAYOUT_LABEL[id],
+            callback = function()
+                self:closeOverLibrary(dialog, view)
+                self:applyAzLayout(id, view)
+            end,
+        }}
+    end
+    dialog = ButtonDialog:new{
+        title = _("A–Z strip"),
+        title_align = "center",
+        buttons = rows,
+    }
+    self:showOverLibrary(dialog, view)
+end
+
 function Library:showStatusStyleDialog(view)
     local rows = {}
     local dialog
@@ -847,6 +881,8 @@ function Library:newView()
         status_bar_size = require("librarystatus").barSize(self.settings),
         show_scrubber = Core.showScrubber(self.settings),
         filter_expands = Core.filterExpands(self.settings),
+        az_layout = Core.azLayout(self.settings),
+        letter_keeps_shelf = Core.letterKeepsShelf(self.settings),
         fuzzy_search = Core.fuzzySearch(self.settings),
         search_suggestions = self.settings.search_suggestions ~= false,
         timing = self:timer(),
@@ -1948,6 +1984,22 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = _("A–Z: ") .. AZ_LAYOUT_LABEL[Core.azLayout(self.settings)],
+            callback = function()
+                close()
+                self:showAzLayoutDialog(view)
+            end,
+        },
+        {
+            text = (Core.letterKeepsShelf(self.settings) and "✓ " or "") .. _("Letter tap keeps shelf expanded"),
+            callback = function()
+                close()
+                self.settings.letter_keeps_shelf = not Core.letterKeepsShelf(self.settings)
+                self:saveSettings()
+                if view.setLetterKeepsShelf then view:setLetterKeepsShelf(Core.letterKeepsShelf(self.settings)) end
+            end,
+        },
+        {
             text = (Core.showScrubber(self.settings) and "✓ " or "") .. _("A–Z strip"),
             callback = function()
                 close()
@@ -2915,6 +2967,35 @@ function Library:addToMainMenu(menu_items)
                     self:saveSettings()
                     if shared.view and shared.view.setFilterExpands then
                         shared.view:setFilterExpands(Core.filterExpands(self.settings))
+                    end
+                end,
+            },
+            {
+                text_func = function()
+                    return T(_("A–Z when short: %1"), AZ_LAYOUT_LABEL[Core.azLayout(self.settings)])
+                end,
+                help_text = _("One side is the original column on the right, including when the shelf is short. Auto splits the alphabet across both edges only when that column would be too short for every letter. Always split uses both edges even on a tall shelf."),
+                sub_item_table = {
+                    { text = _("One side"), radio = true,
+                        checked_func = function() return Core.azLayout(self.settings) == "one" end,
+                        callback = function() self:applyAzLayout("one") end },
+                    { text = _("Auto"), radio = true,
+                        checked_func = function() return Core.azLayout(self.settings) == "auto" end,
+                        callback = function() self:applyAzLayout("auto") end },
+                    { text = _("Always split"), radio = true,
+                        checked_func = function() return Core.azLayout(self.settings) == "split" end,
+                        callback = function() self:applyAzLayout("split") end },
+                },
+            },
+            {
+                text = _("Letter tap keeps shelf expanded"),
+                help_text = _("On, tapping a letter leaves an expanded shelf expanded. Off, a letter tap collapses it, the same as turning the page. Swipe up to expand keeps working either way."),
+                checked_func = function() return Core.letterKeepsShelf(self.settings) end,
+                callback = function()
+                    self.settings.letter_keeps_shelf = not Core.letterKeepsShelf(self.settings)
+                    self:saveSettings()
+                    if shared.view and shared.view.setLetterKeepsShelf then
+                        shared.view:setLetterKeepsShelf(Core.letterKeepsShelf(self.settings))
                     end
                 end,
             },

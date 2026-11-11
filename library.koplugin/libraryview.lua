@@ -99,6 +99,8 @@ local LibraryView = InputContainer:extend{
     show_continue = true,   -- the Continue reading strip on the Books tab
     filter_expands = true, -- a filter hides the widgets unless this is off (#11)
     widget_covers = "compact", -- "compact" (120px cap) | "fill" (#12)
+    az_layout = "one",      -- "one" | "auto" | "split" (#14)
+    letter_keeps_shelf = false, -- a letter tap collapses an expanded shelf unless this is on (#15)
     top_row = "continue",   -- what that strip shows: "continue" | "recent" (Recently opened)
     continue_slots = 5,
     barely_threshold = 0.10, -- "Barely started" when chapters are unknown: below this fraction
@@ -1902,6 +1904,10 @@ function LibraryView:buildBody()
         enabled = self.show_continue, tab = self.tab, group = self.group,
         query = self.query, filter = self.filter, keyboard = keyboard_h > 0,
         filter_expands = self.filter_expands ~= false })
+    -- Whether this screen can show a widget band at all. A letter jump
+    -- keeps the expand gesture working from this, including on a later
+    -- page (#15). The slot is not a shelf-height constraint.
+    self._strip_possible = strip_possible and true or false
     if not strip_possible then self._shelf_expanded = nil end
     self._widget_band_h = nil
     if widget_area and not self._shelf_expanded then
@@ -1932,11 +1938,25 @@ function LibraryView:buildBody()
         if #data.items < 1 then return nil end
         return self:scrubberLetterMode(data.kind, pages)
     end
+    -- A short shelf cannot show every letter in one column. Split the
+    -- alphabet across both edges then (#14). The slot minimum only decides
+    -- that; it does not change the shelf height. Use the shorter page (the
+    -- one under the widgets) so the two pages do not disagree.
+    local az_h = full_h
+    if continue_layout then
+        local short = full_h - continue_layout.height
+        if short < az_h then az_h = math.max(1, short) end
+    end
+    local split_left, split_right = Core.azHalves(
+        self.az_layout, Core.SCRUBBER_LETTERS, az_h, Core.scrubberMinSlot(self:screenDpi()))
     local function widthsFor(mode)
         if not mode then return self.width, 0 end
         local strip_w = Core.scrubberWidth(self:screenDpi())
-        local content_w = Core.gridContentWidth(self.width, strip_w)
-        return content_w, self.width - content_w
+        local cols = split_left and 2 or 1
+        local content_w = Core.gridContentWidth(self.width, strip_w * cols)
+        local reserved = self.width - content_w
+        local one_w = cols == 2 and math.floor(reserved / 2) or reserved
+        return content_w, one_w
     end
     local letter_mode = letterMode(nil)
     local grid_w, letter_w = widthsFor(letter_mode)
@@ -2025,9 +2045,22 @@ function LibraryView:buildBody()
     if letter_mode and letter_w > 0 then
         local anchor_item = page_items[1]
         local anchor = anchor_item and Core.scrubberBucket(Core.scrubberItemKey(anchor_item, letter_mode)) or nil
-        self.scrubber = self:buildScrubber(grid_items, first_per, letter_mode, letter_w, grid_h, anchor, later_per)
-        self.scrubbers = { self.scrubber }
-        grid = HorizontalGroup:new{ align = "top", grid, self.scrubber }
+        if split_left and split_right then
+            local left = self:buildScrubber(grid_items, first_per, letter_mode, letter_w, grid_h, anchor, later_per, {
+                letters = split_left, side = "left",
+            })
+            local right = self:buildScrubber(grid_items, first_per, letter_mode, letter_w, grid_h, anchor, later_per, {
+                letters = split_right, side = "right",
+            })
+            -- Either half can jump: both carry the full index.
+            self.scrubber = right
+            self.scrubbers = { left, right }
+            grid = HorizontalGroup:new{ align = "top", left, grid, right }
+        else
+            self.scrubber = self:buildScrubber(grid_items, first_per, letter_mode, letter_w, grid_h, anchor, later_per)
+            self.scrubbers = { self.scrubber }
+            grid = HorizontalGroup:new{ align = "top", grid, self.scrubber }
+        end
     end
     for _, p in ipairs(continue_missing) do table.insert(self.missing_covers, p) end
     local footer = self:buildFooter(page, pages, #data.items, data.kind)
@@ -2672,13 +2705,14 @@ function LibraryView:_turnAnchoredPage(dir, wrap)
     return true
 end
 
-function LibraryView:goToPage(page, anchor)
+function LibraryView:goToPage(page, anchor, opts)
     if not self.pages then return end
     page = math.max(1, math.min(page, self.pages))
     if page == self.page and anchor == nil and self._jump_anchor == nil then return end
     -- The expand is for the page that was showing. Another page draws its
-    -- own layout, and page 2+ never had the Continue strip.
-    if page ~= self.page then self._shelf_expanded = nil end
+    -- own layout, and page 2+ never had the Continue strip. A letter jump
+    -- is not that: it keeps the shelf as it was (#15).
+    if page ~= self.page and not (opts and opts.keep_shelf) then self._shelf_expanded = nil end
     -- A letter jump carries its first matching book: the page is shown from
     -- that book, so its books start at the top (issue #7). A direct page
     -- request (the footer number, a long-press) clears the anchor and
@@ -2708,7 +2742,7 @@ function LibraryView:jumpToLetter(letter)
     if not page or not first then return false end
     local anchor = self._jump_anchor
     if page == self.page and anchor and anchor.index == first and anchor.letter == letter then return false end
-    self:goToPage(page, { index = first, letter = letter })
+    self:goToPage(page, { index = first, letter = letter }, { keep_shelf = self.letter_keeps_shelf == true })
     return true
 end
 
@@ -3149,12 +3183,25 @@ end
 -- tap that drifted a little (tapWasSwipe) has no end_pos, so it still
 -- opens the book instead of expanding. The swipe must start below the
 -- search bar, and expanding only applies while a strip is showing.
+--- True when a swipe up has a widget band it can hide. Page 2 of an
+-- ordinary turn already uses the full shelf, so it does not. A letter
+-- jump must still be able to expand and collapse (#15).
+function LibraryView:shelfCanExpand()
+    -- The band is on screen: a swipe up hides it, as before.
+    if self.continue_books then return true end
+    if not self._strip_possible then return false end
+    -- Page 1 can show the band. A letter jump can too, even from a later
+    -- page, so the gesture is not stranded (#15).
+    if self.page == 1 or self._jump_anchor then return true end
+    return false
+end
+
 function LibraryView:toggleShelfExpand(expand, ges)
     local pos = ges and ges.pos
     if not (ges and ges.end_pos and pos and pos.y) then return false end
     if self.body_y and pos.y < self.body_y then return false end
     if expand then
-        if self._shelf_expanded or not self.continue_books then return false end
+        if self._shelf_expanded or not self:shelfCanExpand() then return false end
         self._shelf_expanded = true
     else
         if not self._shelf_expanded then return false end
@@ -3668,6 +3715,15 @@ end
 function LibraryView:setWidgetCovers(mode)
     self.widget_covers = mode == "fill" and "fill" or "compact"
     self:refreshBody(true)
+end
+
+function LibraryView:setAzLayout(mode)
+    self.az_layout = Core.azLayout({ az_layout = mode })
+    self:refreshBody(true)
+end
+
+function LibraryView:setLetterKeepsShelf(on)
+    self.letter_keeps_shelf = on == true
 end
 
 function LibraryView:setShowContinue(on)
