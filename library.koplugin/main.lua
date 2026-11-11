@@ -339,6 +339,7 @@ function Library:init()
     installBroadcastTag()
     self:installCloseGuard(UIManager)
     self.settings = G_reader_settings:readSetting(SETTINGS_KEY) or {}
+    Core.migrateSettings(self.settings)
     -- The old checkbox has to be read before the default writes top_tap = "bar".
     require("libraryreadermenu").migrateTopTap(self.settings)
     for k, v in pairs(DEFAULTS) do
@@ -841,6 +842,7 @@ function Library:newView()
         show_clock = Core.showClock(self.settings),
         show_battery = Core.showBattery(self.settings),
         status_style = self:statusStyleId(),
+        status_bar_size = require("librarystatus").barSize(self.settings),
         show_scrubber = Core.showScrubber(self.settings),
         fuzzy_search = Core.fuzzySearch(self.settings),
         search_suggestions = self.settings.search_suggestions ~= false,
@@ -1947,6 +1949,26 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = (require("librarystatus").barSize(self.settings) == "small" and "✓ " or "") .. _("Status bar text: Small"),
+            callback = function()
+                close()
+                self.settings.status_bar_size = "small"
+                self:saveSettings()
+                if view.setStatusBarSize then view:setStatusBarSize("small") end
+            end,
+        },
+        {
+            text = (require("librarystatus").barSize(self.settings) == "match" and "✓ " or "") .. _("Match clock"),
+            callback = function()
+                close()
+                self.settings.status_bar_size = "match"
+                self:saveSettings()
+                if view.setStatusBarSize then view:setStatusBarSize("match") end
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = (Core.showClock(self.settings) and "✓ " or "") .. _("Show clock"),
             callback = function()
                 close()
@@ -2790,6 +2812,35 @@ function Library:addToMainMenu(menu_items)
                 end,
             },
             self:statusStyleMenu(),
+            {
+                text_func = function()
+                    local size = require("librarystatus").barSize(self.settings)
+                    return T(_("Status bar text: %1"), size == "match" and _("Match clock") or _("Small"))
+                end,
+                help_text = _("The size of the clock and the percentage when Clock and battery is set to Status bar. Small is the original face. Match clock uses the same size and weight as the battery-icon clock. The battery symbol stays KOReader's status-bar icon."),
+                sub_item_table = {
+                    {
+                        text = _("Small"),
+                        radio = true,
+                        checked_func = function() return require("librarystatus").barSize(self.settings) == "small" end,
+                        callback = function()
+                            self.settings.status_bar_size = "small"
+                            self:saveSettings()
+                            if shared.view and shared.view.setStatusBarSize then shared.view:setStatusBarSize("small") end
+                        end,
+                    },
+                    {
+                        text = _("Match clock"),
+                        radio = true,
+                        checked_func = function() return require("librarystatus").barSize(self.settings) == "match" end,
+                        callback = function()
+                            self.settings.status_bar_size = "match"
+                            self:saveSettings()
+                            if shared.view and shared.view.setStatusBarSize then shared.view:setStatusBarSize("match") end
+                        end,
+                    },
+                },
+            },
             {
                 text = _("A–Z strip"),
                 help_text = _("A letter strip down the right edge. Tap or drag a letter to jump to the first page that starts with it. Shown when books are already sorted by title, author, author then year, or series (a cover grid or single-column Compact included), and on the Authors, Collections and Genres lists. The Series list shows it when that list runs past one page. Hidden for Date added, Last read and Size, inside one series, on Compact · 2 columns, and when a search fits on one page. Showing the strip does not change the sort."),

@@ -35,12 +35,12 @@ Status.SYMBOL = {
 -- Unscaled font sizes. KOReader scales them with the screen.
 Status.FACE = {
     icon    = { font = "cfont",    size = 22, bold = true },
-    -- Status bar used to be 16 and not bold, so the clock and the
-    -- percentage sat small beside the search field (#16). Match the
-    -- battery-icon clock.
-    compact = { font = "infofont", size = 22, bold = true },
+    -- Small is the v0.7.7 status-bar face. Match clock is the option (#16).
+    compact = { font = "infofont", size = 16, bold = false },
     plain   = { font = "cfont",    size = 20, bold = true },
 }
+
+Status.COMPACT_MATCH = { font = "infofont", size = 22, bold = true }
 
 -- Lightning bolt, normalized to the box. Concave, so it is filled per scanline.
 Status.BOLT = {
@@ -70,8 +70,17 @@ function Status.styleOf(settings)
     return Status.style(settings and settings.status_style)
 end
 
-function Status.face(style)
-    return Status.FACE[Status.style(style)]
+--- "small" unless the reader picked "match" (the battery-icon clock's size).
+-- A v0.7.7 settings table has no status_bar_size key, so it stays small.
+function Status.barSize(settings)
+    if type(settings) == "table" and settings.status_bar_size == "match" then return "match" end
+    return "small"
+end
+
+function Status.face(style, size_id)
+    style = Status.style(style)
+    if style == "compact" and size_id == "match" then return Status.COMPACT_MATCH end
+    return Status.FACE[style]
 end
 
 --- 0..100, or nil. Same rounding as the plain "87%" label.

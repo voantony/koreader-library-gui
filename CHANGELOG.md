@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Status bar clock and battery.** The Status bar choice beside the search field uses the same size and weight as the battery-icon clock, so the time and the percentage stay readable. Thanks to @drkhn1234 (#16).
+- **Status bar text.** In the Library's ☰ menu, and under ☰ → Library → **Status bar text**. **Small** (the default) is the original status-bar face. **Match clock** uses the same size and weight as the battery-icon clock. The battery symbol stays KOReader's icon. A saved settings table with no `status_bar_size` key stays Small, and the rest of that table is left as it was. Thanks to @drkhn1234 (#16).
 
 ## 0.7.7 (2026-11-11)
 
