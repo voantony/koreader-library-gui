@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Left-edge brightness.** Off by default, including for a Library saved before this setting. A vertical swipe on the left edge no longer sets the frontlight unless **Left-edge brightness** is on. The switch is in the Library's ☰ menu next to Gestures, inside that Gestures list, and under ☰ → Library next to Gestures. Off, that edge does whatever the file browser or the Left edge gesture says. A gesture set to Brightness still slides the light when the setting is off. A slide already underway still finishes. Warmth on the right edge is unchanged.
+
 ## 0.7.8 (2026-11-11)
 
 - **Status bar text.** In the Library's ☰ menu, and under ☰ → Library → **Status bar text**. **Small** (the default) is the original status-bar face. **Match clock** uses the same size and weight as the battery-icon clock. The battery symbol stays KOReader's icon. A saved settings table with no `status_bar_size` key stays Small, and the rest of that table is left as it was. Thanks to @drkhn1234 (#16).

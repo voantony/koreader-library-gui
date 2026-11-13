@@ -555,11 +555,40 @@ describe("left-edge brightness", function()
         return p, sets, state
     end
 
-    it("sets the frontlight on the first pan and does not rebuild the library", function()
+    it("is off by default, so a left-edge pan or swipe does not start a slide", function()
+        local View = loadView()
+        local p, sets = light()
+        device_stub.getPowerDevice = function() return p end
+        local pan = {
+            pos = { x = 20, y = 400 },
+            start_pos = { x = 20, y = 800 },
+            relative = { x = 0, y = -400 },
+        }
+        local function quiet(settings)
+            local v = swipeView(View, {
+                plugin = { settings = settings },
+                continue_books = { {} },
+            })
+            eq(v:onPan(nil, pan), false)
+            eq(v:onHoldPan(nil, pan), false)
+            eq(v._edge, nil)
+            live_calls = {}
+            eq(v:onSwipe(nil, ges("south", 20, 500)), true)
+            eq(#live_calls, 1, "the file browser still gets the edge")
+            eq(v._shelf_expanded, nil, "a downward swipe does not expand")
+            return v
+        end
+        quiet(nil)
+        quiet({})
+        quiet({ edge_brightness = false })
+        eq(#sets, 0)
+    end)
+
+    it("sets the frontlight on the first pan when Left-edge brightness is on", function()
         local View = loadView()
         local p, sets, state = light()
         device_stub.getPowerDevice = function() return p end
-        local v = swipeView(View, {})
+        local v = swipeView(View, { plugin = { settings = { edge_brightness = true } } })
         eq(v:onPan(nil, {
             pos = { x = 20, y = 400 },
             start_pos = { x = 20, y = 800 },
@@ -581,11 +610,98 @@ describe("left-edge brightness", function()
         eq(v.refreshed(), 0)
     end)
 
+    it("a left-edge swipe sets the light when the setting is on, and the right edge does not", function()
+        local View = loadView()
+        local p, sets = light()
+        device_stub.getPowerDevice = function() return p end
+        local v = swipeView(View, {
+            plugin = { settings = { edge_brightness = true } },
+            continue_books = { {} },
+        })
+        eq(v:onSwipe(nil, ges("north", 20, 800, 400)), true)
+        eq(sets[1], 16)
+        eq(#live_calls, 0, "the built-in slide kept the left edge")
+        eq(v._edge, nil)
+        live_calls = {}
+        local n = #sets
+        eq(v:onSwipe(nil, ges("north", 1250, 500)), true)
+        eq(#sets, n, "warmth is not this slide")
+        eq(#live_calls, 1, "the right edge still goes to the file browser")
+        eq(v._shelf_expanded, nil)
+    end)
+
+    it("finishes a slide that is already going when the setting turns off", function()
+        local View = loadView()
+        local p, sets = light()
+        device_stub.getPowerDevice = function() return p end
+        local settings = { edge_brightness = true }
+        local v = swipeView(View, { plugin = { settings = settings } })
+        eq(v:onPan(nil, {
+            pos = { x = 20, y = 400 },
+            start_pos = { x = 20, y = 800 },
+            relative = { x = 0, y = -400 },
+        }), true)
+        eq(sets[1], 16)
+        settings.edge_brightness = false
+        eq(v:onPan(nil, {
+            pos = { x = 20, y = 200 },
+            start_pos = { x = 20, y = 800 },
+            relative = { x = 0, y = -600 },
+        }), true)
+        eq(v:onPanRelease(nil, {
+            pos = { x = 20, y = 200 },
+            start_pos = { x = 20, y = 800 },
+        }), true)
+        eq(sets[#sets], 20)
+        eq(v._edge, nil)
+    end)
+
+    it("an explicit Brightness gesture still slides when the setting is off", function()
+        local View = loadView()
+        local p, sets = light()
+        device_stub.getPowerDevice = function() return p end
+        local v = swipeView(View, { plugin = {
+            settings = { gestures = { left_edge = "brightness" } },
+        } })
+        local ev = {
+            ges = "swipe", direction = "north",
+            pos = { x = 16, y = 800 },
+            start_pos = { x = 16, y = 800 },
+            end_pos = { x = 16, y = 400 },
+        }
+        eq(v:handleEvent({ handler = "onGesture", args = { ev } }), true)
+        eq(sets[1], 16)
+        eq(#live_calls, 0)
+        eq(v._edge, nil)
+        p.fl_intensity = 8
+        local drag = swipeView(View, { plugin = { settings = {
+            edge_brightness = false,
+            gestures = { left_edge = "brightness" },
+        } } })
+        local pan = {
+            ges = "pan",
+            pos = { x = 20, y = 200 },
+            start_pos = { x = 20, y = 800 },
+            relative = { x = 0, y = -600 },
+        }
+        eq(drag:handleEvent({ handler = "onGesture", args = { pan } }), true)
+        eq(drag._edge ~= nil, true)
+        eq(sets[#sets], 20)
+        local rel = {
+            ges = "pan_release",
+            pos = { x = 20, y = 200 },
+            start_pos = { x = 20, y = 800 },
+        }
+        eq(drag:handleEvent({ handler = "onGesture", args = { rel } }), true)
+        eq(drag._edge, nil)
+        eq(#live_calls, 0)
+    end)
+
     it("a sideways pan on the left edge is not brightness", function()
         local View = loadView()
         local p, sets = light()
         device_stub.getPowerDevice = function() return p end
-        local v = swipeView(View, {})
+        local v = swipeView(View, { plugin = { settings = { edge_brightness = true } } })
         eq(v:onPan(nil, {
             pos = { x = 80, y = 500 },
             start_pos = { x = 20, y = 500 },
@@ -598,10 +714,13 @@ describe("left-edge brightness", function()
         local View = loadView()
         local p, sets = light()
         device_stub.getPowerDevice = function() return p end
-        local v = swipeView(View, { scrubber = {
-            dimen = { x = 1214, y = 200, w = 50, h = 1200 },
-            dragTo = function() end,
-        } })
+        local v = swipeView(View, {
+            plugin = { settings = { edge_brightness = true } },
+            scrubber = {
+                dimen = { x = 1214, y = 200, w = 50, h = 1200 },
+                dragTo = function() end,
+            },
+        })
         eq(v:onPan(nil, {
             pos = { x = 1230, y = 400 },
             start_pos = { x = 1230, y = 800 },
@@ -619,7 +738,7 @@ describe("left-edge brightness", function()
             updateResumeFrontlightState = function() error("nil warmth") end,
         }
         device_stub.getPowerDevice = function() return p end
-        local v = swipeView(View, {})
+        local v = swipeView(View, { plugin = { settings = { edge_brightness = true } } })
         eq(v:onPan(nil, {
             pos = { x = 20, y = 300 },
             start_pos = { x = 20, y = 700 },

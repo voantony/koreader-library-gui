@@ -3161,11 +3161,13 @@ function LibraryView:onSwipe(_, ges)
         local skip = (slot == "top_side" or slot == "bottom_side") and self:gestureChoice(slot) == "nothing"
         if not skip and Zones.tryUserFirst(ges, Zones.liveHost()) then return true end
     end
-    -- A vertical slide that starts on an edge is LiveLight's (issue #8):
-    -- brightness on the left, warmth on the right. The A–Z strip already
-    -- took a swipe that started on it, above. Warmth only sees a right-edge
-    -- swipe that started outside the strip (above or below a short column).
-    -- If nothing there takes it, the shelf expand below still runs.
+    -- A vertical slide that this view did not keep is LiveLight's (issue #8).
+    -- Warmth on the right edge always comes through here. Brightness on the
+    -- left does too, unless Left-edge brightness took the swipe above. The
+    -- A–Z strip already took a swipe that started on it. Warmth only sees a
+    -- right-edge swipe that started outside the strip (above or below a
+    -- short column). If nothing there takes it, the shelf expand below
+    -- still runs.
     if (d == "north" or d == "south") and ges.pos and Core.edgeStrip(ges.pos.x, self.dimen.w) then
         local slot = self:gestureSlot({ ges = "swipe", direction = d, pos = ges.pos })
         if self:gestureChoice(slot or "") == "filebrowser" and Zones.tryLiveZones(ges) then return true end
@@ -3367,8 +3369,11 @@ function LibraryView:endEdgeLight()
 end
 
 --- Left-edge brightness. True when this gesture is part of that slide.
--- A touch that started on the A–Z strip is not one. No frontlight: false,
--- so the file browser's own zones still get it.
+-- A touch that started on the A–Z strip is not one. The slide starts only
+-- when Left-edge brightness is on, or when `anywhere` is set (a gesture
+-- slot set to Brightness). A slide already underway still moves and ends.
+-- Warmth is not this path: a right-edge swipe falls through to the file
+-- browser. No frontlight: false, so those zones still get the gesture.
 function LibraryView:trackEdgeLight(kind, ges, anywhere)
     if type(ges) ~= "table" or not self.dimen then return false end
     local start = ges.start_pos or ges.pos
@@ -3383,6 +3388,11 @@ function LibraryView:trackEdgeLight(kind, ges, anywhere)
             self:endEdgeLight()
             return true
         end
+        return false
+    end
+    -- Off (nil or false) does not start a slide. The caller then treats the
+    -- gesture as if this handler were not here.
+    if not anywhere and not Core.edgeBrightness(self:gestureSettings()) then
         return false
     end
     if not (start and start.x and start.y) then return false end
@@ -3405,9 +3415,10 @@ function LibraryView:trackEdgeLight(kind, ges, anywhere)
     return false
 end
 
---- A drag that has left the letter strip keeps driving it. A vertical drag
--- that starts on the left edge sets the frontlight directly, the way the
--- Controls brightness slider does, and does not repaint the Library.
+--- A drag that has left the letter strip keeps driving it. When Left-edge
+-- brightness is on, a vertical drag that starts on the left edge sets the
+-- frontlight directly, the way the Controls brightness slider does, and
+-- does not repaint the Library. Off, that drag is left to the gesture.
 function LibraryView:onPan(_, ges)
     local drag = self:draggingScrubber()
     if drag then
