@@ -2672,6 +2672,13 @@ function Core.edgeStrip(x, w)
     return nil
 end
 
+--- Built-in left-edge brightness slide. Off unless the reader turned it
+-- on. Nil and false are off, including a settings table saved before
+-- this key existed. Migration does not turn it on.
+function Core.edgeBrightness(settings)
+    return type(settings) == "table" and settings.edge_brightness == true
+end
+
 --- Brightness for a finger that started at `start_y` on the left edge and
 -- is now at `y`. Up (smaller y) raises the level. The whole range takes
 -- 70% of the screen height, the same travel LiveLight uses. One step of

@@ -68,6 +68,8 @@ local DEFAULTS = {
     timing_log = false,         -- "Timing log": how long opening, page turns, filters and search take (librarytiming.lua)
     remember_views = true,      -- each shelf (collection, author, series, tab) remembers its layout, sort, filter
     controls_panel = true,      -- swipe down from the Library's top-right corner: light, warmth, toggles
+    -- edge_brightness: nil or false (default, off). true: a vertical swipe on
+    -- the left edge sets brightness. An explicit Brightness gesture ignores this.
     top_tap = "bar",            -- "Top tap opens": "bar" (Library GUI bar) | "koreader" (KOReader's menu)
     simple_reader_menu = true,  -- kept in step with top_tap; false is the old checkbox for KOReader's menu
     bezel_lift = true,          -- Colorsoft: lift KOReader's status bar above the bezel (librarybezel.lua)
@@ -2249,6 +2251,16 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = (Core.edgeBrightness(self.settings) and "\u{2713} " or "") .. _("Left-edge brightness"),
+            callback = function()
+                close()
+                self.settings.edge_brightness = not Core.edgeBrightness(self.settings)
+                self:saveSettings()
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = (Core.useKoreaderKeyboard(self.settings) and "✓ " or "") .. _("Use KOReader's keyboard"),
             callback = function()
                 close()
@@ -2647,10 +2659,22 @@ function Library:gestureTouchItems()
     return items
 end
 
+function Library:edgeBrightnessMenu()
+    return {
+        text = _("Left-edge brightness"),
+        help_text = _("A vertical swipe on the left edge sets brightness. Off by default. Turning it off lets the left edge do whatever the file browser or the gesture setting says."),
+        checked_func = function() return Core.edgeBrightness(self.settings) end,
+        callback = function()
+            self.settings.edge_brightness = not Core.edgeBrightness(self.settings)
+            self:saveSettings()
+        end,
+    }
+end
+
 function Library:gestureSettingsMenu()
     return {
         text = _("Gestures"),
-        help_text = _("What a gesture does on the Library home screen. Same as file browser keeps today's behaviour: the file browser's own gesture runs, including a swipe down from the top opening KOReader's menu, a two-finger swipe doing whatever you set in the gesture manager, and the left edge setting brightness. Nothing ignores that gesture. A one-finger tap or swipe that starts on the A–Z strip still jumps to a letter."),
+        help_text = _("What a gesture does on the Library home screen. Same as file browser keeps the file browser's own gesture, including a swipe down from the top opening KOReader's menu and a two-finger swipe doing whatever you set in the gesture manager. The left edge does that too while Left-edge brightness is off. Nothing ignores that gesture. A one-finger tap or swipe that starts on the A–Z strip still jumps to a letter."),
         sub_item_table_func = function() return self:gestureTouchItems() end,
     }
 end
@@ -2689,6 +2713,14 @@ function Library:showGestureMenu(view)
     local rows = {}
     for i, entry in ipairs(Gestures.MENU) do
         if entry.manager then
+            rows[#rows + 1] = {
+                text = (Core.edgeBrightness(self.settings) and "\u{2713} " or "") .. _("Left-edge brightness"),
+                run = function()
+                    self.settings.edge_brightness = not Core.edgeBrightness(self.settings)
+                    self:saveSettings()
+                    self:showGestureMenu(view)
+                end,
+            }
             rows[#rows + 1] = {
                 text = _("KOReader gesture manager"),
                 run = function() self:openFileBrowserGestureManager() end,
@@ -3236,6 +3268,7 @@ function Library:addToMainMenu(menu_items)
             },
             self:rememberViewsMenu(),
             self:controlsMenu(),
+            self:edgeBrightnessMenu(),
             self:gestureSettingsMenu(),
             self:settingsBackupMenu(),
             {

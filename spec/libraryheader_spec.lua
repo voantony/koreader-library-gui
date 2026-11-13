@@ -302,12 +302,13 @@ describe("Header settings in the menu", function()
         eq(rows[#rows - 1][1].text:find("On startup", 1, true), 1)
         eq(rows[#rows - 2][1].text:find("After closing a book", 1, true), 1)
         eq(rows[#rows - 3][1].text, "Use KOReader's keyboard")
-        eq(rows[#rows - 4][1].text, "Gestures")
-        eq(rows[#rows - 5][1].text, "\u{2713} Show clock")
-        eq(rows[#rows - 5][2].text, "\u{2713} Show battery")
-        eq(rows[#rows - 6][1].text, "\u{2713} Status bar text: Small")
-        eq(rows[#rows - 6][2].text, "Match clock")
-        eq(rows[#rows - 7][1].text, "Clock and battery: Battery icon")
+        eq(rows[#rows - 4][1].text, "Left-edge brightness")
+        eq(rows[#rows - 5][1].text, "Gestures")
+        eq(rows[#rows - 6][1].text, "\u{2713} Show clock")
+        eq(rows[#rows - 6][2].text, "\u{2713} Show battery")
+        eq(rows[#rows - 7][1].text, "\u{2713} Status bar text: Small")
+        eq(rows[#rows - 7][2].text, "Match clock")
+        eq(rows[#rows - 8][1].text, "Clock and battery: Battery icon")
     end)
 
     it("toggles clock and battery separately, and the keyboard on its own", function()
@@ -316,18 +317,71 @@ describe("Header settings in the menu", function()
             use_koreader_keyboard = false, rounded_keyboard = true,
         })
         local rows = dialog.buttons
-        rows[#rows - 5][1].callback()
+        rows[#rows - 6][1].callback()
         eq(settings.show_clock, false)
         eq(settings.show_battery, true)
         eq(settings.rounded_keyboard, true)
         eq(view.clock, false)
-        rows[#rows - 5][2].callback()
+        rows[#rows - 6][2].callback()
         eq(settings.show_battery, false)
         eq(view.battery, false)
         rows[#rows - 3][1].callback()
         eq(settings.use_koreader_keyboard, true)
         eq(view.koreader_keyboard, true)
         eq(settings.show_clock, false, "the keyboard switch does not turn the clock back on")
+    end)
+
+    it("Left-edge brightness in the Library menu starts off and toggles", function()
+        local dialog, _, settings = menuFor({ columns = 4 })
+        local row = dialog.buttons[#dialog.buttons - 4][1]
+        eq(row.text, "Left-edge brightness")
+        eq(settings.edge_brightness, nil)
+        eq(Core.edgeBrightness(settings), false)
+        row.callback()
+        eq(settings.edge_brightness, true)
+        row.callback()
+        eq(settings.edge_brightness, false)
+        eq(Core.edgeBrightness(settings), false)
+    end)
+
+    it("the Gestures dialog toggles Left-edge brightness", function()
+        local shown = {}
+        local UIManager = {
+            show = function(_, w) shown[#shown + 1] = w end,
+            close = function() end,
+            nextTick = function(_, f) f() end,
+            scheduleIn = function() end,
+        }
+        local Library = load("main.lua", {
+            ["ui/uimanager"] = UIManager,
+            ["ui/widget/buttondialog"] = { new = function(_, o) return o end },
+            ["ui/widget/container/widgetcontainer"] = cls(),
+            librarygestures = require("librarygestures"),
+        })
+        local view = {
+            sort = "recent", view_mode = "grid",
+            placeName = function() return "Books" end,
+            viewKey = function() return "books" end,
+            hasRemembered = function() return false end,
+        }
+        local self = setmetatable({
+            settings = { columns = 4 },
+            saveSettings = function() end,
+        }, { __index = Library })
+        Library.showGestureMenu(self, view)
+        local row
+        for _, buttons in ipairs(shown[1].buttons) do
+            if buttons[1].text == "Left-edge brightness" then row = buttons[1] end
+        end
+        eq(row ~= nil, true)
+        eq(shown[1].buttons[1][1].text:find("Swipe down from the top", 1, true), 1)
+        row.callback()
+        eq(self.settings.edge_brightness, true)
+        local again
+        for _, buttons in ipairs(shown[#shown].buttons) do
+            if buttons[1].text:find("Left-edge brightness", 1, true) then again = buttons[1].text end
+        end
+        eq(again, "\u{2713} Left-edge brightness")
     end)
 
     it("offers the four clock styles and keeps the battery icon as the default", function()
@@ -357,7 +411,7 @@ describe("Header settings in the menu", function()
         }, { __index = Library })
         Library.showLibraryMenu(self, view)
         local rows = shown[1].buttons
-        rows[#rows - 7][1].callback()
+        rows[#rows - 8][1].callback()
         local picker = shown[#shown]
         eq(picker.title, "Clock and battery")
         eq(#picker.buttons, 3)
@@ -397,8 +451,8 @@ describe("Header settings in the menu", function()
         eq(self:statusStyleId(), "icon")
         Library.showLibraryMenu(self, view)
         local rows = shown[1].buttons
-        eq(rows[#rows - 7][1].text, "Clock and battery: Battery icon")
-        rows[#rows - 7][1].callback()
+        eq(rows[#rows - 8][1].text, "Clock and battery: Battery icon")
+        rows[#rows - 8][1].callback()
         eq(shown[#shown].buttons[1][1].text, "\u{2713} Battery icon")
     end)
 end)

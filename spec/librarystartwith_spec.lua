@@ -355,6 +355,37 @@ describe("After closing a book, and On startup", function()
         _G.G_reader_settings = nil
     end)
 
+    it("offers Left-edge brightness off by default, next to Gestures", function()
+        local Library = mainLib()
+        local self = setmetatable({
+            ui = {}, settings = {}, saveSettings = function() end,
+        }, { __index = Library })
+        local items = {}
+        Library.addToMainMenu(self, items)
+        local brightness, gestures, bi, gi
+        for i, e in ipairs(items.library.sub_item_table) do
+            if e.text == "Left-edge brightness" then brightness, bi = e, i end
+            if e.text == "Gestures" then gestures, gi = e, i end
+        end
+        eq(brightness ~= nil, true)
+        eq(gestures ~= nil, true)
+        eq(gi, bi + 1)
+        eq(brightness.checked_func(), false)
+        eq(brightness.help_text:find("vertical swipe", 1, true) ~= nil, true)
+        eq(brightness.help_text:find("Off by default", 1, true) ~= nil, true)
+        eq(brightness.help_text:find("file browser", 1, true) ~= nil, true)
+        eq(brightness.help_text:find("gesture setting", 1, true) ~= nil, true)
+        eq(gestures.help_text:find("left edge setting brightness", 1, true), nil)
+        eq(gestures.help_text:find("Left-edge brightness is off", 1, true) ~= nil, true)
+        brightness.callback()
+        eq(self.settings.edge_brightness, true)
+        eq(brightness.checked_func(), true)
+        brightness.callback()
+        eq(self.settings.edge_brightness, false)
+        eq(brightness.checked_func(), false)
+        _G.G_reader_settings = nil
+    end)
+
     it("no longer offers a custom startup toggle", function()
         local Library = mainLib()
         local store = {}

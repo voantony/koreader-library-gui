@@ -374,7 +374,8 @@ jobs.menu = function(done)
         q(0.6, function()
             local label = findAnywhere("Widgets")
             local gestures = findAnywhere("Gestures")
-            P("menu", tostring(label), tostring(gestures), "stack", stackLine())
+            local edge = findAnywhere("Left%-edge brightness")
+            P("menu", tostring(label), tostring(gestures), tostring(edge), "stack", stackLine())
             if label ~= "Widgets" then
                 state.ok = false
                 P("FAIL menu has no Widgets row")
@@ -382,6 +383,10 @@ jobs.menu = function(done)
             if gestures ~= "Gestures" then
                 state.ok = false
                 P("FAIL menu has no Gestures row")
+            end
+            if edge ~= "Left-edge brightness" then
+                state.ok = false
+                P("FAIL menu has no Left-edge brightness row")
             end
             capture("v050-menu", nil)
             closeAboveView()
@@ -1240,10 +1245,15 @@ local function gestureMenuScenario()
         q(0.5, function()
             local top = findAnywhere("Swipe down from the top")
             local same = findAnywhere("Same as file browser")
-            P("menu", tostring(top), tostring(same))
+            local edge = findAnywhere("Left%-edge brightness")
+            P("menu", tostring(top), tostring(same), tostring(edge))
             if not top or not same then
                 state.ok = false
                 P("FAIL gesture menu")
+            end
+            if edge ~= "Left-edge brightness" then
+                state.ok = false
+                P("FAIL gesture menu has no Left-edge brightness row")
             end
             shot("07-gesture-menu")
             press("Swipe down from the top")
