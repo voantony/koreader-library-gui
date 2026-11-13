@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.9 (2026-11-12)
+
 - **Left-edge brightness.** Off by default, including for a Library saved before this setting. A vertical swipe on the left edge no longer sets the frontlight unless **Left-edge brightness** is on. The switch is in the Library's ☰ menu next to Gestures, inside that Gestures list, and under ☰ → Library next to Gestures. Off, that edge does whatever the file browser or the Left edge gesture says. A gesture set to Brightness still slides the light when the setting is off. A slide already underway still finishes. Warmth on the right edge is unchanged.
 
 ## 0.7.8 (2026-11-11)
