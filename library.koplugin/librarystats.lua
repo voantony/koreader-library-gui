@@ -386,6 +386,97 @@ end
 
 --- The descriptor SimpleUI's QA.register accepts. `run` opens the log.
 -- Registered only when that module is actually installed.
+Stats.PROVIDER_BUILTIN = "builtin"
+Stats.PROVIDER_READINGLOG = "readinglog"
+Stats.PROVIDER_ACTION = "action"
+-- stevenzamora1/reading-log registers this dispatcher event. Calling it
+-- opens that plugin's own dashboard. We do not load its code.
+Stats.READINGLOG_EVENT = "ReadingLogDashboard"
+Stats.READINGLOG_MISSING = "Reading Log is not installed. Showing the built-in log."
+Stats.ACTION_MISSING = "That action is not available. Showing the built-in log."
+
+--- "builtin" unless the saved choice is the Reading Log plugin or a
+-- dispatcher action. An older settings table has no key, so it stays built-in.
+function Stats.provider(settings)
+    local id = type(settings) == "table" and settings.reading_log_provider
+    if id == Stats.PROVIDER_READINGLOG or id == Stats.PROVIDER_ACTION then return id end
+    return Stats.PROVIDER_BUILTIN
+end
+
+function Stats.providerLabel(settings)
+    local id = Stats.provider(settings)
+    if id == Stats.PROVIDER_READINGLOG then return "Reading Log plugin" end
+    if id == Stats.PROVIDER_ACTION then return "Dispatcher action" end
+    return "Built-in"
+end
+
+--- A KOReader event name, or nil. Spaces and anything else are rejected
+-- so a typed line cannot be a snippet of code.
+function Stats.actionEvent(settings)
+    local event = type(settings) == "table" and settings.reading_log_action
+    if type(event) ~= "string" then return nil end
+    event = event:match("^%s*(.-)%s*$")
+    if not event or not event:match("^[%w_]+$") then return nil end
+    return event
+end
+
+--- Where "open the reading log" should go.
+-- probe.readinglog: the Reading Log plugin is loaded.
+-- probe.action_ok: the saved event name is usable (defaults to that check).
+-- target is "builtin", "readinglog", or "action". fallback means show the
+-- built-in page and the toast.
+function Stats.route(settings, probe)
+    probe = probe or {}
+    local id = Stats.provider(settings)
+    if id == Stats.PROVIDER_READINGLOG then
+        if probe.readinglog then
+            return { target = "readinglog", event = Stats.READINGLOG_EVENT }
+        end
+        return { target = "builtin", fallback = true, toast = Stats.READINGLOG_MISSING }
+    end
+    if id == Stats.PROVIDER_ACTION then
+        local event = Stats.actionEvent(settings)
+        local ok = probe.action_ok
+        if ok == nil then ok = event ~= nil end
+        if event and ok then return { target = "action", event = event } end
+        return { target = "builtin", fallback = true, toast = Stats.ACTION_MISSING }
+    end
+    return { target = "builtin" }
+end
+
+--- Sizes for the built-in page. Narrow is a 758-wide screen; wide is the
+-- Colorsoft. Cover, chart and the today figure all come from the width.
+function Stats.pageLayout(width)
+    width = math.floor(tonumber(width) or 0)
+    if width < 1 then width = 600 end
+    local narrow = width < 900
+    local margin = narrow and 16 or 28
+    local cover = math.floor(width * (narrow and 0.32 or 0.18))
+    if cover < 104 then cover = 104 end
+    if cover > 200 then cover = 200 end
+    return {
+        narrow = narrow,
+        margin = margin,
+        gap = narrow and 12 or 20,
+        cover_w = cover,
+        cover_h = math.floor(cover * 3 / 2),
+        chart_h = narrow and 88 or 120,
+        today_size = narrow and 46 or 62,
+    }
+end
+
+--- Left edge of each of 7 day columns, and the column width. Labels and
+-- bars use the same numbers so a day sits on its bar.
+function Stats.chartColumns(width, gap)
+    width = math.max(0, math.floor(tonumber(width) or 0))
+    gap = math.max(0, math.floor(tonumber(gap) or 0))
+    local slot = math.floor((width - gap * 6) / 7)
+    if slot < 1 then slot = 1 end
+    local cols = {}
+    for i = 0, 6 do cols[i + 1] = i * (slot + gap) end
+    return slot, cols
+end
+
 function Stats.quickAction(run)
     return {
         id = Stats.QUICK_ACTION_ID,

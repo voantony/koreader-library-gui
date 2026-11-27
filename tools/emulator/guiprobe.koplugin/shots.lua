@@ -1861,6 +1861,17 @@ scenarios.readinglog = function()
                 P("PASS reading log")
             end
             shot("reading-log")
+            local screen = Device.screen
+            if not screen.night_mode and screen.toggleNightMode then
+                screen:toggleNightMode()
+            end
+            if top and top.reload then top:reload() end
+            UIManager:setDirty(top, "full")
+            P("night", tostring(screen.night_mode))
+            shot("reading-log-night")
+            if screen.night_mode and screen.toggleNightMode then
+                screen:toggleNightMode()
+            end
             if top and top.onOpenLibrary then top:onOpenLibrary() end
         end)
         q(0.6, function()
@@ -1873,19 +1884,24 @@ scenarios.readinglog = function()
                 P("PASS library grid")
             end
             shot("reading-log-grid")
-            lib():showHomePageDialog(view)
+            lib():showReadingLogProviderDialog(view)
         end)
         q(0.5, function()
-            local home = findAnywhere("Home page")
-            local reading = findAnywhere("Reading log")
-            local library = findAnywhere("^Library$") or findAnywhere("Library")
-            P("home page dialog", tostring(home), tostring(reading), tostring(library))
-            if not (home and reading) then
+            local builtin = findAnywhere("Built%-in")
+            local plugin = findAnywhere("Reading Log plugin")
+            local action = findAnywhere("Dispatcher action")
+            P("provider dialog", tostring(builtin), tostring(plugin), tostring(action))
+            if not (builtin and plugin and action) then
                 state.ok = false
-                P("FAIL home page choices missing")
+                P("FAIL provider choices missing")
             else
-                P("PASS home page setting")
+                P("PASS reading log provider")
             end
+            shot("reading-log-provider")
+            closeAboveView()
+            lib():showHomePageDialog(V())
+        end)
+        q(0.4, function()
             shot("home-page-setting")
         end)
     end)

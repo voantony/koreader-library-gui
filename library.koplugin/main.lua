@@ -1246,8 +1246,87 @@ function Library:showReadingLog(opts)
     return true
 end
 
+--- The Reading Log plugin (stevenzamora1/reading-log), if this KOReader
+-- has loaded it. Its dashboard is the ReadingLogDashboard event.
+function Library:findReadingLogPlugin()
+    local function take(ui)
+        local plugin = ui and ui.readinglog
+        if type(plugin) == "table" and type(plugin.onReadingLogDashboard) == "function" then
+            return plugin
+        end
+    end
+    local plugin = take(self.ui)
+    if plugin then return plugin end
+    local FM = package.loaded["apps/filemanager/filemanager"]
+    plugin = take(FM and FM.instance)
+    if plugin then return plugin end
+    local RUI = package.loaded["apps/reader/readerui"]
+    return take(RUI and RUI.instance)
+end
+
+function Library:showReadingLogToast(text)
+    if type(text) ~= "string" or text == "" then return end
+    local shown = false
+    local ok, Notification = pcall(require, "ui/widget/notification")
+    if ok and Notification then
+        local note_ok = pcall(function()
+            UIManager:show(Notification:new{ text = text, timeout = 3 })
+        end)
+        shown = note_ok
+    end
+    if not shown then
+        UIManager:show(InfoMessage:new{ text = text, timeout = 3 })
+    end
+end
+
+function Library:openReadingLogPlugin()
+    local plugin = self:findReadingLogPlugin()
+    if not plugin then return false end
+    local ok, result = pcall(plugin.onReadingLogDashboard, plugin)
+    return ok and result ~= false
+end
+
+function Library:dispatchReadingLogEvent(event)
+    local Stats = require("librarystats")
+    event = Stats.actionEvent({ reading_log_action = event })
+    if not event then return false end
+    local ui = self.ui
+    if not (ui and ui.handleEvent) then
+        local FM = package.loaded["apps/filemanager/filemanager"]
+        ui = FM and FM.instance
+    end
+    if not (ui and ui.handleEvent) then return false end
+    local ok, handled = pcall(function()
+        return ui:handleEvent(Event:new(event))
+    end)
+    return ok and handled ~= false
+end
+
+--- Open the provider the reader chose. False means show the built-in page.
+-- A missing plugin or action is a short note, then the built-in page.
+function Library:openChosenReadingLog()
+    local Stats = require("librarystats")
+    local route = Stats.route(self.settings, {
+        readinglog = self:findReadingLogPlugin() ~= nil,
+        action_ok = Stats.actionEvent(self.settings) ~= nil,
+    })
+    if route.target == "readinglog" then
+        if self:openReadingLogPlugin() then return true end
+        self:showReadingLogToast(Stats.READINGLOG_MISSING)
+        return false
+    end
+    if route.target == "action" then
+        if self:dispatchReadingLogEvent(route.event) then return true end
+        self:showReadingLogToast(Stats.ACTION_MISSING)
+        return false
+    end
+    if route.toast then self:showReadingLogToast(route.toast) end
+    return false
+end
+
 --- Dispatcher event ShowReadingLog, the ☰ entry, and the grid's Log button.
 function Library:onShowReadingLog()
+    if self:openChosenReadingLog() then return true end
     return self:showReadingLog({ full = true })
 end
 
@@ -1261,6 +1340,7 @@ function Library:onShowLibrary(focus_search, opts)
     opts = type(opts) == "table" and opts or {}
     if self:wantsReadingLog(focus_search, opts) then
         shared.prefer_log = nil
+        if self:openChosenReadingLog() then return true end
         return self:showReadingLog(opts)
     end
     shared.prefer_log = nil
@@ -2409,6 +2489,15 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = self:providerMenuText(),
+            callback = function()
+                close()
+                self:showReadingLogProviderDialog(view)
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = self:afterCloseMenuText(),
             callback = function()
                 close()
@@ -2969,7 +3058,7 @@ function Library:setHomePage(mode)
     self:saveSettings()
     if mode == Stats.READING_LOG then
         if shared.view and not (self.ui and self.ui.document) then
-            self:showReadingLog({ full = true })
+            self:onShowReadingLog()
         end
     elseif shared.log then
         self:onOpenLibraryGrid()
@@ -3020,6 +3109,115 @@ function Library:homePageMenu()
                 radio = true,
                 checked_func = function() return self:homePage() == Stats.READING_LOG end,
                 callback = function() self:setHomePage(Stats.READING_LOG) end,
+            },
+        },
+    }
+end
+
+function Library:providerLabel()
+    return _(require("librarystats").providerLabel(self.settings))
+end
+
+function Library:providerMenuText()
+    return T(_("Reading log provider: %1"), self:providerLabel())
+end
+
+function Library:setReadingLogProvider(mode)
+    local Stats = require("librarystats")
+    if mode ~= Stats.PROVIDER_BUILTIN and mode ~= Stats.PROVIDER_READINGLOG
+        and mode ~= Stats.PROVIDER_ACTION then
+        return
+    end
+    self.settings.reading_log_provider = mode
+    self:saveSettings()
+end
+
+function Library:showReadingLogActionDialog(view)
+    local Stats = require("librarystats")
+    local InputDialog = require("ui/widget/inputdialog")
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Dispatcher action"),
+        description = _("The event name from KOReader's gesture manager. Reading Log's is ReadingLogDashboard."),
+        input = self.settings.reading_log_action or "",
+        buttons = { {
+            { text = _("Cancel"), id = "close", callback = function() self:closeOverLibrary(dialog, view) end },
+            { text = _("Save"), is_enter_default = true, callback = function()
+                local event = Stats.actionEvent({ reading_log_action = dialog:getInputText() })
+                if not event then
+                    self:showReadingLogToast(_("Use an event name such as ReadingLogDashboard."))
+                    return
+                end
+                self.settings.reading_log_action = event
+                self.settings.reading_log_provider = Stats.PROVIDER_ACTION
+                self:saveSettings()
+                self:closeOverLibrary(dialog, view)
+            end },
+        } },
+    }
+    self:showOverLibrary(dialog, view)
+    return dialog
+end
+
+function Library:showReadingLogProviderDialog(view)
+    local Stats = require("librarystats")
+    local dialog
+    local function pick(mode)
+        self:setReadingLogProvider(mode)
+        self:closeOverLibrary(dialog, view)
+        if mode == Stats.PROVIDER_ACTION then
+            self:showReadingLogActionDialog(view)
+        end
+    end
+    local current = Stats.provider(self.settings)
+    local event = Stats.actionEvent(self.settings)
+    dialog = ButtonDialog:new{
+        title = _("Reading log provider"),
+        title_align = "center",
+        buttons = {
+            {{
+                text = (current == Stats.PROVIDER_BUILTIN and "\u{2713} " or "") .. _("Built-in"),
+                callback = function() pick(Stats.PROVIDER_BUILTIN) end,
+            }},
+            {{
+                text = (current == Stats.PROVIDER_READINGLOG and "\u{2713} " or "") .. _("Reading Log plugin"),
+                callback = function() pick(Stats.PROVIDER_READINGLOG) end,
+            }},
+            {{
+                text = (current == Stats.PROVIDER_ACTION and "\u{2713} " or "")
+                    .. (event and T(_("Dispatcher action: %1"), event) or _("Dispatcher action")),
+                callback = function() pick(Stats.PROVIDER_ACTION) end,
+            }},
+        },
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
+    UIManager:show(dialog)
+    return dialog
+end
+
+function Library:readingLogProviderMenu()
+    local Stats = require("librarystats")
+    return {
+        text_func = function() return self:providerMenuText() end,
+        help_text = _("Built-in is this Library's reading log. Reading Log plugin opens that plugin's dashboard when it is installed. Dispatcher action runs an event you name. If the plugin or the action is missing, the built-in log opens and a note says so."),
+        sub_item_table = {
+            {
+                text = _("Built-in"),
+                radio = true,
+                checked_func = function() return Stats.provider(self.settings) == Stats.PROVIDER_BUILTIN end,
+                callback = function() self:setReadingLogProvider(Stats.PROVIDER_BUILTIN) end,
+            },
+            {
+                text = _("Reading Log plugin"),
+                radio = true,
+                checked_func = function() return Stats.provider(self.settings) == Stats.PROVIDER_READINGLOG end,
+                callback = function() self:setReadingLogProvider(Stats.PROVIDER_READINGLOG) end,
+            },
+            {
+                text = _("Dispatcher action"),
+                radio = true,
+                checked_func = function() return Stats.provider(self.settings) == Stats.PROVIDER_ACTION end,
+                callback = function() self:setReadingLogProvider(Stats.PROVIDER_ACTION) end,
             },
         },
     }
@@ -3197,6 +3395,7 @@ function Library:addToMainMenu(menu_items)
                 callback = function() self:onShowReadingLog() end,
             },
             self:homePageMenu(),
+            self:readingLogProviderMenu(),
             self:afterCloseMenu(),
             self:onStartupMenu(),
             {

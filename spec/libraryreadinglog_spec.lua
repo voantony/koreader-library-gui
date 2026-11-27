@@ -262,6 +262,61 @@ local function load(file, extra)
     return mod
 end
 
+describe("Reading log layout", function()
+    it("gives a narrow screen a smaller today figure and a wide screen a larger one", function()
+        local small = Stats.pageLayout(758)
+        local large = Stats.pageLayout(1264)
+        eq(small.narrow, true)
+        eq(large.narrow, false)
+        eq(small.today_size < large.today_size, true)
+        eq(small.cover_w >= 104, true)
+        eq(large.cover_w <= 200, true)
+        eq(small.margin < large.margin, true)
+    end)
+    it("lines the seven day labels up on the bars", function()
+        local slot, cols = Stats.chartColumns(700, 8)
+        eq(#cols, 7)
+        eq(cols[1], 0)
+        eq(cols[2], slot + 8)
+        eq(cols[7] + slot <= 700, true)
+    end)
+end)
+
+describe("Reading log provider", function()
+    it("stays on the built-in log until a provider is saved", function()
+        eq(Stats.provider(nil), "builtin")
+        eq(Stats.provider({}), "builtin")
+        eq(Stats.providerLabel({}), "Built-in")
+        eq(Stats.route({}, {}).target, "builtin")
+    end)
+    it("opens the Reading Log plugin when it is installed, and falls back when it is not", function()
+        local settings = { reading_log_provider = "readinglog" }
+        local open = Stats.route(settings, { readinglog = true })
+        eq(open.target, "readinglog")
+        eq(open.event, "ReadingLogDashboard")
+        local missing = Stats.route(settings, { readinglog = false })
+        eq(missing.target, "builtin")
+        eq(missing.fallback, true)
+        eq(missing.toast, Stats.READINGLOG_MISSING)
+    end)
+    it("runs a named dispatcher action, and falls back when the name is missing", function()
+        eq(Stats.actionEvent({ reading_log_action = "  ReadingLogDashboard  " }), "ReadingLogDashboard")
+        eq(Stats.actionEvent({ reading_log_action = "not an event" }), nil)
+        eq(Stats.actionEvent({ reading_log_action = "" }), nil)
+        local settings = { reading_log_provider = "action", reading_log_action = "ShowCatalog" }
+        local open = Stats.route(settings, {})
+        eq(open.target, "action")
+        eq(open.event, "ShowCatalog")
+        local missing = Stats.route({ reading_log_provider = "action" }, {})
+        eq(missing.target, "builtin")
+        eq(missing.fallback, true)
+        eq(missing.toast, Stats.ACTION_MISSING)
+        local refused = Stats.route(settings, { action_ok = false })
+        eq(refused.target, "builtin")
+        eq(refused.fallback, true)
+    end)
+end)
+
 describe("Ways onto the Reading log", function()
     it("offers Reading log and Home page in the KOReader menu, next to startup", function()
         local Library = load("main.lua", {})
@@ -275,20 +330,27 @@ describe("Ways onto the Reading log", function()
         local items = {}
         Library.addToMainMenu(self, items)
         local rows = items.library.sub_item_table
-        local reading, home, after, startup, ri, hi, ai, si
+        local reading, home, provider, after, startup, ri, hi, pi, ai, si
         for i, entry in ipairs(rows) do
             if entry.text == "Reading log" then reading, ri = entry, i end
             if entry.text_func and entry.text_func():find("Home page", 1, true) == 1 then home, hi = entry, i end
+            if entry.text_func and entry.text_func():find("Reading log provider", 1, true) == 1 then provider, pi = entry, i end
             if entry.text_func and entry.text_func():find("After closing a book", 1, true) == 1 then after, ai = entry, i end
             if entry.text_func and entry.text_func():find("On startup", 1, true) == 1 then startup, si = entry, i end
         end
         eq(reading ~= nil, true)
         eq(home ~= nil, true)
+        eq(provider ~= nil, true)
         eq(after ~= nil, true)
         eq(startup ~= nil, true)
         eq(hi, ri + 1)
-        eq(ai, hi + 1)
+        eq(pi, hi + 1)
+        eq(ai, pi + 1)
         eq(si, ai + 1)
+        eq(provider.text_func(), "Reading log provider: Built-in")
+        eq(provider.sub_item_table[1].text, "Built-in")
+        eq(provider.sub_item_table[2].text, "Reading Log plugin")
+        eq(provider.sub_item_table[1].checked_func(), true)
         eq(home.text_func(), "Home page: Library")
         eq(home.sub_item_table[1].text, "Library")
         eq(home.sub_item_table[2].text, "Reading log")
@@ -382,6 +444,48 @@ describe("Ways onto the Reading log", function()
         eq(again, descriptor)
         eq(#registered, 1)
         Library.shared.sui_reading_log = nil
+    end)
+
+    it("sends every entry point to the chosen provider and falls back to the built-in log", function()
+        local Library = load("main.lua", {})
+        local toasts = {}
+        local plugin_opened = false
+        local builtin = false
+        local self = setmetatable({
+            ui = {
+                readinglog = {
+                    onReadingLogDashboard = function() plugin_opened = true return true end,
+                },
+                handleEvent = function() return true end,
+            },
+            settings = { home_page = "reading_log", reading_log_provider = "readinglog" },
+            saveSettings = function() end,
+            showReadingLog = function() builtin = true return true end,
+            showReadingLogToast = function(_, text) toasts[#toasts + 1] = text end,
+        }, { __index = Library })
+        eq(Library.onShowReadingLog(self), true)
+        eq(plugin_opened, true)
+        eq(builtin, false)
+        eq(Library.onShowLibrary(self, false, { full = true }), true)
+        eq(builtin, false)
+        self.ui.readinglog = nil
+        Library.onShowReadingLog(self)
+        eq(builtin, true)
+        eq(toasts[#toasts], Stats.READINGLOG_MISSING)
+        builtin = false
+        self.settings.reading_log_provider = "action"
+        self.settings.reading_log_action = "ShowCatalog"
+        local seen
+        self.ui.handleEvent = function(_, ev) seen = ev return true end
+        eq(Library.onShowReadingLog(self), true)
+        eq(seen ~= nil, true)
+        eq(builtin, false)
+        self.ui.handleEvent = function() return false end
+        Library.onShowReadingLog(self)
+        eq(builtin, true)
+        eq(toasts[#toasts], Stats.ACTION_MISSING)
+        Library.shared.prefer_log = nil
+        Library.shared.log = nil
     end)
 
     it("opens the Reading log from startup when that is the home page", function()
