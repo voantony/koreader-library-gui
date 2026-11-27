@@ -72,6 +72,7 @@ local DEFAULTS = {
     -- the left edge sets brightness. An explicit Brightness gesture ignores this.
     top_tap = "bar",            -- "Top tap opens": "bar" (Library GUI bar) | "koreader" (KOReader's menu)
     simple_reader_menu = true,  -- kept in step with top_tap; false is the old checkbox for KOReader's menu
+    simpleui_library = false,   -- "Use as SimpleUI library page": a SimpleUI nav action (librarysimpleui.lua)
     bezel_lift = true,          -- Colorsoft: lift KOReader's status bar above the bezel (librarybezel.lua)
     -- bezel_prev: the status bar's bottom margin from before we lifted it
     footer_page_total = true,   -- reader status bar: page out of total, short tap cycle (libraryfooter.lua)
@@ -413,6 +414,28 @@ function Library:init()
     UIManager:nextTick(function()
         require("libraryupdate").maybeWeekly(self)
     end)
+    -- SimpleUI drops a saved tab it does not know yet and writes that list
+    -- back. This plugin's folder sorts first, so register now, before
+    -- SimpleUI starts, while the setting is on. The later tick covers a
+    -- SimpleUI that was already running, and redraws its bar.
+    if require("librarysimpleui").enabled(self.settings) then
+        self:syncSimpleUI()
+    end
+    UIManager:nextTick(function() self:syncSimpleUI() end)
+end
+
+--- Register or remove the SimpleUI "Library GUI" action to match the setting.
+function Library:syncSimpleUI()
+    require("librarysimpleui").sync({ settings = self.settings })
+end
+
+--- ☰ → Library → Use as SimpleUI library page. Off does not touch SimpleUI.
+function Library:toggleSimpleUILibrary()
+    local SimpleUI = require("librarysimpleui")
+    self.settings.simpleui_library = not SimpleUI.enabled(self.settings)
+    self:saveSettings()
+    SimpleUI.sync({ settings = self.settings })
+    return self.settings.simpleui_library == true
 end
 
 --- True when KOReader's own "Start with" setting points at the Library:
@@ -686,6 +709,7 @@ function Library:replaceSettings(settings)
     end
     G_reader_settings:saveSetting(SETTINGS_KEY, self.settings)
     if G_reader_settings.flush then G_reader_settings:flush() end
+    self:syncSimpleUI()
     return true
 end
 
@@ -2290,6 +2314,16 @@ function Library:showLibraryMenu(view)
             end,
         },
     })
+    table.insert(buttons, {
+        {
+            text = (require("librarysimpleui").enabled(self.settings) and "\u{2713} " or "")
+                .. _("Use as SimpleUI library page"),
+            callback = function()
+                close()
+                self:toggleSimpleUILibrary()
+            end,
+        },
+    })
     -- Last item: leave the Library for the file browser (there is no X).
     table.insert(buttons, {
         {
@@ -3043,6 +3077,14 @@ function Library:addToMainMenu(menu_items)
             self:barelyMenu(),
             self:topRowMenu(),
             self:sleepCoverMenu(),
+            {
+                text = _("Use as SimpleUI library page"),
+                help_text = _("When SimpleUI is installed, add a Library GUI action to the list it offers for its navigation bar. SimpleUI's own Library tab stays until you remove it: open SimpleUI's settings (the gear, or hold the bar), then Bars, Navigation Bar, Tabs. Remove Library and add Library GUI. Leave Home where it is, so a Reading Log module on that page stays. The bar holds at most six tabs; remove one first if it is already full. Off by default. Nothing is registered when SimpleUI is not installed, and turning this off removes the Library GUI action."),
+                checked_func = function()
+                    return require("librarysimpleui").enabled(self.settings)
+                end,
+                callback = function() self:toggleSimpleUILibrary() end,
+            },
             {
                 text = _("Library tab in the reader menu"),
                 help_text = _("Show a Library tab (book icon) in the top menu bar while reading, next to the file browser tab."),

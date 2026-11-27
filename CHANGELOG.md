@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **SimpleUI library page.** Off by default, including for a Library saved before this setting. ☰ → Library → **Use as SimpleUI library page**, and the same switch in the Library's ☰ menu. When SimpleUI is installed, Library GUI adds a navigation action named **Library GUI**. SimpleUI's own Library tab cannot be removed by another plugin, so it stays until you take it off the bar: SimpleUI's settings (the gear, or hold the bar) → **Bars** → **Navigation Bar** → **Tabs**, remove **Library**, and add **Library GUI**. Leave **Home** where it is. A Reading Log module on that home page stays. Nothing is registered when SimpleUI is not installed. Thanks to u/Aladris666 (Reddit), who asked for this.
+
 ## 0.7.9 (2026-11-12)
 
 - **Left-edge brightness.** Off by default, including for a Library saved before this setting. A vertical swipe on the left edge no longer sets the frontlight unless **Left-edge brightness** is on. The switch is in the Library's ☰ menu next to Gestures, inside that Gestures list, and under ☰ → Library next to Gestures. Off, that edge does whatever the file browser or the Left edge gesture says. A gesture set to Brightness still slides the light when the setting is off. A slide already underway still finishes. Warmth on the right edge is unchanged.
