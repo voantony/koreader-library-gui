@@ -1810,6 +1810,87 @@ scenarios.closebook = function()
     end)
 end
 
+scenarios.readinglog = function()
+    whenLibrary(function()
+        q(0.4, function()
+            dismissNotices()
+            local DataStorage = require("datastorage")
+            local SQ3 = require("lua-ljsqlite3/init")
+            local path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
+            local conn = SQ3.open(path)
+            conn:exec([[
+                CREATE TABLE IF NOT EXISTS book (
+                    id integer PRIMARY KEY, title text, authors text, notes integer,
+                    last_open integer, highlights integer, pages integer, series text,
+                    language text, md5 text, total_read_time integer, total_read_pages integer
+                );
+                CREATE TABLE IF NOT EXISTS page_stat_data (
+                    id_book integer, page integer, start_time integer,
+                    duration integer, total_pages integer
+                );
+            ]])
+            local function at(days_ago, hour)
+                local t = os.date("*t")
+                return os.time{ year = t.year, month = t.month, day = t.day - days_ago, hour = hour, min = 0, sec = 0 }
+            end
+            conn:exec("DELETE FROM page_stat_data; DELETE FROM book;")
+            local function add(page, days_ago, hour, duration)
+                conn:exec(string.format(
+                    "INSERT INTO page_stat_data (id_book, page, start_time, duration, total_pages) VALUES (1, %d, %d, %d, 320);",
+                    page, at(days_ago, hour), duration))
+            end
+            add(12, 0, 9, 600)
+            add(18, 0, 10, 900)
+            add(40, 1, 20, 1200)
+            add(8, 2, 21, 400)
+            add(3, 3, 8, 300)
+            conn:exec("INSERT INTO book (id, title, authors, total_read_time, total_read_pages) VALUES (1, 'Fixture', 'Reader', 3400, 20);")
+            conn:close()
+            P("stats db", path)
+            lib():onShowReadingLog()
+        end)
+        q(0.8, function()
+            local stack = UIManager._window_stack or {}
+            local top = stack[#stack] and stack[#stack].widget
+            local name = top and top.name or "?"
+            P("reading log top", tostring(name), "stack", stackLine())
+            if name ~= "library_reading_log" then
+                state.ok = false
+                P("FAIL reading log is not showing")
+            else
+                P("PASS reading log")
+            end
+            shot("reading-log")
+            if top and top.onOpenLibrary then top:onOpenLibrary() end
+        end)
+        q(0.6, function()
+            local view = V()
+            P("back on grid", tostring(view and view.name), "stack", stackLine())
+            if not (view and view.name == "library_view") then
+                state.ok = false
+                P("FAIL Library grid did not open")
+            else
+                P("PASS library grid")
+            end
+            shot("reading-log-grid")
+            lib():showHomePageDialog(view)
+        end)
+        q(0.5, function()
+            local home = findAnywhere("Home page")
+            local reading = findAnywhere("Reading log")
+            local library = findAnywhere("^Library$") or findAnywhere("Library")
+            P("home page dialog", tostring(home), tostring(reading), tostring(library))
+            if not (home and reading) then
+                state.ok = false
+                P("FAIL home page choices missing")
+            else
+                P("PASS home page setting")
+            end
+            shot("home-page-setting")
+        end)
+    end)
+end
+
 scenarios.returnmenu = function()
     whenLibrary(function()
         q(0.3, function()

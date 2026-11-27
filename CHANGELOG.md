@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Reading log.** An optional home page, off until you choose it. ☰ → Library → **Home page** is **Library** (the default, including a Library saved before this setting) or **Reading log**. **On startup** and **After closing a book** are unchanged: Open Library and Return to Library open whichever home page is selected. The page shows Continue reading (the same books and progress as the Library), today's pages and minutes, this week's seven days with the total and the daily average, and the current streak. It reads KOReader's statistics database read-only. If that database is missing, or Reading statistics is off, Continue reading stays and a note says **Turn on Reading statistics**. **Reading log** in the ☰ menu opens it any time. **Log** on the book grid opens it, and **Library** on the reading log opens the grid. **Open Reading log** can be bound to a gesture. When SimpleUI is installed, the same action can be placed on its bottom bar. Thanks to u/Aladris666 (Reddit) for the idea.
+
 ## 0.7.9 (2026-11-12)
 
 - **Left-edge brightness.** Off by default, including for a Library saved before this setting. A vertical swipe on the left edge no longer sets the frontlight unless **Left-edge brightness** is on. The switch is in the Library's ☰ menu next to Gestures, inside that Gestures list, and under ☰ → Library next to Gestures. Off, that edge does whatever the file browser or the Left edge gesture says. A gesture set to Brightness still slides the light when the setting is off. A slide already underway still finishes. Warmth on the right edge is unchanged.

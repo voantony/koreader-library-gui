@@ -29,6 +29,8 @@ tools/emulator/shoot.sh footer
 
 `closebook` opens a book from the Library and closes it the way the file-browser button does. `close-first-paint.png` is the first refresh of that close. Return to Library makes that paint the Library. `returnmenu` writes `after-closing-a-book.png` and `on-startup.png`.
 
+`readinglog` writes a statistics database, opens the Reading log (`reading-log.png`), returns to the book grid (`reading-log-grid.png`), and opens **Home page** (`home-page-setting.png`).
+
 `readme` also writes `v050-az-column.png`, `v050-az-short.png`, `v050-footer-book.png`, `v050-footer-empty.png`, `v070-cover-only.png`, `v070-badges.png`, `v070-gestures.png` and `v070-gesture-choices.png`. Those names are scenarios on their own (`azcolumn`, `azshort`, `footerbook`, `footerempty`, `coveronly`, `badges`, `gesturepages`).
 
 `readme` writes the README shots that show the v0.5.0 home screen and gallery. It waits until the covers on screen have been extracted, so the PNGs are not grey placeholders. The same shots can be taken on their own:

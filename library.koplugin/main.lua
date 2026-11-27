@@ -52,6 +52,8 @@ local DEFAULTS = {
     return_to_library = true,   -- legacy checkbox; after_close ("library"|"filemanager") wins when set
     -- after_close: nil (same as "library") | "library" | "filemanager"
     -- on_startup: nil | "library" | "last" (Resume last book). See libraryreturn.lua.
+    -- home_page: nil or "library" (default) | "reading_log". See librarystats.lua.
+    -- An unset key stays the Library, including a settings table saved before this choice.
     debounce_ms = 150,
     barely_threshold = 0.10,    -- "Barely started" when chapters are unknown: below this fraction
     series_skip_finished = true, -- Next in series skips books already finished
@@ -389,6 +391,7 @@ function Library:init()
     self:registerStartWithMenu()
     self:registerReturnHooks()
     self:onDispatcherRegisterActions()
+    self:registerSimpleUIQuickAction()
     self.ui.menu:registerToMainMenu(self)
     if self.ui.document then
         self:hookReaderMenuTap()
@@ -651,18 +654,55 @@ function Library:registerStartWithMenu()
 end
 
 function Library:onDispatcherRegisterActions()
-    Dispatcher:registerAction("library_show",
+    local D = self.dispatcher or Dispatcher
+    local reading = require("librarystats").dispatcherAction()
+    D:registerAction(reading.id, {
+        category = "none", event = reading.event, title = _(reading.title), general = true,
+    })
+    D:registerAction("library_show",
         { category = "none", event = "ShowLibrary", title = _("Library"), general = true })
-    Dispatcher:registerAction("library_search",
+    D:registerAction("library_search",
         { category = "none", event = "SearchLibrary", title = _("Search library"), general = true })
-    Dispatcher:registerAction("library_resume",
+    D:registerAction("library_resume",
         { category = "none", event = "LibraryResume", title = _("Resume last book (Library)"), general = true })
-    Dispatcher:registerAction("library_rescan",
+    D:registerAction("library_rescan",
         { category = "none", event = "RescanLibrary", title = _("Rescan library"), general = true, separator = true })
-    Dispatcher:registerAction("library_next_in_series",
+    D:registerAction("library_next_in_series",
         { category = "none", event = "LibraryNextInSeries", title = _("Next in series"), reader = true })
-    Dispatcher:registerAction("library_prev_in_series",
+    D:registerAction("library_prev_in_series",
         { category = "none", event = "LibraryPrevInSeries", title = _("Previous in series"), reader = true, separator = true })
+end
+
+--- SimpleUI's quick-action registry, when that plugin is installed.
+-- A spec stub answers every field and is not a real module: it has no
+-- own keys. pairs() on it is empty, so this returns nil and nothing is registered.
+function Library.simpleUIModule()
+    local ok, QA = pcall(require, "features/sui_quickactions")
+    if not ok or type(QA) ~= "table" or type(QA.register) ~= "function" then return nil end
+    local owned = false
+    for key in pairs(QA) do
+        if key == "register" then owned = true break end
+    end
+    if not owned then return nil end
+    return QA
+end
+
+--- Register "Reading log" so it can sit on SimpleUI's bottom bar.
+-- `QA` is the module, or nil to look it up. Safe to call more than once.
+function Library:registerSimpleUIQuickAction(QA)
+    if shared.sui_reading_log then return shared.sui_reading_log end
+    if QA == nil then QA = Library.simpleUIModule() end
+    if type(QA) ~= "table" or type(QA.register) ~= "function" then return nil end
+    local Stats = require("librarystats")
+    local descriptor = Stats.quickAction(function()
+        local plugin = liveLibrary()
+        if plugin and plugin.onShowReadingLog then return plugin:onShowReadingLog() end
+        if self and self.onShowReadingLog then return self:onShowReadingLog() end
+    end)
+    descriptor.label = _(Stats.MENU)
+    QA.register(descriptor)
+    shared.sui_reading_log = descriptor
+    return descriptor
 end
 
 function Library:saveSettings()
@@ -1146,8 +1186,85 @@ function Library:onLibraryResume()
     return true
 end
 
+--- True when Open Library / startup / return should paint the Reading log.
+-- A grid request, or a search, stays on the book grid. prefer_log is the
+-- one-shot set when Reading log was asked for from inside a book.
+function Library:wantsReadingLog(focus_search, opts)
+    opts = type(opts) == "table" and opts or {}
+    if opts.grid or focus_search then return false end
+    if shared.prefer_log then return true end
+    return require("librarystats").homePage(self.settings) == "reading_log"
+end
+
+function Library:closeReadingLog()
+    local log = shared.log
+    if not log then return end
+    shared.log = nil
+    if UIManager and UIManager.close then UIManager:close(log) end
+end
+
+function Library:onReadingLogClosed(log)
+    if shared.log == log then shared.log = nil end
+end
+
+--- Books in progress, for the Reading log's Continue reading row.
+function Library:continueBooks(n)
+    local ok, books = pcall(function() return self:getBooks() end)
+    if not ok or type(books) ~= "table" then return {} end
+    return require("librarycore").continueReading(books, n or 4)
+end
+
+function Library:showReadingLog(opts)
+    opts = type(opts) == "table" and opts or {}
+    if self.ui and self.ui.document then
+        shared.prefer_log = true
+        return self:leaveBook(false)
+    end
+    if shared.view then
+        local view = shared.view
+        shared.view = nil
+        if UIManager and UIManager.close then UIManager:close(view) end
+    end
+    if shared.log and not shared.log._closed then
+        if shared.log.reload then shared.log:reload() end
+        if opts.full and UIManager.setDirty then UIManager:setDirty(shared.log, "full") end
+        return true
+    end
+    local ok_index, err = pcall(function()
+        if not shared.index or shared.index.needs_build then self:ensureIndex()
+        else self:refreshReadingState() end
+    end)
+    if not ok_index then logger.warn("Library: reading log index:", err) end
+    local ReadingLog = require("libraryreadinglog")
+    local view = ReadingLog:new{ plugin = self }
+    shared.log = view
+    if opts.full then
+        UIManager:show(view, "full")
+    else
+        UIManager:show(view)
+    end
+    return true
+end
+
+--- Dispatcher event ShowReadingLog, the ☰ entry, and the grid's Log button.
+function Library:onShowReadingLog()
+    return self:showReadingLog({ full = true })
+end
+
+--- The Reading log's Library button. Always the book grid, even when the
+-- Reading log is the home page.
+function Library:onOpenLibraryGrid()
+    return self:onShowLibrary(false, { grid = true, full = true })
+end
+
 function Library:onShowLibrary(focus_search, opts)
     opts = type(opts) == "table" and opts or {}
+    if self:wantsReadingLog(focus_search, opts) then
+        shared.prefer_log = nil
+        return self:showReadingLog(opts)
+    end
+    shared.prefer_log = nil
+    self:closeReadingLog()
     if shared.view then
         local shelf = shared.open_shelf
         shared.open_shelf = nil
@@ -2274,6 +2391,24 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = _("Reading log"),
+            callback = function()
+                close()
+                self:onShowReadingLog()
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
+            text = self:homePageMenuText(),
+            callback = function()
+                close()
+                self:showHomePageDialog(view)
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = self:afterCloseMenuText(),
             callback = function()
                 close()
@@ -2815,6 +2950,81 @@ function Library:showKoreaderMenu(ges)
     return true
 end
 
+function Library:homePage()
+    return require("librarystats").homePage(self.settings)
+end
+
+function Library:homePageLabel()
+    return _(require("librarystats").homePageLabel(self.settings))
+end
+
+function Library:homePageMenuText()
+    return T(_("Home page: %1"), self:homePageLabel())
+end
+
+function Library:setHomePage(mode)
+    local Stats = require("librarystats")
+    if mode ~= Stats.LIBRARY and mode ~= Stats.READING_LOG then return end
+    self.settings.home_page = mode
+    self:saveSettings()
+    if mode == Stats.READING_LOG then
+        if shared.view and not (self.ui and self.ui.document) then
+            self:showReadingLog({ full = true })
+        end
+    elseif shared.log then
+        self:onOpenLibraryGrid()
+    end
+end
+
+function Library:showHomePageDialog(view)
+    local Stats = require("librarystats")
+    local dialog
+    local function pick(mode)
+        self:closeOverLibrary(dialog, view)
+        self:setHomePage(mode)
+    end
+    local current = self:homePage()
+    dialog = ButtonDialog:new{
+        title = _("Home page"),
+        title_align = "center",
+        buttons = {
+            {{
+                text = (current == Stats.LIBRARY and "\u{2713} " or "") .. _("Library"),
+                callback = function() pick(Stats.LIBRARY) end,
+            }},
+            {{
+                text = (current == Stats.READING_LOG and "\u{2713} " or "") .. _("Reading log"),
+                callback = function() pick(Stats.READING_LOG) end,
+            }},
+        },
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
+    UIManager:show(dialog)
+    return dialog
+end
+
+function Library:homePageMenu()
+    local Stats = require("librarystats")
+    return {
+        text_func = function() return self:homePageMenuText() end,
+        help_text = _("Library is the book grid, and it is the home page until you change this. Reading log opens on startup and after a book when those are set to the Library. On startup and After closing a book are unchanged."),
+        sub_item_table = {
+            {
+                text = _("Library"),
+                radio = true,
+                checked_func = function() return self:homePage() == Stats.LIBRARY end,
+                callback = function() self:setHomePage(Stats.LIBRARY) end,
+            },
+            {
+                text = _("Reading log"),
+                radio = true,
+                checked_func = function() return self:homePage() == Stats.READING_LOG end,
+                callback = function() self:setHomePage(Stats.READING_LOG) end,
+            },
+        },
+    }
+end
+
 function Library:afterCloseMode()
     return require("libraryreturn").afterClose(
         self.settings and self.settings.after_close,
@@ -2982,6 +3192,11 @@ function Library:addToMainMenu(menu_items)
                 callback = function() self:onRescanLibrary() end,
                 separator = true,
             },
+            {
+                text = _("Reading log"),
+                callback = function() self:onShowReadingLog() end,
+            },
+            self:homePageMenu(),
             self:afterCloseMenu(),
             self:onStartupMenu(),
             {
