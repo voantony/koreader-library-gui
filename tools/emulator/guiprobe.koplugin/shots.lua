@@ -1893,6 +1893,79 @@ scenarios.readinglog = function()
             settings.stats_style = nil
             settings.continue_style = nil
             plugin:saveSettings()
+            local function paintCovers(books)
+                local Blitbuffer = require("ffi/blitbuffer")
+                local Covers = require("librarycovers")
+                local Font = require("ui/font")
+                local TextWidget = require("ui/widget/textwidget")
+                local store = Covers.getStore()
+                store:scan()
+                local tones = { 0x22, 0x38, 0x4A, 0x2C, 0x55, 0x33 }
+                for i, book in ipairs(books or {}) do
+                    if i > 6 then break end
+                    local bb = Blitbuffer.new(320, 480, Blitbuffer.TYPE_BB8)
+                    local base = Blitbuffer.Color8(tones[((i - 1) % #tones) + 1])
+                    bb:fill(base)
+                    bb:paintRect(14, 14, 292, 452, Blitbuffer.COLOR_BLACK)
+                    bb:paintRect(26, 26, 268, 428, base)
+                    if i % 3 == 1 then
+                        bb:paintCircle(160, 168, 84, Blitbuffer.COLOR_BLACK, 12)
+                        bb:paintCircle(160, 168, 42, Blitbuffer.COLOR_BLACK)
+                    elseif i % 3 == 2 then
+                        bb:paintRect(52, 70, 40, 230, Blitbuffer.COLOR_BLACK)
+                        bb:paintRect(140, 70, 40, 230, Blitbuffer.COLOR_WHITE)
+                        bb:paintRect(228, 70, 40, 200, Blitbuffer.COLOR_BLACK)
+                    else
+                        bb:paintCircle(160, 168, 90, Blitbuffer.COLOR_BLACK, 8)
+                        bb:paintCircle(160, 168, 60, base)
+                        bb:paintCircle(160, 168, 26, Blitbuffer.COLOR_BLACK)
+                    end
+                    local words = {}
+                    for word in tostring(book.title or ""):gmatch("%S+") do
+                        words[#words + 1] = word
+                    end
+                    local mid = math.max(1, math.ceil(#words / 2))
+                    local line_a = table.concat(words, " ", 1, mid)
+                    local line_b = table.concat(words, " ", mid + 1)
+                    local title_a = TextWidget:new{
+                        text = line_a,
+                        face = Font:getFace("cfont", 22),
+                        bold = true,
+                        fgcolor = Blitbuffer.COLOR_WHITE,
+                        max_width = 260,
+                    }
+                    title_a:paintTo(bb, 30, 320)
+                    title_a:free()
+                    if line_b ~= "" then
+                        local title_b = TextWidget:new{
+                            text = line_b,
+                            face = Font:getFace("cfont", 22),
+                            bold = true,
+                            fgcolor = Blitbuffer.COLOR_WHITE,
+                            max_width = 260,
+                        }
+                        title_b:paintTo(bb, 30, 352)
+                        title_b:free()
+                    end
+                    local author = book.authors and book.authors[1]
+                    if author and author ~= "" then
+                        local line = TextWidget:new{
+                            text = author,
+                            face = Font:getFace("cfont", 18),
+                            fgcolor = Blitbuffer.COLOR_GRAY_9 or Blitbuffer.COLOR_WHITE,
+                            max_width = 260,
+                        }
+                        line:paintTo(bb, 30, 400)
+                        line:free()
+                    end
+                    local dest = store:path(Covers.key(book) .. ".jpg")
+                    local wrote = bb:writeToFile(dest, "jpg", 85)
+                    bb:free()
+                    P("cover", tostring(book.title), wrote and "ok" or "fail")
+                end
+                store.scanned = false
+            end
+            paintCovers(plugin:continueBooks(6))
             P("stats db", path, "title", title)
             plugin:onShowReadingLog()
         end)
@@ -1923,6 +1996,12 @@ scenarios.readinglog = function()
         q(0.5, function()
             local stack = UIManager._window_stack or {}
             local top = stack[#stack] and stack[#stack].widget
+            lib().settings.continue_style = "card"
+            lib().settings.stats_style = nil
+            lib():saveSettings()
+            if top and top.reload then top:reload() end
+            shot("mockup-card-day")
+            lib().settings.continue_style = nil
             lib().settings.stats_style = "minimal"
             lib():saveSettings()
             if top and top.reload then top:reload() end
