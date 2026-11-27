@@ -131,8 +131,10 @@ describe("search clear button (issue #6)", function()
         eq(v.search_input:getText(), "")
         eq(has_clear(last_group), true)
         eq(v._search_clear.paintTo ~= v._search_clear._library_paint, true, "it does not paint")
-        -- slot reserved: 770 - 2*1 - 2*10 - 22 - 22 - 2*5
-        eq(v.search_input.width, 694)
+        -- slot reserved: field 709 (800 - 30 margin - 56 Log - 5 gap)
+        -- minus borders, padding, magnifier, clear and the two gaps:
+        -- 709 - 2*1 - 2*10 - 22 - 22 - 2*5
+        eq(v.search_input.width, 633)
     end)
 
     it("shows the clear button with a query", function()
@@ -141,7 +143,7 @@ describe("search clear button (issue #6)", function()
         eq(v._search_clear_visible, true)
         eq(has_clear(last_group), true)
         eq(v._search_clear.paintTo, v._search_clear._library_paint)
-        eq(v.search_input.width, 694)
+        eq(v.search_input.width, 633)
     end)
 
     it("appears on the first character and disappears on clear without a new text box", function()

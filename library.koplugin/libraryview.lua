@@ -381,7 +381,12 @@ function LibraryView:buildSearchRow(text)
     local gap = Size.padding.large
     local status_w = self:measureStatusSlot()
     self._status_slot_w = status_w
+    -- "Log" sits in front of the search field. Its width is reserved so the
+    -- field does not jump, and it stays up whether or not statistics exist.
+    local log_w = self:readingLogButtonWidth()
+    self._log_button_w = log_w
     local field_w = self.width - 2 * margin - status_w - (status_w > 0 and gap or 0)
+        - log_w - Size.padding.default
     if field_w < Screen:scaleBySize(140) then field_w = Screen:scaleBySize(140) end
     -- What this row will show: what was passed, what the old box held, or
     -- nothing yet. The clear button is always in the row (issue #6). Showing
@@ -792,9 +797,59 @@ function LibraryView:updateStatusText()
     return true
 end
 
+--- Width of the header's Log control. A fixed fallback when the face
+-- cannot be measured (the spec stubs).
+function LibraryView:readingLogButtonWidth()
+    local sample = TextWidget:new{
+        text = _("Log"),
+        face = Font:getFace("cfont", 16),
+        bold = true,
+    }
+    local sz = sample.getSize and sample:getSize()
+    local w = sz and tonumber(sz.w)
+    if sample.free then sample:free() end
+    local pad = (Size.padding and Size.padding.default or 0) * 2
+    if not w or w < 1 then
+        return Screen:scaleBySize(56)
+    end
+    return w + pad
+end
+
+--- One tap back to the Reading log, from the book grid.
+function LibraryView:onOpenReadingLog()
+    local plugin = self.plugin
+    if not (plugin and plugin.onShowReadingLog) then return false end
+    local function go() return plugin:onShowReadingLog() end
+    if UIManager and UIManager.nextTick then
+        UIManager:nextTick(go)
+        return true
+    end
+    return go()
+end
+
+function LibraryView:readingLogHeaderButton()
+    local label = TextWidget:new{
+        text = _("Log"),
+        face = Font:getFace("cfont", 16),
+        bold = true,
+    }
+    return TapArea:new{
+        min_w = self._log_button_w or self:readingLogButtonWidth(),
+        min_h = Tiles.minTouch(),
+        align = "center",
+        callback = function() self:onOpenReadingLog() end,
+        label,
+    }
+end
+
 function LibraryView:assembleHeader()
     local margin = self._header_margin or (Size.margin.default + Size.padding.default)
-    local row = { align = "center", self.search_field }
+    local row = {
+        align = "center",
+        self:readingLogHeaderButton(),
+        HorizontalSpan:new{ width = Size.padding.default },
+        self.search_field,
+    }
     local status = self:buildStatusWidget()
     if status then
         row[#row + 1] = HorizontalSpan:new{ width = Size.padding.large }

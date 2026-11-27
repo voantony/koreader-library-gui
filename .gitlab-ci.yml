@@ -10,7 +10,7 @@ variables:
 default:
   interruptible: true
   before_script:
-    - apk add --no-cache luajit
+    - apk add --no-cache luajit sqlite
 
 workflow:
   rules:
