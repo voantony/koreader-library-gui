@@ -23,7 +23,7 @@ It prints one dot per test and a summary such as `272 passed, 0 failed`. KOReade
 
 Each spec file is listed in `spec/run.lua`. If you add a new one, add it to that list.
 
-Merge requests, and pushes to `main`, run the same command in GitLab CI (`.gitlab-ci.yml`), plus a syntax check of every `.lua` file with `luajit -bl`. The job uses a small Alpine image and installs LuaJIT. It does not start the emulator. A red pipeline means the merge request is not ready.
+Pushes to `main` and merge requests on the GitLab mirror run the same command in GitLab CI (`.gitlab-ci.yml`), plus a syntax check of every `.lua` file with `luajit -bl`. The job uses a small Alpine image and installs LuaJIT. It does not start the emulator. There are no GitHub Actions yet, so run the tests yourself before opening a pull request.
 
 ## Testing in the KOReader emulator
 
@@ -68,16 +68,16 @@ Library GUI is MIT licensed. Code under the GPL or AGPL can't be copied into it,
 - **ZenOS** (GPL-3.0),
 - any other GPL or AGPL plugin.
 
-Using KOReader's APIs (requiring its modules and widgets) is fine; that's how every plugin works. Looking at how another project solves something and writing your own version from the idea is fine too. Copying or closely translating their code is not. If you're unsure, ask in the issue or the merge request.
+Using KOReader's APIs (requiring its modules and widgets) is fine; that's how every plugin works. Looking at how another project solves something and writing your own version from the idea is fine too. Copying or closely translating their code is not. If you're unsure, ask in the issue or the pull request.
 
-## Fork and merge requests
+## Fork and pull requests
 
-The project lives on GitLab. Issues and merge requests use GitLab's `#` numbers (`#1`, `!4`).
+The project lives on GitHub at [voantony/koreader-library-gui](https://github.com/voantony/koreader-library-gui). Open issues and pull requests there. [GitLab](https://gitlab.com/antonyvo/koreader-library-gui) is a mirror that runs CI and hosts a copy of each release. Older issues and merge requests on GitLab keep their GitLab numbers (`#1`, `!4`).
 
 1. Fork the repository and create a branch from `main`. One branch, one change.
 2. Commit in the [conventional](https://www.conventionalcommits.org/) form: `feat`, `fix`, `test`, `docs`, `refactor`, or `chore`, and name the issue when there is one (`feat: remember a widget's page (#1)`).
 3. Add or update specs for any behaviour you change, and make sure `luajit spec/run.lua` passes with 0 failures.
-4. Open a merge request into `main`. Say what changed and why. For anything on screen, attach emulator screenshots. `Closes #N` in the description closes that issue when the merge request is merged.
+4. Open a pull request into `main` on GitHub. Say what changed and why. For anything on screen, attach emulator screenshots. `Closes #N` in the description closes that issue when the pull request is merged.
 5. Only the files in `library.koplugin/` go on the device. Keep runtime code in that folder, and if you add a file there, add it to `FILES` in the `Makefile`.
 6. Don't commit books, `.sdr` folders, KOReader settings or anything from your own device. `.gitignore` blocks the usual ones.
 
@@ -111,7 +111,7 @@ make zip VERSION=0.7.0
 SHA256: <hex of the zip>
 ```
 
-Paste that into the GitLab release description. v0.7.1's form, `` SHA256 `<hex>` ``, is still accepted.
+Paste that into the release description on both GitHub and GitLab. The in-plugin updater reads it from the GitLab release. v0.7.1's form, `` SHA256 `<hex>` ``, is still accepted.
 
 ### Minimum KOReader version
 
