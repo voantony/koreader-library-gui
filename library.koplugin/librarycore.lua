@@ -2199,7 +2199,7 @@ Core.CACHE_VERSION = 3
 -- `opened`, `doc_status` and `time_left` ride along so a tile never has to
 -- open a sidecar or the statistics database again.
 Core.STATE_FIELDS = { "sc_mtime", "status", "percent", "pages", "m_start", "m_chap",
-    "opened", "doc_status", "time_left", "open_path" }
+    "opened", "doc_status", "time_left", "open_path", "finished_at" }
 
 function Core.copyState(to, from)
     for _, k in ipairs(Core.STATE_FIELDS) do to[k] = from[k] end
@@ -2246,7 +2246,7 @@ local CACHED_FIELDS = {
     "size", "modification", "title", "authors", "series", "series_index",
     "keywords", "src", "cal", "uuid", "isbn", "year",
     "sc_mtime", "status", "percent", "pages", "m_start", "m_chap",
-    "opened", "doc_status", "time_left", "open_path",
+    "opened", "doc_status", "time_left", "open_path", "finished_at",
 }
 
 function Core.toCacheEntries(books)

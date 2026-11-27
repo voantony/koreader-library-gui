@@ -1814,6 +1814,34 @@ scenarios.readinglog = function()
     whenLibrary(function()
         q(0.4, function()
             dismissNotices()
+            local plugin = lib()
+            local continue = plugin:continueBooks(1)
+            local title = (continue[1] and continue[1].title) or "Fixture"
+            local marked = 0
+            local books = plugin:getBooks() or {}
+            for _, book in ipairs(books) do
+                if marked >= 6 then break end
+                if book.status == "complete" and type(book.path) == "string" then
+                    local dir, name = book.path:match("^(.*)/([^/]+)$")
+                    local base, ext
+                    if name then base, ext = name:match("^(.*)(%.[^%.]+)$") end
+                    if dir and base and ext then
+                    local meta = dir .. "/" .. base .. ".sdr/metadata" .. ext .. ".lua"
+                    local handle = io.open(meta, "r")
+                    if handle then
+                        local text = handle:read("*a") or ""
+                        handle:close()
+                        if text:find('["status"] = "complete"', 1, true) and not text:find("modified", 1, true) then
+                            text = text:gsub('%["status"%]%s*=%s*"complete"',
+                                '["status"] = "complete", ["modified"] = ' .. os.time(), 1)
+                            local out = io.open(meta, "w")
+                            if out then out:write(text); out:close(); marked = marked + 1 end
+                        end
+                    end
+                    end
+                end
+            end
+            P("finished sidecars", marked)
             local DataStorage = require("datastorage")
             local SQ3 = require("lua-ljsqlite3/init")
             local path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
@@ -1833,23 +1861,42 @@ scenarios.readinglog = function()
                 local t = os.date("*t")
                 return os.time{ year = t.year, month = t.month, day = t.day - days_ago, hour = hour, min = 0, sec = 0 }
             end
+            local safe = title:gsub("'", "''")
             conn:exec("DELETE FROM page_stat_data; DELETE FROM book;")
+            conn:exec(string.format(
+                "INSERT INTO book (id, title, authors, pages, total_read_time, total_read_pages) VALUES (1, '%s', 'Reader', 320, 20000, 40);",
+                safe))
             local function add(page, days_ago, hour, duration)
                 conn:exec(string.format(
                     "INSERT INTO page_stat_data (id_book, page, start_time, duration, total_pages) VALUES (1, %d, %d, %d, 320);",
                     page, at(days_ago, hour), duration))
             end
-            add(12, 0, 9, 600)
-            add(18, 0, 10, 900)
-            add(40, 1, 20, 1200)
-            add(8, 2, 21, 400)
-            add(3, 3, 8, 300)
-            conn:exec("INSERT INTO book (id, title, authors, total_read_time, total_read_pages) VALUES (1, 'Fixture', 'Reader', 3400, 20);")
+            -- Today is about 18 minutes, so a 30-minute goal reads 18 / 30 min.
+            add(1, 0, 9, 600)
+            add(2, 0, 10, 480)
+            for ago = 1, 11 do
+                add(ago + 2, ago, 20, 900)
+            end
+            -- Extra distinct pages just outside this week, so the finish
+            -- forecast has a real pace without changing today's page count.
+            for page = 20, 240 do
+                add(page, 8 + (page % 6), 12, 20)
+            end
             conn:close()
-            P("stats db", path)
-            lib():onShowReadingLog()
+            local settings = plugin.settings
+            settings.daily_goal_on = true
+            settings.daily_goal_unit = "minutes"
+            settings.daily_goal = 30
+            settings.yearly_goal_on = true
+            settings.yearly_goal = 24
+            settings.reading_log_best = 41
+            settings.stats_style = nil
+            settings.continue_style = nil
+            plugin:saveSettings()
+            P("stats db", path, "title", title)
+            plugin:onShowReadingLog()
         end)
-        q(0.8, function()
+        q(2.4, function()
             local stack = UIManager._window_stack or {}
             local top = stack[#stack] and stack[#stack].widget
             local name = top and top.name or "?"
@@ -1860,19 +1907,64 @@ scenarios.readinglog = function()
             else
                 P("PASS reading log")
             end
-            shot("reading-log")
+            shot("mockup-standard-day")
             local screen = Device.screen
             if not screen.night_mode and screen.toggleNightMode then
                 screen:toggleNightMode()
             end
             if top and top.reload then top:reload() end
             UIManager:setDirty(top, "full")
-            P("night", tostring(screen.night_mode))
-            shot("reading-log-night")
+            shot("mockup-standard-night")
             if screen.night_mode and screen.toggleNightMode then
                 screen:toggleNightMode()
             end
-            if top and top.onOpenLibrary then top:onOpenLibrary() end
+            if top and top.reload then top:reload() end
+        end)
+        q(0.5, function()
+            local stack = UIManager._window_stack or {}
+            local top = stack[#stack] and stack[#stack].widget
+            lib().settings.stats_style = "minimal"
+            lib():saveSettings()
+            if top and top.reload then top:reload() end
+            shot("mockup-minimal-day")
+            lib().settings.stats_style = "detailed"
+            lib():saveSettings()
+            if top then top._tab = "today" end
+            if top and top.reload then top:reload() end
+            shot("mockup-detailed-day")
+            if top then top._tab = "month" end
+            if top and top.reload then top:reload() end
+            shot("mockup-detailed-month")
+            if top then top._tab = "year" end
+            if top and top.reload then top:reload() end
+            shot("mockup-detailed-year")
+            lib():setStatsStyle("standard")
+            lib():showStatsStyleDialog(V())
+        end)
+        q(0.4, function()
+            local standard = findAnywhere("Standard")
+            local minimal = findAnywhere("Minimal")
+            local detailed = findAnywhere("Detailed")
+            P("stats style", tostring(standard), tostring(minimal), tostring(detailed))
+            if not (standard and minimal and detailed) then
+                state.ok = false
+                P("FAIL stats style choices missing")
+            else
+                P("PASS stats style")
+            end
+            shot("mockup-stats-style")
+            local stack = UIManager._window_stack or {}
+            local dialog = stack[#stack] and stack[#stack].widget
+            if dialog and dialog.name ~= "library_reading_log" then
+                UIManager:close(dialog)
+            end
+            for i = #stack, 1, -1 do
+                local w = stack[i].widget
+                if w and w.name == "library_reading_log" and w.onOpenLibrary then
+                    w:onOpenLibrary()
+                    break
+                end
+            end
         end)
         q(0.6, function()
             local view = V()
