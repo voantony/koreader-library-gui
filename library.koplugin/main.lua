@@ -1207,6 +1207,22 @@ function Library:onReadingLogClosed(log)
     if shared.log == log then shared.log = nil end
 end
 
+function Library:noteBestStreak(summary)
+    if type(summary) ~= "table" then return end
+    local Stats = require("librarystats")
+    local best = Stats.rememberBest(self.settings.reading_log_best, summary.streak, summary.best)
+    summary.saved_best = best
+    if best > (tonumber(self.settings.reading_log_best) or 0) then
+        self.settings.reading_log_best = best
+        self:saveSettings()
+    end
+end
+
+function Library:refreshOpenLog()
+    local log = shared.log
+    if log and not log._closed and log.reload then log:reload() end
+end
+
 --- Books in progress, for the Reading log's Continue reading row.
 function Library:continueBooks(n)
     local ok, books = pcall(function() return self:getBooks() end)
@@ -2498,6 +2514,42 @@ function Library:showLibraryMenu(view)
     })
     table.insert(buttons, {
         {
+            text = self:statsStyleMenuText(),
+            callback = function()
+                close()
+                self:showStatsStyleDialog(view)
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
+            text = self:dailyGoalMenuText(),
+            callback = function()
+                close()
+                self:showDailyGoalDialog(view)
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
+            text = self:continueStyleMenuText(),
+            callback = function()
+                close()
+                self:showContinueStyleDialog(view)
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
+            text = self:yearlyGoalMenuText(),
+            callback = function()
+                close()
+                self:showYearlyGoalDialog(view)
+            end,
+        },
+    })
+    table.insert(buttons, {
+        {
             text = self:afterCloseMenuText(),
             callback = function()
                 close()
@@ -3223,6 +3275,307 @@ function Library:readingLogProviderMenu()
     }
 end
 
+function Library:statsStyleMenuText()
+    local Stats = require("librarystats")
+    return T(_("Stats style: %1"), Stats.statsStyleLabel(Stats.statsStyle(self.settings)))
+end
+
+function Library:setStatsStyle(id)
+    if id == "minimal" or id == "detailed" then
+        self.settings.stats_style = id
+    else
+        self.settings.stats_style = nil
+    end
+    self:saveSettings()
+    self:refreshOpenLog()
+end
+
+function Library:showStatsStyleDialog(view)
+    local Stats = require("librarystats")
+    local dialog
+    local function pick(id)
+        self:closeOverLibrary(dialog, view)
+        self:setStatsStyle(id)
+    end
+    local current = Stats.statsStyle(self.settings)
+    local function row(id, label)
+        return {{
+            text = (current == id and "\u{2713} " or "") .. _(label),
+            callback = function() pick(id) end,
+        }}
+    end
+    dialog = ButtonDialog:new{
+        title = _("Stats style"),
+        title_align = "center",
+        buttons = {
+            row("standard", "Standard"),
+            row("minimal", "Minimal"),
+            row("detailed", "Detailed"),
+        },
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
+    UIManager:show(dialog)
+    return dialog
+end
+
+function Library:statsStyleMenu()
+    local Stats = require("librarystats")
+    return {
+        text_func = function() return self:statsStyleMenuText() end,
+        help_text = _("Standard is the default: today, this week, and the streak. Minimal is one line. Detailed adds the activity row, the month, the year, and a Today, Month, and Year switch."),
+        sub_item_table = {
+            {
+                text = _("Standard"),
+                radio = true,
+                checked_func = function() return Stats.statsStyle(self.settings) == "standard" end,
+                callback = function() self:setStatsStyle("standard") end,
+            },
+            {
+                text = _("Minimal"),
+                radio = true,
+                checked_func = function() return Stats.statsStyle(self.settings) == "minimal" end,
+                callback = function() self:setStatsStyle("minimal") end,
+            },
+            {
+                text = _("Detailed"),
+                radio = true,
+                checked_func = function() return Stats.statsStyle(self.settings) == "detailed" end,
+                callback = function() self:setStatsStyle("detailed") end,
+            },
+        },
+    }
+end
+
+function Library:dailyGoalMenuText()
+    local Stats = require("librarystats")
+    local goal = Stats.goalOf(self.settings)
+    if not goal then return _("Daily goal: Off") end
+    local unit = goal.unit == "pages" and (goal.amount == 1 and _("page") or _("pages")) or _("min")
+    return T(_("Daily goal: %1 %2"), goal.amount, unit)
+end
+
+function Library:setDailyGoal(mode)
+    if mode == "minutes" or mode == "pages" then
+        self.settings.daily_goal_on = true
+        self.settings.daily_goal_unit = mode
+        local amount = tonumber(self.settings.daily_goal)
+        if not amount or amount < 1 then
+            self.settings.daily_goal = mode == "pages" and 20 or 30
+        end
+    else
+        self.settings.daily_goal_on = nil
+    end
+    self:saveSettings()
+    self:refreshOpenLog()
+end
+
+function Library:showDailyGoalDialog(view)
+    local dialog
+    local function pick(mode)
+        self:closeOverLibrary(dialog, view)
+        self:setDailyGoal(mode)
+    end
+    local Stats = require("librarystats")
+    local goal = Stats.goalOf(self.settings)
+    local function mark(mode)
+        if mode == "off" then return not goal end
+        return goal and goal.unit == mode
+    end
+    dialog = ButtonDialog:new{
+        title = _("Daily goal"),
+        title_align = "center",
+        buttons = {
+            {{ text = (mark("off") and "\u{2713} " or "") .. _("Off"), callback = function() pick("off") end }},
+            {{ text = (mark("minutes") and "\u{2713} " or "") .. _("30 minutes"), callback = function()
+                self.settings.daily_goal = 30
+                pick("minutes")
+            end }},
+            {{ text = (mark("pages") and "\u{2713} " or "") .. _("20 pages"), callback = function()
+                self.settings.daily_goal = 20
+                pick("pages")
+            end }},
+        },
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
+    UIManager:show(dialog)
+    return dialog
+end
+
+function Library:dailyGoalMenu()
+    local Stats = require("librarystats")
+    return {
+        text_func = function() return self:dailyGoalMenuText() end,
+        help_text = _("Off until you choose it. A thin rail under Today shows minutes or pages against the goal."),
+        sub_item_table = {
+            {
+                text = _("Off"),
+                radio = true,
+                checked_func = function() return Stats.goalOf(self.settings) == nil end,
+                callback = function() self:setDailyGoal("off") end,
+            },
+            {
+                text = _("30 minutes"),
+                radio = true,
+                checked_func = function()
+                    local goal = Stats.goalOf(self.settings)
+                    return goal and goal.unit == "minutes"
+                end,
+                callback = function()
+                    self.settings.daily_goal = 30
+                    self:setDailyGoal("minutes")
+                end,
+            },
+            {
+                text = _("20 pages"),
+                radio = true,
+                checked_func = function()
+                    local goal = Stats.goalOf(self.settings)
+                    return goal and goal.unit == "pages"
+                end,
+                callback = function()
+                    self.settings.daily_goal = 20
+                    self:setDailyGoal("pages")
+                end,
+            },
+        },
+    }
+end
+
+function Library:continueStyleMenuText()
+    local Stats = require("librarystats")
+    local style = Stats.continueStyle(self.settings)
+    return T(_("Continue reading: %1"), style == "card" and _("Card") or _("Cover row"))
+end
+
+function Library:setContinueStyle(id)
+    if id == "card" then self.settings.continue_style = "card"
+    else self.settings.continue_style = nil end
+    self:saveSettings()
+    self:refreshOpenLog()
+end
+
+function Library:showContinueStyleDialog(view)
+    local Stats = require("librarystats")
+    local dialog
+    local function pick(id)
+        self:closeOverLibrary(dialog, view)
+        self:setContinueStyle(id)
+    end
+    local card = Stats.continueStyle(self.settings) == "card"
+    dialog = ButtonDialog:new{
+        title = _("Continue reading"),
+        title_align = "center",
+        buttons = {
+            {{ text = (not card and "\u{2713} " or "") .. _("Cover row"), callback = function() pick("row") end }},
+            {{ text = (card and "\u{2713} " or "") .. _("Card"), callback = function() pick("card") end }},
+        },
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
+    UIManager:show(dialog)
+    return dialog
+end
+
+function Library:continueStyleMenu()
+    local Stats = require("librarystats")
+    return {
+        text_func = function() return self:continueStyleMenuText() end,
+        help_text = _("Cover row is the default: covers, a thin rail, and the percent. Card is one book at a time."),
+        sub_item_table = {
+            {
+                text = _("Cover row"),
+                radio = true,
+                checked_func = function() return Stats.continueStyle(self.settings) == "row" end,
+                callback = function() self:setContinueStyle("row") end,
+            },
+            {
+                text = _("Card"),
+                radio = true,
+                checked_func = function() return Stats.continueStyle(self.settings) == "card" end,
+                callback = function() self:setContinueStyle("card") end,
+            },
+        },
+    }
+end
+
+function Library:yearlyGoalMenuText()
+    local Stats = require("librarystats")
+    local goal = Stats.yearGoalOf(self.settings)
+    if not goal then return _("Yearly book goal: Off") end
+    return T(_("Yearly book goal: %1"), goal.amount)
+end
+
+function Library:setYearlyGoal(amount)
+    amount = tonumber(amount)
+    if amount and amount >= 1 then
+        self.settings.yearly_goal_on = true
+        self.settings.yearly_goal = math.floor(amount)
+    else
+        self.settings.yearly_goal_on = nil
+    end
+    self:saveSettings()
+    self:refreshOpenLog()
+end
+
+function Library:showYearlyGoalDialog(view)
+    local Stats = require("librarystats")
+    local dialog
+    local function pick(amount)
+        self:closeOverLibrary(dialog, view)
+        self:setYearlyGoal(amount)
+    end
+    local goal = Stats.yearGoalOf(self.settings)
+    local function mark(amount)
+        if not amount then return not goal end
+        return goal and goal.amount == amount
+    end
+    dialog = ButtonDialog:new{
+        title = _("Yearly book goal"),
+        title_align = "center",
+        buttons = {
+            {{ text = (mark(nil) and "\u{2713} " or "") .. _("Off"), callback = function() pick(nil) end }},
+            {{ text = (mark(12) and "\u{2713} " or "") .. _("12 books"), callback = function() pick(12) end }},
+            {{ text = (mark(24) and "\u{2713} " or "") .. _("24 books"), callback = function() pick(24) end }},
+        },
+        tap_close_callback = function() self:flashLibraryOverlay(view) end,
+    }
+    UIManager:show(dialog)
+    return dialog
+end
+
+function Library:yearlyGoalMenu()
+    local Stats = require("librarystats")
+    return {
+        text_func = function() return self:yearlyGoalMenuText() end,
+        help_text = _("Off until you choose it. Finished books this year are those whose sidecar says complete and whose summary was written this year. That time is when the sidecar was saved, not a separate finish date, and a finished book with no time is not counted."),
+        sub_item_table = {
+            {
+                text = _("Off"),
+                radio = true,
+                checked_func = function() return Stats.yearGoalOf(self.settings) == nil end,
+                callback = function() self:setYearlyGoal(nil) end,
+            },
+            {
+                text = _("12 books"),
+                radio = true,
+                checked_func = function()
+                    local goal = Stats.yearGoalOf(self.settings)
+                    return goal and goal.amount == 12
+                end,
+                callback = function() self:setYearlyGoal(12) end,
+            },
+            {
+                text = _("24 books"),
+                radio = true,
+                checked_func = function()
+                    local goal = Stats.yearGoalOf(self.settings)
+                    return goal and goal.amount == 24
+                end,
+                callback = function() self:setYearlyGoal(24) end,
+            },
+        },
+    }
+end
+
 function Library:afterCloseMode()
     return require("libraryreturn").afterClose(
         self.settings and self.settings.after_close,
@@ -3396,6 +3749,10 @@ function Library:addToMainMenu(menu_items)
             },
             self:homePageMenu(),
             self:readingLogProviderMenu(),
+            self:statsStyleMenu(),
+            self:dailyGoalMenu(),
+            self:continueStyleMenu(),
+            self:yearlyGoalMenu(),
             self:afterCloseMenu(),
             self:onStartupMenu(),
             {
@@ -4445,6 +4802,11 @@ function Library:onCloseDocument()
     -- Any close, including one that did not start in the Library. The file
     -- browser that comes next reads this once.
     shared.closed_book = true
+    require("librarystats").invalidate()
+end
+
+function Library:onResume()
+    require("librarystats").invalidate()
 end
 
 --- A custom cover was set or removed in Book information: drop our thumbnail.

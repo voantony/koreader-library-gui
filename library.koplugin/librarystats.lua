@@ -156,6 +156,10 @@ function Stats.missing(now, week_start)
         today = { pages = 0, seconds = 0 },
         week = blankWeek(now, week_start),
         streak = 0,
+        best = 0,
+        previous_seconds = 0,
+        month = Stats.monthGrid({}, now, week_start),
+        year = Stats.yearTotals({}, now),
     }
 end
 
@@ -204,6 +208,10 @@ function Stats.summarize(by_day, read_days, now, week_start)
             average_seconds = math.floor(seconds / elapsed),
         },
         streak = Stats.currentStreak(read_days, today_key),
+        previous_seconds = Stats.previousWeekSeconds(by_day, now, week_start),
+        month = Stats.monthGrid(by_day, now, week_start),
+        year = Stats.yearTotals(by_day, now),
+        best = Stats.longestRun(read_days),
     }
 end
 
@@ -248,6 +256,356 @@ function Stats.pagesLabel(n)
     return string.format("%d pages", n)
 end
 
+function Stats.streakCaption(streak, best)
+    streak = math.floor(tonumber(streak) or 0)
+    best = math.floor(tonumber(best) or 0)
+    if best < streak then best = streak end
+    if streak <= 0 and best <= 0 then return "No streak yet" end
+    if streak <= 0 then return string.format("Best %d", best) end
+    if streak == 1 then return string.format("1-day streak · best %d", best) end
+    return string.format("%d-day streak · best %d", streak, best)
+end
+
+--- The saved record, raised when this series shows a longer run.
+function Stats.rememberBest(stored, streak, longest)
+    local best = math.floor(tonumber(stored) or 0)
+    if best < 0 then best = 0 end
+    streak = math.floor(tonumber(streak) or 0)
+    longest = math.floor(tonumber(longest) or 0)
+    if streak > best then best = streak end
+    if longest > best then best = longest end
+    return best
+end
+
+function Stats.longestRun(days)
+    local nums, seen = {}, {}
+    for _, text in ipairs(days or {}) do
+        local y, m, d = Stats.parseYmd(text)
+        if y and not seen[text] then
+            seen[text] = true
+            nums[#nums + 1] = Stats.dayNumber(y, m, d)
+        end
+    end
+    table.sort(nums)
+    local best, run = 0, 0
+    for i, n in ipairs(nums) do
+        if i > 1 and n == nums[i - 1] + 1 then run = run + 1 else run = 1 end
+        if run > best then best = run end
+    end
+    return best
+end
+
+function Stats.previousWeekSeconds(by_day, now, week_start)
+    by_day = type(by_day) == "table" and by_day or {}
+    local week = Stats.weekDays(now, week_start)
+    local y, m, d = Stats.parseYmd(week[1] and week[1].day)
+    if not y then return 0 end
+    local total = 0
+    for i = 1, 7 do
+        local key = os.date("%Y-%m-%d", os.time{ year = y, month = m, day = d - i, hour = 12 })
+        local row = by_day[key]
+        if row then total = total + math.max(0, math.floor(tonumber(row.seconds) or 0)) end
+    end
+    return total
+end
+
+--- "2 h 10 m" / "25 min" / "2 h". Used in the quiet week caption.
+function Stats.weekHours(seconds)
+    local mins = Stats.minutes(seconds)
+    if mins < 60 then return string.format("%d min", mins) end
+    local hours = math.floor(mins / 60)
+    local rem = mins % 60
+    if rem == 0 then return string.format("%d h", hours) end
+    return string.format("%d h %d m", hours, rem)
+end
+
+function Stats.weekCompareLine(this_seconds, last_seconds)
+    local head = Stats.weekHours(this_seconds) .. " this week"
+    local delta = Stats.minutes(this_seconds) - Stats.minutes(last_seconds)
+    if delta > 0 then return head .. " · " .. delta .. " min more than last" end
+    if delta < 0 then return head .. " · " .. (-delta) .. " min less than last" end
+    return head .. " · the same as last"
+end
+
+--- Off unless daily_goal_on is true and the amount is a whole number of
+-- minutes or pages. A settings table from before this choice stays off.
+function Stats.yearGoalOf(settings, now)
+    if type(settings) ~= "table" or settings.yearly_goal_on ~= true then return nil end
+    local amount = tonumber(settings.yearly_goal)
+    if not amount or amount ~= math.floor(amount) or amount < 1 or amount > 500 then return nil end
+    return { year = tonumber(os.date("%Y", tonumber(now) or os.time())), amount = amount }
+end
+
+--- Finished books whose sidecar says complete and summary.modified falls in `year`.
+-- A complete book with no modified time is not counted: the year is unknown.
+function Stats.finishedThisYear(books, year)
+    year = tonumber(year)
+    if not year then return 0 end
+    local n = 0
+    for _, book in ipairs(books or {}) do
+        if type(book) == "table" and (book.status == "complete" or book.doc_status == "complete") then
+            local when = tonumber(book.finished_at)
+            if when and tonumber(os.date("%Y", when)) == year then n = n + 1 end
+        end
+    end
+    return n
+end
+
+function Stats.yearFraction(done, amount)
+    amount = tonumber(amount) or 0
+    done = tonumber(done) or 0
+    if amount < 1 or done < 0 then return 0 end
+    local frac = done / amount
+    if frac > 1 then return 1 end
+    return frac
+end
+
+function Stats.goalOf(settings)
+    if type(settings) ~= "table" or settings.daily_goal_on ~= true then return nil end
+    local unit = settings.daily_goal_unit
+    if unit ~= "minutes" and unit ~= "pages" then return nil end
+    local amount = tonumber(settings.daily_goal)
+    if not amount or amount ~= math.floor(amount) or amount < 1 or amount > 1440 then return nil end
+    return { unit = unit, amount = amount }
+end
+
+function Stats.goalProgress(today, goal)
+    today = today or {}
+    if not goal then return 0, 0 end
+    local have = goal.unit == "pages" and math.floor(tonumber(today.pages) or 0)
+        or Stats.minutes(today.seconds)
+    if have < 0 then have = 0 end
+    local frac = have / goal.amount
+    if frac < 0 then frac = 0 end
+    if frac > 1 then frac = 1 end
+    return have, frac
+end
+
+function Stats.goalLine(today, goal)
+    if not goal then return nil end
+    local have = Stats.goalProgress(today, goal)
+    local unit = goal.unit == "pages" and (goal.amount == 1 and "page" or "pages") or "min"
+    return string.format("%d / %d %s", have, goal.amount, unit)
+end
+
+function Stats.monthGrid(by_day, now, week_start)
+    now = tonumber(now) or os.time()
+    by_day = type(by_day) == "table" and by_day or {}
+    local t = os.date("*t", now)
+    local first = os.time{ year = t.year, month = t.month, day = 1, hour = 12 }
+    local fw = tonumber(os.date("%w", first)) + 1
+    week_start = Stats.weekStart(week_start)
+    local lead = (fw - week_start) % 7
+    local dim = os.date("*t", os.time{ year = t.year, month = t.month + 1, day = 0, hour = 12 }).day
+    local cells, read_n, seconds = {}, 0, 0
+    for _ = 1, lead do cells[#cells + 1] = { blank = true } end
+    for d = 1, dim do
+        local key = string.format("%04d-%02d-%02d", t.year, t.month, d)
+        local row = by_day[key]
+        local read = type(row) == "table" and ((tonumber(row.seconds) or 0) > 0 or (tonumber(row.pages) or 0) > 0)
+        if read then
+            read_n = read_n + 1
+            seconds = seconds + math.max(0, math.floor(tonumber(row.seconds) or 0))
+        end
+        cells[#cells + 1] = { day = d, read = read and true or false, today = d == t.day }
+    end
+    local letters = {}
+    for i = 0, 6 do
+        local w = ((week_start - 1 + i) % 7) + 1
+        letters[i + 1] = LETTER[w]
+    end
+    return {
+        name = os.date("%B", now),
+        letters = letters,
+        cells = cells,
+        read_days = read_n,
+        seconds = seconds,
+    }
+end
+
+function Stats.monthCaption(month)
+    month = month or {}
+    local days = math.floor(tonumber(month.read_days) or 0)
+    local day_word = days == 1 and "day" or "days"
+    return string.format("%s · %d %s · %s", month.name or "", days, day_word, Stats.weekHours(month.seconds))
+end
+
+--- Remaining pages at the pace of the last 14 days. Nil when the book has
+-- no page count, or fewer than 5 distinct pages in that window.
+function Stats.forecast(book, pace, now)
+    if type(book) ~= "table" or type(pace) ~= "table" then return nil end
+    local read = math.floor(tonumber(pace.pages) or 0)
+    if read < 5 then return nil end
+    local pages = tonumber(book.pages)
+    local pct = tonumber(book.percent) or 0
+    if pct > 1 then pct = 1 end
+    if pct < 0 then pct = 0 end
+    if not pages or pages < 2 then return nil end
+    local left = math.ceil(pages * (1 - pct) - 1e-9)
+    if left < 1 then return nil end
+    local per_day = read / 14
+    if per_day <= 0 then return nil end
+    local days = math.ceil(left / per_day)
+    if days > 366 then return nil end
+    now = tonumber(now) or os.time()
+    local t = os.date("*t", now)
+    local when = os.time{ year = t.year, month = t.month, day = t.day + days, hour = 12 }
+    local date = os.date("%a %d %b", when):gsub(" 0(%d)", " %1")
+    local title = type(book.title) == "string" and book.title or ""
+    if title == "" then return "done by " .. date end
+    return title .. " · done by " .. date
+end
+
+--- How many covers sit in the row. Five on the Colorsoft, four when the
+-- row would get cramped.
+function Stats.coverCount(width)
+    if (tonumber(width) or 0) < 900 then return 4 end
+    return 5
+end
+
+function Stats.invalidate()
+    Stats._cache = nil
+end
+
+--- One series per database stamp and calendar day. `load` runs only on a miss.
+function Stats.cached(path, stamp, day, load)
+    local key = tostring(path) .. "|" .. tostring(stamp) .. "|" .. tostring(day)
+    if Stats._cache and Stats._cache.key == key then return Stats._cache.value end
+    local value = load()
+    Stats._cache = { key = key, value = value }
+    return value
+end
+
+function Stats.sqlString(text)
+    return "'" .. tostring(text or ""):gsub("'", "''") .. "'"
+end
+
+function Stats.bookIdSQL(title)
+    return "SELECT id, pages FROM book WHERE title = " .. Stats.sqlString(title) .. " ORDER BY id LIMIT 1"
+end
+
+--- Distinct pages and their time for one book, since `since` (unix).
+function Stats.bookPaceSQL(id_book, since)
+    id_book = math.floor(tonumber(id_book) or 0)
+    since = math.floor(tonumber(since) or 0)
+    return string.format(
+        "SELECT COUNT(*), SUM(secs) FROM ("
+        .. "SELECT page, SUM(duration) AS secs FROM page_stat_data "
+        .. "WHERE id_book = %d AND start_time >= %d AND duration > 0 GROUP BY page)",
+        id_book, since)
+end
+
+--- Distinct reading days and total time for one book, from `since`.
+function Stats.bookLifeSQL(id_book, since)
+    id_book = math.floor(tonumber(id_book) or 0)
+    since = math.floor(tonumber(since) or 0)
+    return string.format(
+        "SELECT COUNT(*), SUM(secs) FROM ("
+        .. "SELECT strftime('%%Y-%%m-%%d', start_time, 'unixepoch', 'localtime') AS day, "
+        .. "SUM(duration) AS secs FROM page_stat_data "
+        .. "WHERE id_book = %d AND start_time >= %d AND duration > 0 GROUP BY day)",
+        id_book, since)
+end
+
+function Stats.bookDaysLine(days, seconds)
+    days = math.floor(tonumber(days) or 0)
+    if days < 1 and Stats.minutes(seconds) < 1 then return nil end
+    local head = days == 1 and "1 day of reading" or string.format("%d days of reading", days)
+    return head .. " · " .. Stats.weekHours(seconds) .. " read"
+end
+
+--- "row" until the reader picks "card".
+function Stats.continueStyle(settings)
+    if type(settings) == "table" and settings.continue_style == "card" then return "card" end
+    return "row"
+end
+
+function Stats.paceWindowStart(now)
+    now = tonumber(now) or os.time()
+    return now - 14 * 86400
+end
+
+--- Start of the one daily series: this calendar year, or 120 days, whichever
+-- reaches further back. One bounded query covers the week, the month, the
+-- streak, and the year line.
+function Stats.seriesStart(now)
+    now = tonumber(now) or os.time()
+    local t = os.date("*t", now)
+    local jan = os.time{ year = t.year, month = 1, day = 1, hour = 0 }
+    local back = now - 120 * 86400
+    if jan < back then return jan end
+    return back
+end
+
+--- "standard" until the reader picks "minimal" or "detailed".
+function Stats.statsStyle(settings)
+    local id = type(settings) == "table" and settings.stats_style
+    if id == "minimal" or id == "detailed" then return id end
+    return "standard"
+end
+
+function Stats.statsStyleLabel(id)
+    if id == "minimal" then return "Minimal" end
+    if id == "detailed" then return "Detailed" end
+    return "Standard"
+end
+
+--- filled = a past day with reading, partial = today already started,
+-- outline = nothing yet (including a future day and a today still at zero).
+function Stats.dayMark(day)
+    if type(day) ~= "table" or day.future then return "outline" end
+    local read = (tonumber(day.pages) or 0) > 0 or (tonumber(day.seconds) or 0) > 0
+    if day.today then return read and "partial" or "outline" end
+    if read then return "filled" end
+    return "outline"
+end
+
+function Stats.todayBrief(today)
+    today = today or {}
+    return Stats.weekHours(today.seconds) .. " · " .. Stats.pagesLabel(today.pages)
+end
+
+function Stats.averageLine(week)
+    week = week or {}
+    return Stats.weekHours(week.average_seconds) .. " · "
+        .. Stats.pagesLabel(week.average_pages) .. " a day on average"
+end
+
+function Stats.minimalLine(summary)
+    summary = summary or {}
+    local streak = math.floor(tonumber(summary.streak) or 0)
+    local tail = streak <= 0 and "no streak" or Stats.streakLabel(streak)
+    return "Today " .. Stats.weekHours((summary.today or {}).seconds)
+        .. " · This week " .. Stats.weekHours((summary.week or {}).seconds)
+        .. " · " .. tail
+end
+
+function Stats.yearTotals(by_day, now)
+    now = tonumber(now) or os.time()
+    local year = tonumber(os.date("%Y", now))
+    local pages, seconds, days = 0, 0, 0
+    for key, row in pairs(by_day or {}) do
+        if type(key) == "string" and type(row) == "table" and tonumber(key:sub(1, 4)) == year then
+            local p = math.max(0, math.floor(tonumber(row.pages) or 0))
+            local s = math.max(0, math.floor(tonumber(row.seconds) or 0))
+            if p > 0 or s > 0 then
+                days = days + 1
+                pages = pages + p
+                seconds = seconds + s
+            end
+        end
+    end
+    return { year = year, pages = pages, seconds = seconds, days = days }
+end
+
+function Stats.yearTotalsLine(year)
+    year = year or {}
+    local days = math.floor(tonumber(year.days) or 0)
+    local word = days == 1 and "day" or "days"
+    return string.format("%s · %d %s · %s · %s",
+        tostring(year.year or ""), days, word, Stats.pagesLabel(year.pages), Stats.weekHours(year.seconds))
+end
+
 function Stats.streakLabel(n)
     n = math.floor(tonumber(n) or 0)
     if n <= 0 then return "No streak yet" end
@@ -270,23 +628,23 @@ function Stats.weekAverageLine(week)
     return "avg " .. Stats.pagesLabel(week.average_pages) .. " · " .. Stats.durationLabel(week.average_seconds)
 end
 
-local TABLES = { page_stat_data = true, page_stat = true }
+local TABLES = { page_stat_data = true }
 
 function Stats.bookSQL()
     return "SELECT COUNT(*) FROM book"
 end
 
 --- Pages are distinct (book, page) pairs that day. Time is the sum of
--- the sittings, including a page opened more than once.
+-- the sittings. Only page_stat_data, and only rows at or after `since`.
 function Stats.dailySQL(table_name, since)
-    if not TABLES[table_name] then return nil end
+    if table_name ~= "page_stat_data" then return nil end
     since = math.floor(tonumber(since) or 0)
     return string.format(
         "SELECT day, SUM(secs), COUNT(*) FROM ("
         .. "SELECT id_book, page, strftime('%%Y-%%m-%%d', start_time, 'unixepoch', 'localtime') AS day, "
-        .. "SUM(duration) AS secs FROM %s WHERE start_time >= %d AND duration > 0 "
+        .. "SUM(duration) AS secs FROM page_stat_data WHERE start_time >= %d AND duration > 0 "
         .. "GROUP BY id_book, page, day) AS daily_pages GROUP BY day ORDER BY day",
-        table_name, since)
+        since)
 end
 
 --- lua-ljsqlite3 hands back one array per column. A test double may do
@@ -331,26 +689,19 @@ local function dayMap(result)
 end
 
 --- `exec(sql)` runs one statement. It may throw. Nil means no rows.
--- One query lists every reading day with its pages and seconds. The
--- streak is those days.
+-- One grouped query on page_stat_data, bounded by start_time. The streak,
+-- the week, and the month are read from that series.
 function Stats.read(exec, now, week_start)
     if type(exec) ~= "function" then return Stats.missing(now, week_start) end
     local book_ok = pcall(exec, Stats.bookSQL())
     if not book_ok then return Stats.missing(now, week_start) end
-    local function pull(table_name)
-        local daily_ok, daily = pcall(exec, Stats.dailySQL(table_name, 0))
-        if not daily_ok then return nil end
-        local map = dayMap(daily)
-        local list = {}
-        for day in pairs(map) do list[#list + 1] = day end
-        return map, list
-    end
-    local by_day, read_days = pull("page_stat_data")
-    if not by_day then
-        by_day, read_days = pull("page_stat")
-    end
-    if not by_day then return Stats.missing(now, week_start) end
-    return Stats.summarize(by_day, read_days, now, week_start)
+    local since = Stats.seriesStart(now)
+    local daily_ok, daily = pcall(exec, Stats.dailySQL("page_stat_data", since))
+    if not daily_ok then return Stats.missing(now, week_start) end
+    local map = dayMap(daily)
+    local list = {}
+    for day in pairs(map) do list[#list + 1] = day end
+    return Stats.summarize(map, list, now, week_start)
 end
 
 function Stats.openReadOnly(path)
@@ -460,8 +811,65 @@ function Stats.pageLayout(width)
         gap = narrow and 12 or 20,
         cover_w = cover,
         cover_h = math.floor(cover * 3 / 2),
-        chart_h = narrow and 88 or 120,
+        covers = Stats.coverCount(width),
+        chart_h = narrow and 88 or 112,
         today_size = narrow and 46 or 62,
+    }
+end
+
+--- Side margin of the reading log. The Library button uses the same
+-- distance at the bottom, so the button never sits on the screen edge.
+function Stats.readingMargin(width)
+    if (tonumber(width) or 0) < 900 then return 18 end
+    return 36
+end
+
+--- Cover geometry for the reading log. Every cover is a whole 2:3
+-- rectangle: height is always floor(width * 3 / 2). `scale` 1 fills the
+-- content width with `n` covers. A lower scale keeps that ratio and leaves
+-- the spare width as gaps. Nothing here crops.
+function Stats.fitCovers(inner, opts)
+    opts = opts or {}
+    inner = math.max(1, math.floor(tonumber(inner) or 1))
+    local card = opts.card and true or false
+    local n = math.floor(tonumber(opts.n) or 5)
+    if n < 4 then n = 4 end
+    if n > 6 then n = 6 end
+    local scale = tonumber(opts.scale) or 1
+    if scale < 0.45 then scale = 0.45 end
+    if scale > 1 then scale = 1 end
+    local row_gap = math.max(4, math.floor(tonumber(opts.row_gap) or 12))
+    local function aspect(w)
+        w = math.max(1, math.floor(w))
+        return w, math.floor(w * 3 / 2)
+    end
+    local feat_w, feat_h = aspect(math.floor(inner * (card and 0.28 or 0.20) * scale))
+    local slot, row_h
+    if card then
+        slot, row_h = feat_w, feat_h
+        n = 0
+        row_gap = 0
+    else
+        local full = math.floor((inner - row_gap * (n - 1)) / n)
+        if full < 1 then
+            row_gap = 4
+            full = math.floor((inner - row_gap * (n - 1)) / n)
+        end
+        slot, row_h = aspect(math.max(1, math.floor(full * scale)))
+        local used = n * slot + (n - 1) * row_gap
+        if used > inner and scale >= 0.999 then
+            row_gap = 4
+            slot, row_h = aspect(math.floor((inner - row_gap * (n - 1)) / n))
+        end
+    end
+    return {
+        n = n,
+        feat_w = feat_w,
+        feat_h = feat_h,
+        slot = slot,
+        row_h = row_h,
+        row_gap = row_gap,
+        cropped = false,
     }
 end
 

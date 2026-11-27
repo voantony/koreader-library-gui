@@ -122,23 +122,15 @@ describe("Reading statistics database", function()
         eq(summary.note, nil)
     end)
 
-    it("falls back to the page_stat view when page_stat_data is absent", function()
-        local saw_view = false
+    it("treats a missing page_stat_data table as no statistics", function()
         local function exec(sql)
             if sql:find("page_stat_data", 1, true) then error("no such table: page_stat_data") end
             if sql:find("FROM book", 1, true) then return column({ { 1 } }) end
-            if sql:find("page_stat", 1, true) then
-                saw_view = true
-                return column({ { "2026-11-27", 120, 3 } })
-            end
             error("unexpected " .. sql)
         end
         local summary = Stats.read(exec, NOW, 2)
-        eq(saw_view, true)
-        eq(summary.missing, false)
-        eq(summary.today.pages, 3)
-        eq(summary.today.seconds, 120)
-        eq(summary.streak, 1)
+        eq(summary.missing, true)
+        eq(summary.note, "Turn on Reading statistics")
     end)
 
     it("queries a fixture database for pages, time and the streak", function()
@@ -217,9 +209,78 @@ CREATE TABLE page_stat_data (
         eq(summary.week.seconds, 1020)
         eq(summary.streak, 2)
         eq(Stats.dailySQL("page_stat_data", 0):find("page_stat_data", 1, true) ~= nil, true)
-        eq(Stats.dailySQL("page_stat", 0):find("page_stat", 1, true) ~= nil, true)
+        eq(Stats.dailySQL("page_stat", 0), nil)
         eq(Stats.bookSQL():find("book", 1, true) ~= nil, true)
         eq(Stats.dbPath("/mnt/us/koreader/settings"), "/mnt/us/koreader/settings/statistics.sqlite3")
+    end)
+end)
+
+describe("Reading log styles", function()
+    it("keeps Standard, the cover row, and both goals off until chosen", function()
+        eq(Stats.statsStyle(nil), "standard")
+        eq(Stats.statsStyle({}), "standard")
+        eq(Stats.statsStyle({ stats_style = "nope" }), "standard")
+        eq(Stats.statsStyle({ stats_style = "minimal" }), "minimal")
+        eq(Stats.statsStyle({ stats_style = "detailed" }), "detailed")
+        eq(Stats.statsStyleLabel("standard"), "Standard")
+        eq(Stats.continueStyle({}), "row")
+        eq(Stats.continueStyle({ continue_style = "card" }), "card")
+        eq(Stats.goalOf({}), nil)
+        eq(Stats.goalOf({ daily_goal_on = true, daily_goal_unit = "minutes", daily_goal = 30 }).amount, 30)
+        eq(Stats.yearGoalOf({}), nil)
+        eq(Stats.yearGoalOf({ yearly_goal_on = true, yearly_goal = 12 }).amount, 12)
+    end)
+
+    it("marks a read day, an empty day, and today in progress", function()
+        eq(Stats.dayMark({ pages = 2 }), "filled")
+        eq(Stats.dayMark({ pages = 0, seconds = 0 }), "outline")
+        eq(Stats.dayMark({ today = true, pages = 1 }), "partial")
+        eq(Stats.dayMark({ today = true, pages = 0, seconds = 0 }), "outline")
+        eq(Stats.dayMark({ future = true, pages = 4 }), "outline")
+    end)
+
+    it("writes the today line, the one average line, and the minimal line", function()
+        local summary = {
+            today = { pages = 46, seconds = 110 * 60 },
+            week = { pages = 322, seconds = 110 * 60, average_pages = 46, average_seconds = 110 * 60 },
+            streak = 12,
+        }
+        eq(Stats.todayBrief(summary.today), "1 h 50 m · 46 pages")
+        eq(Stats.averageLine(summary.week), "1 h 50 m · 46 pages a day on average")
+        eq(Stats.minimalLine(summary), "Today 1 h 50 m · This week 1 h 50 m · 12-day streak")
+        eq(Stats.streakCaption(12, 41), "12-day streak · best 41")
+    end)
+
+    it("counts finished books only when the sidecar time is in that year", function()
+        local this_year = os.time{ year = 2026, month = 3, day = 2, hour = 12 }
+        local last_year = os.time{ year = 2025, month = 12, day = 1, hour = 12 }
+        local n = Stats.finishedThisYear({
+            { status = "complete", finished_at = this_year },
+            { status = "complete", finished_at = last_year },
+            { status = "complete" },
+            { status = "reading", finished_at = this_year },
+        }, 2026)
+        eq(n, 1)
+        eq(Stats.yearFraction(6, 12), 0.5)
+        local year = Stats.yearTotals({
+            ["2026-11-27"] = { pages = 2, seconds = 60 },
+            ["2025-11-27"] = { pages = 9, seconds = 60 },
+        }, os.time{ year = 2026, month = 11, day = 27, hour = 12 })
+        eq(year.days, 1)
+        eq(year.pages, 2)
+    end)
+
+    it("hides a forecast without enough recent pages, and shows one when the pace is there", function()
+        local book = { title = "The Prince and the Pauper", pages = 320, percent = 0.25 }
+        eq(Stats.forecast(book, { pages = 4 }, NOW), nil)
+        local line = Stats.forecast(book, { pages = 14 }, NOW)
+        eq(type(line) == "string" and line:find("The Prince and the Pauper", 1, true) ~= nil, true)
+        eq(line:find("done by", 1, true) ~= nil, true)
+    end)
+
+    it("uses five covers on the Colorsoft and four on a narrow screen", function()
+        eq(Stats.coverCount(1264), 5)
+        eq(Stats.coverCount(758), 4)
     end)
 end)
 
@@ -263,6 +324,33 @@ local function load(file, extra)
 end
 
 describe("Reading log layout", function()
+    it("keeps every reading-log cover whole at 2:3", function()
+        eq(Stats.readingMargin(758), 18)
+        eq(Stats.readingMargin(1264), 36)
+        for _, width in ipairs({ 1264, 758 }) do
+            local inner = width - 2 * Stats.readingMargin(width)
+            local ideal = Stats.fitCovers(inner, { n = 5, scale = 1, row_gap = 12 })
+            eq(ideal.n, 5)
+            eq(ideal.cropped, false)
+            eq(ideal.feat_h, math.floor(ideal.feat_w * 3 / 2))
+            eq(ideal.row_h, math.floor(ideal.slot * 3 / 2))
+            eq(math.abs(ideal.feat_w - math.floor(inner * 0.20)) <= 1, true)
+            eq(ideal.n * ideal.slot + (ideal.n - 1) * ideal.row_gap <= inner, true)
+            for _, n in ipairs({ 5, 4 }) do
+                for _, scale in ipairs({ 1, 0.85, 0.7 }) do
+                    local plan = Stats.fitCovers(inner, { n = n, scale = scale, row_gap = 12 })
+                    eq(plan.cropped, false)
+                    eq(plan.feat_h, math.floor(plan.feat_w * 3 / 2))
+                    eq(plan.row_h, math.floor(plan.slot * 3 / 2))
+                    eq(plan.n * plan.slot + (plan.n - 1) * plan.row_gap <= inner, true)
+                end
+            end
+            local card = Stats.fitCovers(inner, { card = true, scale = 1 })
+            eq(card.feat_h, math.floor(card.feat_w * 3 / 2))
+            eq(card.n, 0)
+        end
+    end)
+
     it("gives a narrow screen a smaller today figure and a wide screen a larger one", function()
         local small = Stats.pageLayout(758)
         local large = Stats.pageLayout(1264)
@@ -330,23 +418,42 @@ describe("Ways onto the Reading log", function()
         local items = {}
         Library.addToMainMenu(self, items)
         local rows = items.library.sub_item_table
-        local reading, home, provider, after, startup, ri, hi, pi, ai, si
+        local reading, home, provider, style, daily, cont, yearly, after, startup
+        local ri, hi, pi, sti, di, ci, yi, ai, si
         for i, entry in ipairs(rows) do
             if entry.text == "Reading log" then reading, ri = entry, i end
             if entry.text_func and entry.text_func():find("Home page", 1, true) == 1 then home, hi = entry, i end
             if entry.text_func and entry.text_func():find("Reading log provider", 1, true) == 1 then provider, pi = entry, i end
+            if entry.text_func and entry.text_func():find("Stats style", 1, true) == 1 then style, sti = entry, i end
+            if entry.text_func and entry.text_func():find("Daily goal", 1, true) == 1 then daily, di = entry, i end
+            if entry.text_func and entry.text_func():find("Continue reading", 1, true) == 1 then cont, ci = entry, i end
+            if entry.text_func and entry.text_func():find("Yearly book goal", 1, true) == 1 then yearly, yi = entry, i end
             if entry.text_func and entry.text_func():find("After closing a book", 1, true) == 1 then after, ai = entry, i end
             if entry.text_func and entry.text_func():find("On startup", 1, true) == 1 then startup, si = entry, i end
         end
         eq(reading ~= nil, true)
         eq(home ~= nil, true)
         eq(provider ~= nil, true)
+        eq(style ~= nil, true)
+        eq(daily ~= nil, true)
+        eq(cont ~= nil, true)
+        eq(yearly ~= nil, true)
         eq(after ~= nil, true)
         eq(startup ~= nil, true)
         eq(hi, ri + 1)
         eq(pi, hi + 1)
-        eq(ai, pi + 1)
+        eq(sti, pi + 1)
+        eq(di, sti + 1)
+        eq(ci, di + 1)
+        eq(yi, ci + 1)
+        eq(ai, yi + 1)
         eq(si, ai + 1)
+        eq(style.text_func(), "Stats style: Standard")
+        eq(style.sub_item_table[1].text, "Standard")
+        eq(style.sub_item_table[1].checked_func(), true)
+        eq(daily.text_func(), "Daily goal: Off")
+        eq(cont.text_func(), "Continue reading: Cover row")
+        eq(yearly.text_func(), "Yearly book goal: Off")
         eq(provider.text_func(), "Reading log provider: Built-in")
         eq(provider.sub_item_table[1].text, "Built-in")
         eq(provider.sub_item_table[2].text, "Reading Log plugin")

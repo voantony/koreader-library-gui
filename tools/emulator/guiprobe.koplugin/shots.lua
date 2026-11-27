@@ -1810,10 +1810,45 @@ scenarios.closebook = function()
     end)
 end
 
+local function auditLog(tag)
+    local stack = UIManager._window_stack or {}
+    local top = stack[#stack] and stack[#stack].widget
+    if not (top and top.name == "library_reading_log" and top.audit) then
+        state.ok = false
+        P("FAIL layout", tag, "no page")
+        return
+    end
+    local report = top._audit or top:audit()
+    local line = report and report.line or "?"
+    P("LAYOUT", tag, line)
+    if not (report and report.ok) then
+        state.ok = false
+        P("FAIL layout", tag, line)
+    else
+        P("PASS layout", tag)
+    end
+end
+
+local function applyReadingGoals(on)
+    local settings = lib().settings
+    if on then
+        settings.daily_goal_on = true
+        settings.daily_goal_unit = "minutes"
+        settings.daily_goal = 30
+        settings.yearly_goal_on = true
+        settings.yearly_goal = 24
+    else
+        settings.daily_goal_on = nil
+        settings.yearly_goal_on = nil
+    end
+    lib():saveSettings()
+end
+
 scenarios.readinglog = function()
     whenLibrary(function()
         q(0.4, function()
             dismissNotices()
+            local plugin = lib()
             local DataStorage = require("datastorage")
             local SQ3 = require("lua-ljsqlite3/init")
             local path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
@@ -1833,23 +1868,53 @@ scenarios.readinglog = function()
                 local t = os.date("*t")
                 return os.time{ year = t.year, month = t.month, day = t.day - days_ago, hour = hour, min = 0, sec = 0 }
             end
+            local title = "Fixture"
+            local continue = plugin:continueBooks(1)
+            if continue[1] and continue[1].title then title = continue[1].title end
+            local safe = title:gsub("'", "''")
             conn:exec("DELETE FROM page_stat_data; DELETE FROM book;")
+            conn:exec(string.format(
+                "INSERT INTO book (id, title, authors, pages, total_read_time, total_read_pages) VALUES (1, '%s', 'Reader', 320, 20000, 40);",
+                safe))
             local function add(page, days_ago, hour, duration)
                 conn:exec(string.format(
                     "INSERT INTO page_stat_data (id_book, page, start_time, duration, total_pages) VALUES (1, %d, %d, %d, 320);",
                     page, at(days_ago, hour), duration))
             end
-            add(12, 0, 9, 600)
-            add(18, 0, 10, 900)
-            add(40, 1, 20, 1200)
-            add(8, 2, 21, 400)
-            add(3, 3, 8, 300)
-            conn:exec("INSERT INTO book (id, title, authors, total_read_time, total_read_pages) VALUES (1, 'Fixture', 'Reader', 3400, 20);")
+            add(1, 0, 9, 600)
+            add(2, 0, 10, 480)
+            for ago = 1, 11 do
+                add(ago + 2, ago, 20, 900)
+            end
             conn:close()
+            applyReadingGoals(false)
+            plugin.settings.stats_style = nil
+            plugin.settings.continue_style = nil
+            plugin:saveSettings()
+            local function paintCovers(books)
+                local Blitbuffer = require("ffi/blitbuffer")
+                local Covers = require("librarycovers")
+                local store = Covers.getStore()
+                store:scan()
+                local tones = { 0x22, 0x38, 0x4A, 0x2C, 0x55, 0x33 }
+                for i, book in ipairs(books or {}) do
+                    if i > 6 then break end
+                    local bb = Blitbuffer.new(320, 480, Blitbuffer.TYPE_BB8)
+                    local base = Blitbuffer.Color8(tones[((i - 1) % #tones) + 1])
+                    bb:fill(base)
+                    bb:paintRect(18, 18, 284, 444, Blitbuffer.COLOR_BLACK)
+                    bb:paintRect(30, 30, 260, 420, base)
+                    local dest = store:path(Covers.key(book) .. ".jpg")
+                    bb:writeToFile(dest, "jpg", 85)
+                    bb:free()
+                end
+                store.scanned = false
+            end
+            paintCovers(plugin:continueBooks(6))
             P("stats db", path)
-            lib():onShowReadingLog()
+            plugin:onShowReadingLog()
         end)
-        q(0.8, function()
+        q(2.2, function()
             local stack = UIManager._window_stack or {}
             local top = stack[#stack] and stack[#stack].widget
             local name = top and top.name or "?"
@@ -1857,9 +1922,30 @@ scenarios.readinglog = function()
             if name ~= "library_reading_log" then
                 state.ok = false
                 P("FAIL reading log is not showing")
-            else
-                P("PASS reading log")
+                return
             end
+            P("PASS reading log")
+            local function show(style, goals, tab)
+                lib().settings.stats_style = style == "standard" and nil or style
+                lib().settings.continue_style = nil
+                applyReadingGoals(goals)
+                if top then top._tab = tab or "today" end
+                if top and top.reload then top:reload() end
+            end
+            local styles = { "standard", "minimal", "detailed" }
+            for _, style in ipairs(styles) do
+                for _, goals in ipairs({ false, true }) do
+                    show(style, goals, "today")
+                    auditLog(style .. (goals and "-goals" or "-goals-off"))
+                end
+            end
+            show("standard", false, "today")
+            shot("standard-goals-off")
+            show("detailed", false, "today")
+            shot("detailed-today")
+            show("minimal", false, "today")
+            shot("minimal")
+            show("standard", false, "today")
             shot("reading-log")
             local screen = Device.screen
             if not screen.night_mode and screen.toggleNightMode then
