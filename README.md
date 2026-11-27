@@ -1,6 +1,6 @@
 # Library GUI for KOReader
 
-[![Release](https://gitlab.com/antonyvo/koreader-library-gui/-/badges/release.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.9)
+[![Release](https://gitlab.com/antonyvo/koreader-library-gui/-/badges/release.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.8.0)
 [![Pipeline](https://gitlab.com/antonyvo/koreader-library-gui/badges/main/pipeline.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/pipelines)
 
 Library GUI (`library.koplugin`) is a KOReader plugin that replaces the file browser with a library screen that looks and works more like the Kindle's own home screen: book covers with reading progress, a search bar with the clock and battery at the top, tabs for Books, Collections, Authors and Series, the menu in the footer, and a Controls panel you pull down from the top right (or open from the clock or the ☰ menu).
@@ -9,7 +9,7 @@ It sits alongside KOReader's file browser, History and Collections. It never mov
 
 <p align="center"><img src="docs/screenshots/v050-widgets.png" width="420" alt="Books tab with Continue Reading and Favorites above the cover grid and one A–Z column on the right"></p>
 
-The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. The current release is [v0.7.9](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.9) (12 November 2026). The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
+The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. The current release is [v0.8.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.8.0) (27 November 2026). The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
 
 ## Home screen
 
@@ -44,6 +44,8 @@ The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com
 ![The Library menu open over the book grid](docs/screenshots/v050-menu.png)
 
 **Start with.** KOReader's own Start with setting, in the file browser menu, can be set to library. KOReader then opens the Library at startup. **On startup** in the Library's ☰ menu is the same choice, plus **Resume last book**, which leaves KOReader on the last file and does not open the Library over it. **After closing a book** is **Return to Library** (the Library is the first thing drawn, with no file-browser flash) or **Return to file browser**. An older "Open Library at startup" tick is moved to Start with.
+
+**Reading log.** **Home page**, next to those two settings, is **Library** until you change it. **Reading log** is a quiet page: one Continue reading card, a large today figure, a seven-day chart with today marked, and the streak. **Reading log provider** chooses **Built-in**, the Reading Log plugin's own dashboard when that plugin is installed, or a dispatcher action you name. If that choice is missing, the built-in page opens and a short note says so. The numbers come from KOReader's own statistics database, read only. With no database, the page still shows Continue reading and **Turn on Reading statistics**. **Log** in the grid header opens the reading log, and **Library** on that page opens the grid. The ☰ menu has **Reading log** as well, and **Open Reading log** can be assigned to a gesture. The idea came from u/Aladris666 on Reddit.
 
 ## Screenshots
 
@@ -110,15 +112,16 @@ The shots on this page were taken in the KOReader emulator (1264×1680) with the
 - **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
 - **Controls panel**: swipe down from the top right (the right half of the top of the screen; a slightly diagonal pull is fine) for Brightness and Warmth sliders and buttons for Light, Night mode, Refresh (clears e-ink ghosting), Wi-Fi, Rotate, Cover sleep and Exit (asks first, then quits KOReader). You can also tap the clock or battery beside the search bar, or choose **Controls** in the ☰ menu. Anything your device doesn't have is left out.
 - **Top tap while reading** (☰ → Library → **Top tap opens**): **Library GUI bar** (the default) opens a small menu: Library, Contents, Go to page, Search, Font & size, Readability, Light, Bookmark, Book details, Exit, and **More…** for KOReader's full reader menu. **KOReader menu** opens KOReader's own reader menu with that same tap. A swipe down from the top of a page opens KOReader's menu with either choice. The search keyboard stays on **Use KOReader's keyboard**.
-- **Start with**: KOReader's own Start with setting (file browser menu) includes library. **On startup** in the Library's ☰ menu chooses **Open Library** (Start with set to library) or **Resume last book** (Start with set to the last file; the Library is not drawn over that book). **After closing a book** chooses **Return to Library** or **Return to file browser**. Return to Library paints the Library immediately, so the file browser does not flash in between. **Left-edge brightness** (off by default) is a vertical drag on the left edge that sets brightness at the same pace as the Controls slider.
+- **Start with**: KOReader's own Start with setting (file browser menu) includes library. **On startup** in the Library's ☰ menu chooses **Open Library** (Start with set to library) or **Resume last book** (Start with set to the last file; the Library is not drawn over that book). **After closing a book** chooses **Return to Library** or **Return to file browser**. Return to Library paints the Library immediately, so the file browser does not flash in between. **Home page** is **Library** or **Reading log**. Library is the default, so an existing setup still opens the book grid. Reading log shows Continue reading, today, this week and the current streak from KOReader's statistics database. **Left-edge brightness** (off by default) is a vertical drag on the left edge that sets brightness at the same pace as the Controls slider.
+- **Reading log**: ☰ → Library → **Reading log**, the **Log** control on the book grid, the gesture **Open Reading log**, and, when SimpleUI is installed, a bottom-bar action of the same name. **Library** on the reading log returns to the grid. A missing statistics database does not crash: Continue reading remains, with **Turn on Reading statistics**.
 - **Covers without other plugins.** Library GUI extracts covers itself in the background. If Project: Title or Cover browser is enabled, it reuses their cover cache.
 - **Gestures** (☰ on the Library, or ☰ → Library → **Gestures**). On the Library home, a swipe down from the top opens KOReader's menu, and a two-finger swipe does whatever you set for the file browser (often rotate). That is **Same as file browser**, the default for every gesture. The left edge follows it while **Left-edge brightness** is off. You can instead pick **Nothing**, or an action of your own: open KOReader's menu, rotate, brightness, warmth, open the current book, the Library menu, Controls, or turn a page. Brightness still slides the light when Left-edge brightness is off. The list is the top swipe, two-finger swipes (right, left, up, down, diagonal), the screen edges, corner taps and holds, and multiswipe, pinch and spread. **KOReader gesture manager** in that menu opens the file-browser profile, which is what Same as file browser follows. A one-finger tap or swipe that starts on the A–Z strip still jumps to a letter. Open Library, Search library, Resume last book, Rescan library, and Next / Previous in series can also be assigned under *Taps and gestures*.
 
 ## Install
 
-The current release is **[v0.7.9](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.9)**. Download **[library.koplugin-v0.7.9.zip](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.7.9/downloads/library.koplugin-v0.7.9.zip)** and unzip it. You get a folder called `library.koplugin`.
+The current release is **[v0.8.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.8.0)**. Download **[library.koplugin-v0.8.0.zip](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.8.0/downloads/library.koplugin-v0.8.0.zip)** and unzip it. You get a folder called `library.koplugin`.
 
-SHA256: `a4eec1aeb9bd6b3339b7706591acd721fb9f1bb89f490526afcbf5b2fb604928`
+SHA256: `45328c4193d6c974cdba745df7384eeb6fa27fc68508a64c62d920724ab0d151`
 
 1. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).

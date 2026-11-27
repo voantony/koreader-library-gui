@@ -1,7 +1,7 @@
 # KOReader's own LuaJIT works too, e.g. LUA=/path/to/koreader/luajit
 LUA ?= luajit
 PLUGIN := library.koplugin
-VERSION ?= 0.7.9
+VERSION ?= 0.8.0
 # Optional. A KOReader tag (v2025.04) or dev revision (v2025.04-42).
 # `make zip` writes it as `Requires KOReader:` in dist/release-notes.txt,
 # next to the zip's SHA256 line. Paste both into the GitLab release notes.
@@ -9,7 +9,7 @@ VERSION ?= 0.7.9
 # install when the installed KOReader is older. It never updates KOReader.
 # Leave this empty to keep today's behaviour (no minimum).
 KOREADER_REQUIRES ?=
-FILES := _meta.lua main.lua librarycore.lua librarystatus.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua libraryfooter.lua libraryrefresh.lua libraryreturn.lua libraryreadability.lua librarysuggest.lua librarytiming.lua libraryscrubber.lua libraryzones.lua librarygestures.lua librarywidgets.lua libraryupdate.lua librarysettings.lua libraryyear.lua librarysimpleui.lua
+FILES := _meta.lua main.lua librarycore.lua librarystatus.lua libraryindex.lua libraryview.lua librarytile.lua librarycovers.lua librarykeyboard.lua librarycontrols.lua librarydetails.lua libraryreadermenu.lua libraryreaderpanel.lua librarybezel.lua libraryfooter.lua libraryrefresh.lua libraryreturn.lua libraryreadability.lua librarysuggest.lua librarytiming.lua libraryscrubber.lua libraryzones.lua librarygestures.lua librarywidgets.lua libraryupdate.lua librarysettings.lua libraryyear.lua librarystats.lua libraryreadinglog.lua librarysimpleui.lua
 
 .PHONY: test zip stage clean
 

@@ -290,6 +290,11 @@ function Index:refreshState(book)
     book.status = norm or "reading"
     book.percent = tonumber(data.percent_finished)
     book.pages = tonumber(data.doc_pages)
+    if norm == "complete" then
+        book.finished_at = tonumber(summary.modified) or false
+    else
+        book.finished_at = nil
+    end
     Core.applyMarks(book, data.library_marks)
     -- KOReader marks a book "reading" as soon as it opens: one you only
     -- opened (still on the cover, title page or contents) stays unread.
