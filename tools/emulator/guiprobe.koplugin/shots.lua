@@ -1981,6 +1981,18 @@ scenarios.readinglog = function()
                 P("PASS reading log")
             end
             shot("mockup-standard-day")
+            lib().settings.daily_goal_on = nil
+            lib().settings.yearly_goal_on = nil
+            lib():saveSettings()
+            if top and top.reload then top:reload() end
+            shot("mockup-standard-1264-goals-off")
+            lib().settings.daily_goal_on = true
+            lib().settings.daily_goal_unit = "minutes"
+            lib().settings.daily_goal = 30
+            lib().settings.yearly_goal_on = true
+            lib().settings.yearly_goal = 24
+            lib():saveSettings()
+            if top and top.reload then top:reload() end
             local screen = Device.screen
             if not screen.night_mode and screen.toggleNightMode then
                 screen:toggleNightMode()

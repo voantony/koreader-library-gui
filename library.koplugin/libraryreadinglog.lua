@@ -13,6 +13,7 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
+local OverlapGroup = require("ui/widget/overlapgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LineWidget = require("ui/widget/linewidget")
@@ -100,15 +101,34 @@ local function paintRing(bb, cx, cy, r, kind, frac)
     if frac < 0 then frac = 0 end
     if frac > 1 then frac = 1 end
     if frac <= 0 then return end
-    local steps = math.max(10, math.floor(r * 5 * frac))
-    local sweep = frac * 2 * math.pi
+    local thick = math.max(4, math.floor(r * 0.28))
+    local half = math.floor(thick / 2)
+    local mid_r = math.max(half + 2, r - half)
+    local steps = math.max(36, math.floor(2 * math.pi * mid_r * frac))
     local a0 = -math.pi / 2
-    local dot = math.max(2, math.floor(r * 0.14))
+    local sweep = frac * 2 * math.pi
+    if bb.setPixelClamped then
+        for i = 0, steps do
+            local a = a0 + sweep * (i / steps)
+            local px = cx + math.cos(a) * mid_r
+            local py = cy + math.sin(a) * mid_r
+            for oy = -half, half do
+                for ox = -half, half do
+                    if ox * ox + oy * oy <= half * half + half then
+                        bb:setPixelClamped(math.floor(px + ox + 0.5), math.floor(py + oy + 0.5), ink())
+                    end
+                end
+            end
+        end
+        return
+    end
+    local dot = math.max(2, half)
     for i = 0, steps do
         local a = a0 + sweep * (i / steps)
-        local px = math.floor(cx + math.cos(a) * (r - 1) + 0.5)
-        local py = math.floor(cy + math.sin(a) * (r - 1) + 0.5)
-        bb:paintCircle(px, py, dot, ink())
+        bb:paintCircle(
+            math.floor(cx + math.cos(a) * mid_r + 0.5),
+            math.floor(cy + math.sin(a) * mid_r + 0.5),
+            dot, ink())
     end
 end
 
@@ -118,7 +138,7 @@ function RingRow:init()
     local w = math.max(0, math.floor(tonumber(self.width) or 0))
     local r = math.max(8, math.floor(tonumber(self.radius) or 16))
     self.radius = r
-    self.label_h = 46
+    self.label_h = 40
     self.dimen = Geom:new{ w = w, h = self.label_h + r * 2 + 8 }
 end
 
@@ -213,7 +233,7 @@ function MonthGrid:paintTo(bb, x, y)
         label:paintTo(bb, dx + math.floor((cell - lw) / 2), y)
         label:free()
     end
-    local top = y + 40
+    local top = y + 52
     for i, info in ipairs(cells) do
         local col = (i - 1) % 7
         local row = math.floor((i - 1) / 7)
@@ -450,6 +470,66 @@ function ReadingLog:finishedCount(year)
     return Stats.finishedThisYear(books, year)
 end
 
+local Sized = Widget:extend{ width = 0, height = 0 }
+
+function Sized:init()
+    self.dimen = Geom:new{
+        w = math.floor(tonumber(self.width) or 0),
+        h = math.floor(tonumber(self.height) or 0),
+    }
+end
+
+function Sized:getSize()
+    return Geom:new{ w = self.dimen.w, h = self.dimen.h }
+end
+
+function Sized:paintTo(bb, x, y)
+    if self[1] and self[1].paintTo then
+        local s = self[1]:getSize()
+        local dx = math.max(0, math.floor((self.dimen.w - (s.w or 0)) / 2))
+        local dy = math.max(0, math.floor((self.dimen.h - (s.h or 0)) / 2))
+        self[1]:paintTo(bb, x + dx, y + dy)
+    end
+    if bb and bb.paintBorder then
+        bb:paintBorder(x, y, self.dimen.w, self.dimen.h, 1, ink(), 0, 0)
+    end
+end
+
+function ReadingLog:fixedCover(book, w, h)
+    self.missing_covers = self.missing_covers or {}
+    if not self._covers_ready then
+        self.missing_covers[#self.missing_covers + 1] = book
+        return self:emptyCover(w, h)
+    end
+    local bb, ready = Tiles.getCover(self.cover_cache, self.covers, book, w - 2, h - 2)
+    if not ready then self.missing_covers[#self.missing_covers + 1] = book end
+    local child
+    if bb then
+        local bw, bh = bb:getWidth(), bb:getHeight()
+        local box_w, box_h = w - 2, h - 2
+        if bw < box_w - 1 or bh < box_h - 1 then
+            local RenderImage = require("ui/renderimage")
+            local scale = math.max(box_w / bw, box_h / bh)
+            local nw = math.max(box_w, math.floor(bw * scale + 0.5))
+            local nh = math.max(box_h, math.floor(bh * scale + 0.5))
+            local scaled = RenderImage:scaleBlitBuffer(bb, nw, nh, false)
+            local cropped = require("ffi/blitbuffer").new(box_w, box_h, scaled:getType())
+            cropped:blitFrom(scaled, 0, 0,
+                math.max(0, math.floor((nw - box_w) / 2)),
+                math.max(0, math.floor((nh - box_h) / 2)),
+                box_w, box_h)
+            scaled:free()
+            bb = cropped
+        end
+        local ImageWidget = require("ui/widget/imagewidget")
+        child = ImageWidget:new{
+            image = bb, image_disposable = false,
+            width = bb:getWidth(), height = bb:getHeight(),
+        }
+    end
+    return Sized:new{ width = w, height = h, child or VerticalSpan:new{ width = 1 } }
+end
+
 function ReadingLog:emptyCover(w, h)
     return FrameContainer:new{
         padding = 0, bordersize = 1, color = ink(), background = paper(),
@@ -481,6 +561,15 @@ function ReadingLog:forecastCaption(book)
         pages = book.pages or record.pages,
         percent = book.percent,
     }, record.pace, os.time())
+end
+
+--- "Done by Sat 12 Dec", without the book title.
+function ReadingLog:doneByLine(book)
+    local line = self:forecastCaption(book)
+    if type(line) ~= "string" then return nil end
+    local date = line:match("done by (.+)$")
+    if not date or date == "" then return nil end
+    return "Done by " .. date
 end
 
 function ReadingLog:measure()
@@ -571,42 +660,28 @@ end
 
 function ReadingLog:coverSizes(n)
     local m = self._m
-    local labels = (m.narrow and 24 or 28) * (m.card and 0 or 2)
-    local budget = math.max(160, m.continue_h - labels - m.gap)
-    if m.card then
-        local cw = math.floor(m.inner * (m.narrow and 0.30 or 0.22))
-        local ch = math.floor(cw * 1.5)
-        local max_h = budget - 48
-        if ch > max_h and max_h > 100 then
-            ch = max_h
-            cw = math.floor(ch * 2 / 3)
-        end
-        if cw < 100 then cw = 100 end
-        if ch < 150 then ch = 150 end
-        return { feat_w = cw, feat_h = ch }
-    end
-    local feat_budget = math.floor(budget * 0.48)
-    local recent_budget = budget - feat_budget
-    local fw = math.floor(m.inner * (m.narrow and 0.32 or 0.24))
-    local fh = math.floor(fw * 1.5)
-    local feat_cap = m.narrow and 120 or 188
-    if fh > feat_cap then
-        fh = feat_cap
-        fw = math.floor(fh * 2 / 3)
-    end
-    if fh > feat_budget - 16 then
-        fh = math.max(120, feat_budget - 16)
-        fw = math.max(88, math.floor(fh * 2 / 3))
-    end
     n = math.max(1, n or 1)
-    local gap = m.narrow and 12 or 16
+    local gap = m.narrow and 8 or 12
     local slot = math.floor((m.inner - gap * (n - 1)) / n)
-    if slot < 48 then slot = 48 end
-    local rh = math.min(math.floor(slot * 1.5), m.narrow and 96 or 164)
-    local cap = recent_budget - 34
-    if cap > 90 and rh > cap then rh = cap end
-    if rh < 100 then rh = 100 end
-    return { feat_w = fw, feat_h = fh, slot = slot, row_h = rh, row_gap = gap }
+    if slot < 72 then slot = 72 end
+    local fw = math.floor(m.inner * (m.card and 0.28 or 0.25))
+    local fh = math.floor(fw * 3 / 2)
+    local row_h = math.floor(slot * 3 / 2)
+    -- Keep the featured cover at about a quarter of the page. The recent
+    -- row gives up height first when the screen cannot hold both at 2:3.
+    local reserve = (m.narrow and 460 or 700)
+    if m.yearly and m.style ~= "minimal" then reserve = reserve + (m.narrow and 64 or 84) end
+    if m.detailed then reserve = reserve + (m.narrow and 56 or 64) end
+    if m.minimal then reserve = m.narrow and 280 or 360 end
+    if m.card then reserve = (m.narrow and 420 or 620) + (m.yearly and 80 or 0) end
+    local max_row = self.dimen.h - reserve - (m.card and 0 or fh)
+    if not m.card and max_row > 80 and row_h > max_row then
+        row_h = max_row
+    end
+    return {
+        feat_w = fw, feat_h = fh, feat_floor_w = math.floor(fw * 0.82),
+        slot = slot, row_h = row_h, row_gap = gap,
+    }
 end
 
 function ReadingLog:buildCoverRow(books, sizes)
@@ -618,26 +693,21 @@ function ReadingLog:buildCoverRow(books, sizes)
     local row = HorizontalGroup:new{ align = "top" }
     for i, book in ipairs(books) do
         if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
-        local cw = math.min(slot, math.max(72, math.floor(cover_h * 2 / 3)))
-        local cover = self:coverBox(book, cw, cover_h)
+        local cover = self:fixedCover(book, slot, cover_h)
         local pct = Core.progressPercent(book)
         local col = VerticalGroup:new{
             align = "center",
             cover,
             VerticalSpan:new{ width = 8 },
-            Bar:new{ width = cw, height = 4, fraction = tonumber(book.percent) or 0 },
+            Bar:new{ width = slot, height = 4, fraction = tonumber(book.percent) or 0 },
             VerticalSpan:new{ width = 4 },
             muted(string.format("%d%% Read", pct), self._m.narrow and 12 or 14),
         }
-        local holder = CenterContainer:new{
-            dimen = Geom:new{ w = slot, h = col:getSize().h },
-            col,
-        }
         table.insert(row, Hit:new{
-            width = slot,
-            height = holder:getSize().h,
+            width = col:getSize().w,
+            height = col:getSize().h,
             callback = function() self:openBook(book) end,
-            holder,
+            col,
         })
     end
     return row
@@ -669,11 +739,13 @@ function ReadingLog:featuredCard(book, sizes)
     table.insert(text, VerticalSpan:new{ width = 14 })
     table.insert(text, Bar:new{ width = text_w, height = 4, fraction = tonumber(book.percent) or 0 })
     table.insert(text, VerticalSpan:new{ width = 6 })
-    table.insert(text, muted(string.format("%d%% Read", pct), m.narrow and 13 or 15))
-    local forecast = self:forecastCaption(book)
-    if forecast then
-        table.insert(text, VerticalSpan:new{ width = 6 })
-        table.insert(text, muted(forecast, m.narrow and 12 or 14))
+    local pct_w = muted(string.format("%d%% Read", pct), m.narrow and 13 or 15)
+    local done = self:doneByLine(book)
+    if done then
+        local done_w = muted(done, m.narrow and 12 or 14)
+        table.insert(text, self:spreadPair(pct_w, done_w, text_w))
+    else
+        table.insert(text, pct_w)
     end
     local row = HorizontalGroup:new{
         align = "center",
@@ -852,7 +924,9 @@ function ReadingLog:ringRadius(content_w, band_h, n)
     local cap = math.floor(slot * 0.42)
     if r > cap then r = cap end
     if r < (self._m.narrow and 11 or 14) then r = self._m.narrow and 11 or 14 end
-    local ring_cap = self._m and self._m.narrow and 20 or 30
+    local ring_cap = self._m and self._m.narrow and 16 or 22
+    ring_cap = ring_cap - (self._ring_cut or 0)
+    if ring_cap < 10 then ring_cap = 10 end
     if r > ring_cap then r = ring_cap end
     return r
 end
@@ -860,7 +934,7 @@ end
 function ReadingLog:averageColumns(summary, width)
     local m = self._m
     local week = summary.week or {}
-    local big = m.narrow and 26 or (m.detailed and 28 or 36)
+    local big = m.narrow and 16 or (m.detailed and 16 or 18)
     local function column(number, caption)
         local n = TextWidget:new{
             text = number, face = face(big), bold = true, fgcolor = ink(),
@@ -908,12 +982,21 @@ function ReadingLog:buildWeekTile(summary, target_h, compact, content_w)
         VerticalSpan:new{ width = compact and 8 or 14 },
         self:averageColumns(summary, content_w),
         VerticalSpan:new{ width = 8 },
-        muted(Stats.streakCaption(summary.streak, self:bestStreak(summary)), m.narrow and 13 or 15),
     }
-    if goal_frac and not compact then
-        table.insert(body_col, VerticalSpan:new{ width = 4 })
-        table.insert(body_col, muted(Stats.goalLine(summary.today, self:goal()), m.narrow and 12 or 14))
+    local streak = muted(Stats.streakCaption(summary.streak, self:bestStreak(summary)), m.narrow and 13 or 14)
+    local goal = self:goal()
+    if goal then
+        local goal_text = Stats.goalLine(summary.today, goal) .. " today"
+        local goal_w = muted(goal_text, m.narrow and 12 or 14)
+        if streak:getSize().w + goal_w:getSize().w + 16 <= content_w then
+            table.insert(body_col, self:spreadPair(streak, goal_w, content_w))
+        else
+            table.insert(body_col, streak)
+        end
+    else
+        table.insert(body_col, streak)
     end
+    table.insert(body_col, 1, HorizontalSpan:new{ width = content_w })
     return self:box(body_col)
 end
 
@@ -924,7 +1007,11 @@ function ReadingLog:buildActivity(summary, height, content_w)
     local frac = goal and select(2, Stats.goalProgress(summary.today, goal)) or nil
     local read = (summary.today.pages or 0) > 0 or (summary.today.seconds or 0) > 0
     local kind = frac and "arc" or (read and "read" or "empty")
-    local r = m.narrow and 28 or 40
+    local r = (m.narrow and 36 or 52) - (self._ring_cut or 0)
+    if r < 22 then r = 22 end
+    local max_r = math.floor((content_w - 130) / 2)
+    if max_r < 22 then max_r = 22 end
+    if r > max_r then r = max_r end
     local glyph = RingGlyph:new{ radius = r, kind = kind, frac = frac or 0 }
     local text_w = math.max(60, content_w - (r * 2 + 8) - 10)
     local lines = VerticalGroup:new{
@@ -954,7 +1041,7 @@ function ReadingLog:buildActivity(summary, height, content_w)
         lines,
     }
     local extra = (height or 0) - row:getSize().h - (m.pad + 2) * 2
-    local col = VerticalGroup:new{ align = "left", row }
+    local col = VerticalGroup:new{ align = "left", HorizontalSpan:new{ width = content_w }, row }
     if extra > 8 then table.insert(col, VerticalSpan:new{ width = extra }) end
     return self:box(col)
 end
@@ -989,14 +1076,23 @@ end
 function ReadingLog:buildMonth(summary)
     local m = self._m
     local month = summary.month or {}
-    local grid_w = math.min(m.inner, m.narrow and m.inner or 640)
+    local grid_w = m.inner
+    local chrome = m.narrow and 340 or 420
+    local budget = math.max(180, self.dimen.h - chrome)
+    local cell = math.floor((budget - 48) / 6) - 8
+    if cell > (m.narrow and 40 or 72) then cell = m.narrow and 40 or 72 end
+    if cell < 22 then cell = 22 end
     return VerticalGroup:new{
         align = "left",
         heading(month.name or _("Month"), m.narrow and 22 or 28),
         VerticalSpan:new{ width = 8 },
         muted(Stats.monthCaption(month), 16),
         VerticalSpan:new{ width = m.gap },
-        self:box(MonthGrid:new{ month = month, width = grid_w - (m.pad + 2) * 2, cell_max = m.narrow and 32 or 64 }),
+        self:box(MonthGrid:new{
+            month = month,
+            width = grid_w - (m.pad + 2) * 2,
+            cell_max = cell,
+        }),
     }
 end
 
@@ -1058,42 +1154,119 @@ function ReadingLog:buildStats(summary, target_h)
     if m.detailed and m.tab == "year" then return self:buildYear(summary) end
     if m.detailed then
         local gap = 12
-        local box_w = math.floor((m.inner - gap) / 2)
-        local column_w = box_w - (m.pad + 2) * 2
+        local activity_w = math.floor(m.inner * 0.40)
+        local week_w = m.inner - gap - activity_w
+        local chrome = (m.pad + 2) * 2
+        local week = self:buildWeekTile(summary, target_h, true, week_w - chrome)
+        local activity = self:buildActivity(summary, week:getSize().h, activity_w - chrome)
         return HorizontalGroup:new{
             align = "top",
-            self:buildActivity(summary, target_h, column_w),
+            activity,
             HorizontalSpan:new{ width = gap },
-            self:buildWeekTile(summary, target_h, true, column_w),
+            week,
         }
     end
     return self:buildWeekTile(summary, target_h, false)
 end
 
+local Segmented = Widget:extend{ width = 0, height = 48, selected = "today", labels = nil }
+
+function Segmented:init()
+    self.dimen = Geom:new{
+        w = math.floor(tonumber(self.width) or 0),
+        h = math.floor(tonumber(self.height) or 48),
+    }
+end
+
+function Segmented:getSize()
+    return Geom:new{ w = self.dimen.w, h = self.dimen.h }
+end
+
+function Segmented:paintTo(bb, x, y)
+    if bb == nil or type(bb.paintRect) ~= "function" then return end
+    local w, h = self.dimen.w, self.dimen.h
+    local labels = self.labels or { "Today", "Month", "Year" }
+    local ids = { "today", "month", "year" }
+    local radius = 12
+    local third = math.floor(w / 3)
+    local selected = 1
+    for i, id in ipairs(ids) do
+        if self.selected == id then selected = i end
+    end
+    if bb.paintRoundedRect then
+        bb:paintRoundedRect(x, y, w, h, paper(), radius)
+    else
+        bb:paintRect(x, y, w, h, paper())
+    end
+    local function fillSegment(index)
+        local sx = x + (index - 1) * third
+        local sw = index == 3 and (x + w - sx) or third
+        if index == 1 and bb.paintRoundedRect then
+            bb:paintRoundedRect(sx, y, sw + radius, h, ink(), radius)
+            bb:paintRect(sx + sw - 2, y, radius, h, ink())
+        elseif index == 3 and bb.paintRoundedRect then
+            bb:paintRoundedRect(sx - radius, y, sw + radius, h, ink(), radius)
+            bb:paintRect(sx, y, radius, h, ink())
+        else
+            bb:paintRect(sx, y, sw, h, ink())
+        end
+    end
+    fillSegment(selected)
+    if bb.paintBorder then
+        bb:paintBorder(x, y, w, h, 2, ink(), radius, 0)
+    end
+    if selected == 1 then
+        bb:paintRect(x + third * 2, y + 10, 2, h - 20, ink())
+    elseif selected == 3 then
+        bb:paintRect(x + third, y + 10, 2, h - 20, ink())
+    end
+    for i, label in ipairs(labels) do
+        local sx = x + (i - 1) * third
+        local sw = i == 3 and (w - third * 2) or third
+        local text = TextWidget:new{
+            text = label,
+            face = face(16),
+            bold = true,
+            fgcolor = i == selected and paper() or ink(),
+        }
+        local tw = text:getSize().w or 0
+        local th = text:getSize().h or 0
+        text:paintTo(bb, sx + math.floor((sw - tw) / 2), y + math.floor((h - th) / 2))
+        text:free()
+    end
+end
+
 function ReadingLog:buildSwitch()
     local m = self._m
-    local tabs = {
-        { id = "today", label = _("Today") },
-        { id = "month", label = _("Month") },
-        { id = "year", label = _("Year") },
-    }
-    local gap = 8
-    local cell = math.floor((m.inner - gap * 2) / 3)
     local h = m.switch_h > 0 and m.switch_h or 48
-    local row = HorizontalGroup:new{ align = "center" }
-    for i, tab in ipairs(tabs) do
-        if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
-        local on = (self._tab or "today") == tab.id
-        table.insert(row, Hit:new{
-            width = cell, height = h,
+    local selected = self._tab or "today"
+    local painted = Segmented:new{
+        width = m.inner,
+        height = h,
+        selected = selected,
+        labels = { _("Today"), _("Month"), _("Year") },
+    }
+    local cell = math.floor(m.inner / 3)
+    local ids = { "today", "month", "year" }
+    local hits = HorizontalGroup:new{ align = "center" }
+    for i, id in ipairs(ids) do
+        local w = i == 3 and (m.inner - cell * 2) or cell
+        table.insert(hits, Hit:new{
+            width = w,
+            height = h,
             callback = function()
-                self._tab = tab.id
+                self._tab = id
                 self:reload()
             end,
-            self:buttonFace(tab.label, cell, h, on),
+            VerticalSpan:new{ width = h },
         })
     end
-    return row
+    return OverlapGroup:new{
+        dimen = Geom:new{ w = m.inner, h = h },
+        allow_mirroring = false,
+        painted,
+        hits,
+    }
 end
 
 function ReadingLog:buildHeader()
@@ -1107,7 +1280,7 @@ function ReadingLog:buildHeader()
     end
     self._clock = TextWidget:new{
         text = clockText(),
-        face = face(m.narrow and 40 or 56),
+        face = face(m.narrow and 24 or 30),
         bold = true,
         fgcolor = ink(),
     }
@@ -1130,20 +1303,12 @@ function ReadingLog:buildHeader()
     return header
 end
 
-function ReadingLog:build()
-    local summary = self:readStats()
-    self.summary = summary
-    self._m = self:measure()
+function ReadingLog:assemble(summary, sizes)
     local m = self._m
-    local books_n = #(self:continueBooks() or {})
-    local cap = self.layout.covers or (m.narrow and 4 or 5)
-    if books_n < 1 then books_n = 1 end
-    if books_n > cap then books_n = cap end
-    local sizes = self:coverSizes(books_n)
     local parts = VerticalGroup:new{ align = "left", self:buildHeader() }
     if m.show_main then
         table.insert(parts, self:pad(self:buildContinue(sizes), m.gap))
-        if m.goal_h > 0 then
+        if m.yearly and m.style ~= "minimal" and not (m.detailed and m.tab ~= "today") then
             local goals = self:goalRow(m.inner)
             if goals then table.insert(parts, self:pad(goals, m.gap)) end
         end
@@ -1152,15 +1317,43 @@ function ReadingLog:build()
         table.insert(parts, self:pad(self:buildStats(summary, 0), m.gap))
     end
     if m.detailed then
-        table.insert(parts, self:pad(self:buildSwitch(), m.narrow and 10 or 14))
+        table.insert(parts, self:pad(self:buildSwitch(), m.narrow and 8 or 10))
     end
-    local button = self:buildLibraryButton(self.dimen.w)
-    local used = parts:getSize().h + button:getSize().h
-    local spacer = self.dimen.h - used
-    if spacer < m.gap then spacer = m.gap end
-    -- On the main tabs the tile already fills the page. Month and year pin
-    -- the Library button to the bottom.
-    if m.show_main and spacer > 28 then spacer = 28 end
+    return parts, self:buildLibraryButton(self.dimen.w)
+end
+
+function ReadingLog:build()
+    local summary = self:readStats()
+    self.summary = summary
+    self._ring_cut = 0
+    self._m = self:measure()
+    local m = self._m
+    local books_n = #(self:continueBooks() or {})
+    local cap = self.layout.covers or (m.narrow and 4 or 5)
+    if books_n < 1 then books_n = 1 end
+    if books_n > cap then books_n = cap end
+    local sizes = self:coverSizes(books_n)
+    local parts, button = self:assemble(summary, sizes)
+    local guard = 0
+    while guard < 8 do
+        local overflow = parts:getSize().h + button:getSize().h - self.dimen.h
+        if overflow <= 0 then break end
+        guard = guard + 1
+        local row_floor = m.narrow and 96 or 150
+        if not m.card and sizes.row_h > row_floor then
+            sizes.row_h = math.max(row_floor, sizes.row_h - math.ceil(overflow * 0.75))
+        else
+            local floor_h = math.floor((sizes.feat_floor_w or 80) * 3 / 2)
+            sizes.feat_h = math.max(floor_h, sizes.feat_h - math.ceil(overflow * 0.5))
+            sizes.feat_w = math.max(sizes.feat_floor_w or 64, math.floor(sizes.feat_h * 2 / 3))
+        end
+        if m.gap > 6 then m.gap = math.max(6, m.gap - 2) end
+        self._ring_cut = (self._ring_cut or 0) + 2
+        parts, button = self:assemble(summary, sizes)
+    end
+    local room = self.dimen.h - parts:getSize().h - button:getSize().h
+    local spacer = 0
+    if room > 6 then spacer = math.min(12, room) end
     self[1] = FrameContainer:new{
         padding = 0, bordersize = 0, background = paper(),
         width = self.dimen.w, height = self.dimen.h,
@@ -1214,7 +1407,7 @@ function ReadingLog:buildLibraryButton(width)
         padding = 0,
         padding_left = L.margin,
         padding_right = L.margin,
-        padding_bottom = L.margin,
+        padding_bottom = 8,
         bordersize = 0,
         background = paper(),
         Hit:new{
