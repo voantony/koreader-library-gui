@@ -1,15 +1,15 @@
 # Library GUI for KOReader
 
-[![Release](https://gitlab.com/antonyvo/koreader-library-gui/-/badges/release.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.8.0)
+[![Release](https://img.shields.io/github/v/release/voantony/koreader-library-gui)](https://github.com/voantony/koreader-library-gui/releases/latest)
 [![Pipeline](https://gitlab.com/antonyvo/koreader-library-gui/badges/main/pipeline.svg)](https://gitlab.com/antonyvo/koreader-library-gui/-/pipelines)
 
 Library GUI (`library.koplugin`) is a KOReader plugin that replaces the file browser with a library screen that looks and works more like the Kindle's own home screen: book covers with reading progress, a search bar with the clock and battery at the top, tabs for Books, Collections, Authors and Series, the menu in the footer, and a Controls panel you pull down from the top right (or open from the clock or the ☰ menu).
 
-It sits alongside KOReader's file browser, History and Collections. It never moves or renames your books, and closing it takes you back to the normal file browser.
+It sits alongside KOReader's file browser, History and Collections. It never moves or renames your books, and closing it takes you back to the normal file browser. An optional Reading log home page, off by default, shows Continue reading and weekly stats from KOReader's own reading statistics.
 
 <p align="center"><img src="docs/screenshots/v050-widgets.png" width="420" alt="Books tab with Continue Reading and Favorites above the cover grid and one A–Z column on the right"></p>
 
-The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. The current release is [v0.8.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.8.0) (27 November 2026). The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
+The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. The current release is [v0.8.0](https://github.com/voantony/koreader-library-gui/releases/tag/v0.8.0) (27 November 2026). The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
 
 ## Home screen
 
@@ -45,7 +45,11 @@ The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com
 
 **Start with.** KOReader's own Start with setting, in the file browser menu, can be set to library. KOReader then opens the Library at startup. **On startup** in the Library's ☰ menu is the same choice, plus **Resume last book**, which leaves KOReader on the last file and does not open the Library over it. **After closing a book** is **Return to Library** (the Library is the first thing drawn, with no file-browser flash) or **Return to file browser**. An older "Open Library at startup" tick is moved to Start with.
 
-**Reading log.** **Home page**, next to those two settings, is **Library** until you change it. **Reading log** is a quiet page: one Continue reading card, a large today figure, a seven-day chart with today marked, and the streak. **Reading log provider** chooses **Built-in**, the Reading Log plugin's own dashboard when that plugin is installed, or a dispatcher action you name. If that choice is missing, the built-in page opens and a short note says so. The numbers come from KOReader's own statistics database, read only. With no database, the page still shows Continue reading and **Turn on Reading statistics**. **Log** in the grid header opens the reading log, and **Library** on that page opens the grid. The ☰ menu has **Reading log** as well, and **Open Reading log** can be assigned to a gesture. The idea came from u/Aladris666 on Reddit.
+**Reading log.** Off until you choose it. ☰ → Library → **Home page** is **Library** (the default, including a Library saved before this setting) or **Reading log**. The page is black on white with grey secondary text, for e-ink. **Continue reading** is a **cover row** by default: the current book, then a row of covers with a thin progress bar and the percent. **Card** is one book at a time. **Stats style** is **Standard** (the default): a boxed This week tile with weekday rings, the week totals, two averages, and the streak. **Minimal** is one boxed strip of three figures. **Detailed** puts an activity box beside a compact week tile and adds a Today / Month / Year switch. **Daily goal** and **Yearly book goal** are off until you turn them on. The numbers come from KOReader's own statistics database, read only. With no database, Continue reading stays and a note says **Turn on Reading statistics**. **Reading log provider** chooses **Built-in**, the Reading Log plugin's own dashboard when that plugin is installed, or a dispatcher action you name. If that choice is missing, the built-in page opens and a short note says so. **Log** in the grid header opens the reading log, and **Library** on that page opens the grid. The ☰ menu has **Reading log** as well, and **Open Reading log** can be assigned to a gesture. The idea came from u/Aladris666 on Reddit.
+
+| Standard | Detailed | Minimal |
+|---|---|---|
+| ![Standard stats: This week tile with weekday rings, two averages, and the streak](docs/screenshots/v080-reading-log-standard.png) | ![Detailed stats: an activity box, a compact week tile, and a Today / Month / Year switch](docs/screenshots/v080-reading-log-detailed.png) | ![Minimal stats: one boxed strip of today, this week, and the streak](docs/screenshots/v080-reading-log-minimal.png) |
 
 ## Screenshots
 
@@ -83,7 +87,7 @@ The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com
 
 ![Choices for swipe down from the top. Same as file browser is selected](docs/screenshots/v070-gesture-choices.png)
 
-The shots on this page were taken in the KOReader emulator (1264×1680) with the dummy library. v0.7.0 adds the Gestures menu: a swipe down from the top opens KOReader's menu, and a two-finger swipe follows the file browser, until you pick another action. v0.6.0 adds Read / New badges, time left, Want to Read, and Cover only. Finished keeps its full label and is cut off at the screen edge when the row is wider than the screen; swipe the chips to bring it across. The level in the brightness shot is drawn by the plugin while the finger is down, and it is cleared when the finger lifts.
+The shots on this page were taken in the KOReader emulator (1264×1680) with the dummy library. v0.8.0 adds the Reading log home page (shots under Home screen above). v0.7.0 adds the Gestures menu: a swipe down from the top opens KOReader's menu, and a two-finger swipe follows the file browser, until you pick another action. v0.6.0 adds Read / New badges, time left, Want to Read, and Cover only. Finished keeps its full label and is cut off at the screen edge when the row is wider than the screen; swipe the chips to bring it across. The level in the brightness shot is drawn by the plugin while the finger is down, and it is cleared when the finger lifts.
 
 ## Features
 
@@ -112,14 +116,14 @@ The shots on this page were taken in the KOReader emulator (1264×1680) with the
 - **Cover sleep screen**: one toggle to show the cover of the book you read last on the sleep screen. Turning it off puts back the sleep screen you had.
 - **Controls panel**: swipe down from the top right (the right half of the top of the screen; a slightly diagonal pull is fine) for Brightness and Warmth sliders and buttons for Light, Night mode, Refresh (clears e-ink ghosting), Wi-Fi, Rotate, Cover sleep and Exit (asks first, then quits KOReader). You can also tap the clock or battery beside the search bar, or choose **Controls** in the ☰ menu. Anything your device doesn't have is left out.
 - **Top tap while reading** (☰ → Library → **Top tap opens**): **Library GUI bar** (the default) opens a small menu: Library, Contents, Go to page, Search, Font & size, Readability, Light, Bookmark, Book details, Exit, and **More…** for KOReader's full reader menu. **KOReader menu** opens KOReader's own reader menu with that same tap. A swipe down from the top of a page opens KOReader's menu with either choice. The search keyboard stays on **Use KOReader's keyboard**.
-- **Start with**: KOReader's own Start with setting (file browser menu) includes library. **On startup** in the Library's ☰ menu chooses **Open Library** (Start with set to library) or **Resume last book** (Start with set to the last file; the Library is not drawn over that book). **After closing a book** chooses **Return to Library** or **Return to file browser**. Return to Library paints the Library immediately, so the file browser does not flash in between. **Home page** is **Library** or **Reading log**. Library is the default, so an existing setup still opens the book grid. Reading log shows Continue reading, today, this week and the current streak from KOReader's statistics database. **Left-edge brightness** (off by default) is a vertical drag on the left edge that sets brightness at the same pace as the Controls slider.
-- **Reading log**: ☰ → Library → **Reading log**, the **Log** control on the book grid, the gesture **Open Reading log**, and, when SimpleUI is installed, a bottom-bar action of the same name. **Library** on the reading log returns to the grid. A missing statistics database does not crash: Continue reading remains, with **Turn on Reading statistics**.
+- **Start with**: KOReader's own Start with setting (file browser menu) includes library. **On startup** in the Library's ☰ menu chooses **Open Library** (Start with set to library) or **Resume last book** (Start with set to the last file; the Library is not drawn over that book). **After closing a book** chooses **Return to Library** or **Return to file browser**. Return to Library paints the Library immediately, so the file browser does not flash in between. **Home page** is **Library** or **Reading log**. Library is the default, so an existing setup still opens the book grid. **Left-edge brightness** (off by default) is a vertical drag on the left edge that sets brightness at the same pace as the Controls slider.
+- **Reading log**: ☰ → Library → **Home page** → **Reading log**, off until you choose it. **Stats style** is **Standard** (the default), **Minimal**, or **Detailed**. **Continue reading** is a **cover row** (the default) or **Card**. **Daily goal** and **Yearly book goal** are off until you turn them on. The page reads KOReader's statistics database, read only. ☰ → Library → **Reading log**, the **Log** control on the book grid, the gesture **Open Reading log**, and, when SimpleUI is installed, a bottom-bar action of the same name also open it. **Library** on the reading log returns to the grid. With no statistics database, Continue reading remains, with **Turn on Reading statistics**.
 - **Covers without other plugins.** Library GUI extracts covers itself in the background. If Project: Title or Cover browser is enabled, it reuses their cover cache.
 - **Gestures** (☰ on the Library, or ☰ → Library → **Gestures**). On the Library home, a swipe down from the top opens KOReader's menu, and a two-finger swipe does whatever you set for the file browser (often rotate). That is **Same as file browser**, the default for every gesture. The left edge follows it while **Left-edge brightness** is off. You can instead pick **Nothing**, or an action of your own: open KOReader's menu, rotate, brightness, warmth, open the current book, the Library menu, Controls, or turn a page. Brightness still slides the light when Left-edge brightness is off. The list is the top swipe, two-finger swipes (right, left, up, down, diagonal), the screen edges, corner taps and holds, and multiswipe, pinch and spread. **KOReader gesture manager** in that menu opens the file-browser profile, which is what Same as file browser follows. A one-finger tap or swipe that starts on the A–Z strip still jumps to a letter. Open Library, Search library, Resume last book, Rescan library, and Next / Previous in series can also be assigned under *Taps and gestures*.
 
 ## Install
 
-The current release is **[v0.8.0](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.8.0)**. Download **[library.koplugin-v0.8.0.zip](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.8.0/downloads/library.koplugin-v0.8.0.zip)** and unzip it. You get a folder called `library.koplugin`.
+The current release is **[v0.8.0](https://github.com/voantony/koreader-library-gui/releases/tag/v0.8.0)**. Download **[library.koplugin-v0.8.0.zip](https://github.com/voantony/koreader-library-gui/releases/download/v0.8.0/library.koplugin-v0.8.0.zip)** and unzip it. You get a folder called `library.koplugin`. The same zip is on the [GitLab release](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.8.0) as a mirror.
 
 SHA256: `45328c4193d6c974cdba745df7384eeb6fa27fc68508a64c62d920724ab0d151`
 
@@ -143,7 +147,7 @@ The updater only replaces this plugin. It never updates KOReader. If a release s
 From a Mac, the same install runs if a Kindle is mounted (including through [Mount Kindle](https://gitlab.com/antonyvo/kindle-mtp-mount)), or with `kpush` when that is on your PATH:
 
 ```sh
-curl -fsSL https://gitlab.com/antonyvo/koreader-library-gui/-/raw/main/tools/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/voantony/koreader-library-gui/main/tools/install.sh | bash
 ```
 
 The [changelog](CHANGELOG.md) lists what is new in each release.
@@ -166,7 +170,7 @@ Delete `koreader/plugins/library.koplugin/` and restart KOReader. To remove ever
 
 ## About this project
 
-This is the first thing I've developed in public. I built it with Grok Bot, and I'm happy to take any suggestions and feedback: [open an issue](https://gitlab.com/antonyvo/koreader-library-gui/-/issues) for bugs, ideas or anything that looks off on your device.
+This is the first thing I've developed in public. I built it with Grok Bot, and I'm happy to take any suggestions and feedback: [open an issue](https://github.com/voantony/koreader-library-gui/issues) for bugs, ideas or anything that looks off on your device.
 
 The home-screen ideas, including the widgets, the accordion, and the footer, came from [@drkhn1234](https://gitlab.com/drkhn1234).
 
