@@ -9,7 +9,7 @@ It sits alongside KOReader's file browser, History and Collections. It never mov
 
 <p align="center"><img src="docs/screenshots/v050-widgets.png" width="420" alt="Books tab with Continue Reading and Favorites above the cover grid and one A–Z column on the right"></p>
 
-The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. The current release is [v0.8.0](https://github.com/voantony/koreader-library-gui/releases/tag/v0.8.0) (27 November 2026). The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
+The home-screen layout follows design ideas from [@drkhn1234](https://gitlab.com/drkhn1234), the first outside contributor. The current release is [v0.8.1](https://github.com/voantony/koreader-library-gui/releases/tag/v0.8.1) (28 November 2026). The shots in this section are from the KOReader emulator at the Kindle Colorsoft size (1264×1680).
 
 ## Home screen
 
@@ -123,9 +123,9 @@ The shots on this page were taken in the KOReader emulator (1264×1680) with the
 
 ## Install
 
-The current release is **[v0.8.0](https://github.com/voantony/koreader-library-gui/releases/tag/v0.8.0)**. Download **[library.koplugin-v0.8.0.zip](https://github.com/voantony/koreader-library-gui/releases/download/v0.8.0/library.koplugin-v0.8.0.zip)** and unzip it. You get a folder called `library.koplugin`. The same zip is on the [GitLab release](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.8.0) as a mirror.
+The current release is **[v0.8.1](https://github.com/voantony/koreader-library-gui/releases/tag/v0.8.1)**. Download **[library.koplugin-v0.8.1.zip](https://github.com/voantony/koreader-library-gui/releases/download/v0.8.1/library.koplugin-v0.8.1.zip)** and unzip it. You get a folder called `library.koplugin`. The same zip is on the [GitLab release](https://gitlab.com/antonyvo/koreader-library-gui/-/releases/v0.8.1) as a mirror.
 
-SHA256: `45328c4193d6c974cdba745df7384eeb6fa27fc68508a64c62d920724ab0d151`
+SHA256: `f477177fc10875bfc94d73f0d9883f3c43cd15b501c6f24ae3cf1718782325a2`
 
 1. Copy the `library.koplugin` folder into `koreader/plugins/` on your device, so you end up with `koreader/plugins/library.koplugin/main.lua`.
    - On a Kindle that is `/mnt/us/koreader/plugins/` (it shows as `koreader/plugins` when the Kindle is plugged in).

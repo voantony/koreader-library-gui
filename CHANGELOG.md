@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.1 (2026-11-28)
+
 - **SimpleUI library page.** Off by default, including for a Library saved before this setting. ☰ → Library → **Use as SimpleUI library page**, and the same switch in the Library's ☰ menu. When SimpleUI is installed, Library GUI adds a navigation action named **Library GUI**. SimpleUI's own Library tab cannot be removed by another plugin, so it stays until you take it off the bar: SimpleUI's settings (the gear, or hold the bar) → **Bars** → **Navigation Bar** → **Tabs**, remove **Library**, and add **Library GUI**. Leave **Home** where it is. A Reading Log module on that home page stays. Nothing is registered when SimpleUI is not installed. Thanks to u/Aladris666 (Reddit), who asked for this.
 
 ## 0.8.0 (2026-11-27)
