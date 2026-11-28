@@ -158,6 +158,24 @@ If **Library** is missing from the menu, check ☰ → Tools → More tools → 
 
 [`tools/kpush/`](tools/kpush/) is an optional command-line tool for macOS that copies the plugin files to a Kindle over MTP in one go, without Calibre. It was written for the Kindle Colorsoft, whose USB connection tends to drop after each libmtp command. Version 6 can also list (`ls`) and copy files off the Kindle (`pull`). See its [README](tools/kpush/README.md) for how to build and use it. You don't need it to install the plugin.
 
+## SimpleUI
+
+SimpleUI can keep its own home page and use this library in place of SimpleUI's library page. The [Reading Log](https://github.com/stevenzamora1/reading-log) plugin, which some people use as that home page, is a module on SimpleUI's Home screen. This switch does not touch Home.
+
+**Use as SimpleUI library page** is off. Turn it on under ☰ → **Library**, or from the Library's own ☰ menu. It does nothing unless [SimpleUI](https://github.com/doctorhetfield-cmd/simpleui.koplugin) is installed and enabled. No SimpleUI code is included here. The switch only adds an action to the list SimpleUI already offers other plugins.
+
+SimpleUI's built-in Library tab stays on the bar until you remove it. SimpleUI does not let another plugin take that tab away.
+
+1. Turn on **Use as SimpleUI library page**.
+2. Open SimpleUI's settings. The gear on the navigation bar opens them, and so does holding the bar.
+3. Open **Bars** → **Navigation Bar** → **Tabs**.
+4. Remove **Library**.
+5. Add **Library GUI**.
+
+The bar holds at most six tabs. If it is already full, remove one before adding Library GUI. Leave **Home** on the bar. That is the page a Reading Log module lives on.
+
+Tapping **Library GUI** opens this library. Turning the switch off removes that action. If the Library tab is gone, add **Library** again from the same Tabs list.
+
 ## Compatibility
 
 - Tested on a **Kindle Colorsoft** running KOReader v2026.07.1, and in the KOReader desktop emulator.

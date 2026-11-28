@@ -71,6 +71,7 @@ require("librarysettings_spec") -- library_plugin settings backup files
 require("librarydedupe_spec") -- duplicate files, grouped copies, skipped folders and types
 require("libraryreturn_spec") -- close straight to the Library; startup choice
 require("libraryreadinglog_spec") -- reading log totals, streak, and every way in
+require("librarysimpleui_spec") -- opt-in SimpleUI navigation action
 
 io.write("\n")
 for _, f in ipairs(failures) do print("FAIL: " .. f) end
